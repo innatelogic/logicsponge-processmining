@@ -1,6 +1,6 @@
 import random
 
-from datasponge.processmining.globals import ActionName, StateId
+from logicsponge.processmining.globals import ActionName, StateId
 
 
 class State:

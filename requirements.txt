@@ -1,4 +1,4 @@
-datasponge
+logicsponge
 
 aalpy
 dash_cytoscape

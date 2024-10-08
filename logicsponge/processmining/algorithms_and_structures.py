@@ -7,8 +7,8 @@ import ot
 from sortedcontainers import SortedSet
 from tqdm import tqdm
 
-from datasponge.processmining.automata import PDFA, State
-from datasponge.processmining.globals import (
+from logicsponge.processmining.automata import PDFA, State
+from logicsponge.processmining.globals import (
     DISCOUNT,
     RANDOMIZED,
     STOP,

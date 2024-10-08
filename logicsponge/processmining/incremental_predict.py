@@ -1,16 +1,16 @@
-import datasponge.core as ds
-from datasponge.core import DataItem, dashboard, file
-from datasponge.processmining.algorithms_and_structures import FrequencyPrefixTree, NGram
-from datasponge.processmining.data_utils import handle_keys
-from datasponge.processmining.models import BasicMiner, Fallback
-from datasponge.processmining.test_data import data
+import logicsponge.core as ls
+from logicsponge.core import DataItem, dashboard, file
+from logicsponge.processmining.algorithms_and_structures import FrequencyPrefixTree, NGram
+from logicsponge.processmining.data_utils import handle_keys
+from logicsponge.processmining.models import BasicMiner, Fallback
+from logicsponge.processmining.test_data import data
 
 # ============================================================
 # Function Terms
 # ============================================================
 
 
-class DataPreparation(ds.FunctionTerm):
+class DataPreparation(ls.FunctionTerm):
     def __init__(self, *args, case_keys: list[str], action_keys: list[str], **kwargs):
         super().__init__(*args, **kwargs)
         self.case_keys = case_keys
@@ -26,7 +26,7 @@ class DataPreparation(ds.FunctionTerm):
         return DataItem({"case_id": handle_keys(self.case_keys, item), "action": handle_keys(self.action_keys, item)})
 
 
-class StreamingActionPredictor(ds.FunctionTerm):
+class StreamingActionPredictor(ls.FunctionTerm):
     def __init__(self, *args, strategy, randomized: bool = True, top_k: int = 1, **kwargs):
         super().__init__(*args, **kwargs)
         self.top_k = top_k
@@ -45,7 +45,7 @@ class StreamingActionPredictor(ds.FunctionTerm):
         )
 
 
-class Evaluation(ds.FunctionTerm):
+class Evaluation(ls.FunctionTerm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.correct_predictions = 0
@@ -100,23 +100,23 @@ fallback_streamer = StreamingActionPredictor(
 
 
 # ====================================================
-# DataSponge
+# logicsponge
 # ====================================================
 
 streamer = file.CSVStreamer(file_path=data["file_path"], delay=0, poll_delay=2)
 circuit = (
     streamer
     * DataPreparation(case_keys=data["case_keys"], action_keys=data["action_keys"])
-    * ds.KeyFilter(keys=["case_id", "action"])
+    * ls.KeyFilter(keys=["case_id", "action"])
     * (
         (fpt_streamer * Evaluation("fpt"))
         | (ngram_streamer * Evaluation("ngram"))
         | (fallback_streamer * Evaluation("fallback"))
     )
-    * ds.ToSingleStream(flatten=True)
-    * ds.KeyFilter(keys=["fpt.accuracy", "ngram.accuracy", "fallback.accuracy"])
-    * ds.AddIndex(key="index")
-    # * ds.Print()
+    * ls.ToSingleStream(flatten=True)
+    * ls.KeyFilter(keys=["fpt.accuracy", "ngram.accuracy", "fallback.accuracy"])
+    * ls.AddIndex(key="index")
+    # * ls.Print()
     * (dashboard.Plot("Accuracy", x="index", y=["fpt.accuracy", "ngram.accuracy", "fallback.accuracy"]))
 )
 

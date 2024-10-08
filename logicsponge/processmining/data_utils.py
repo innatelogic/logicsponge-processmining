@@ -9,8 +9,8 @@ import pandas as pd
 import pm4py
 import requests
 
-from datasponge.core import DataItem
-from datasponge.processmining.globals import STATS, ActionName, CaseId
+from logicsponge.core import DataItem
+from logicsponge.processmining.globals import STATS, ActionName, CaseId
 
 logger = logging.getLogger(__name__)
 

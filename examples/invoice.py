@@ -1,8 +1,8 @@
 import os
 
-import datasponge.core as ds
+import logicsponge.core as ls
 from examples.data.download import check_and_process_file
-from datasponge.core import file
+from logicsponge.core import file
 
 FOLDER = "data"
 FILENAME = "invoice.csv"
@@ -17,5 +17,5 @@ check_and_process_file(FOLDER, FILENAME, URL, DOI)
 
 
 streamer = file.CSVStreamer(file_path=file_path, delay=1, poll_delay=2)
-circuit = streamer * ds.AddIndex(key="index") * ds.Print()
+circuit = streamer * ls.AddIndex(key="index") * ls.Print()
 circuit.start()

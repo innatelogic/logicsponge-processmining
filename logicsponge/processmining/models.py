@@ -6,8 +6,8 @@ from typing import Any
 import matplotlib as mpl
 import pandas as pd
 
-from datasponge.processmining.data_utils import add_input_symbols_sequence
-from datasponge.processmining.globals import (
+from logicsponge.processmining.data_utils import add_input_symbols_sequence
+from logicsponge.processmining.globals import (
     RANDOMIZED,
     STATS,
     TOP_K,

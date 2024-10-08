@@ -6,9 +6,9 @@ from dash import State as DashState
 from dash import dcc, html
 from dash.dependencies import Input, Output
 
-from datasponge.processmining.algorithms_and_structures import FrequencyPrefixTree
-from datasponge.processmining.data_utils import handle_keys
-from datasponge.processmining.test_data import data
+from logicsponge.processmining.algorithms_and_structures import FrequencyPrefixTree
+from logicsponge.processmining.data_utils import handle_keys
+from logicsponge.processmining.test_data import data
 
 mpl.use("Agg")
 

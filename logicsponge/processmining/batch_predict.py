@@ -6,8 +6,8 @@ import matplotlib as mpl
 import pandas as pd
 from aalpy.learning_algs import run_Alergia
 
-from datasponge.processmining.algorithms_and_structures import FrequencyPrefixTree, NGram
-from datasponge.processmining.data_utils import (
+from logicsponge.processmining.algorithms_and_structures import FrequencyPrefixTree, NGram
+from logicsponge.processmining.data_utils import (
     add_input_symbols,
     add_stop_to_sequences,
     calculate_percentages,
@@ -15,9 +15,9 @@ from datasponge.processmining.data_utils import (
     split_data,
     transform_to_seqs,
 )
-from datasponge.processmining.globals import STATS, STOP
-from datasponge.processmining.models import Alergia, BasicMiner, Fallback, Relativize
-from datasponge.processmining.test_data import dataset
+from logicsponge.processmining.globals import STATS, STOP
+from logicsponge.processmining.models import Alergia, BasicMiner, Fallback, Relativize
+from logicsponge.processmining.test_data import dataset
 
 mpl.use("Agg")
 

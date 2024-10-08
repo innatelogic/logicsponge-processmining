@@ -1,1 +1,1 @@
-# datasponge-processmining
+# logicsponge-processmining

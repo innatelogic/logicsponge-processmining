@@ -2,8 +2,8 @@ import os
 
 import pandas as pd
 
-from datasponge.processmining.data_utils import FileHandler, handle_keys
-from datasponge.processmining.globals import ActionName, CaseId
+from logicsponge.processmining.data_utils import FileHandler, handle_keys
+from logicsponge.processmining.globals import ActionName, CaseId
 
 FOLDERNAME = "data"
 file_handler = FileHandler(folder=FOLDERNAME)

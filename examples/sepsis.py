@@ -1,8 +1,8 @@
 import os
 
-import datasponge.core as ds
+import logicsponge.core as ls
 from examples.data.download import check_and_process_file
-from datasponge.core import file
+from logicsponge.core import file
 
 FOLDER = "data"
 FILENAME = "sepsis.csv"
@@ -13,14 +13,14 @@ file_path = os.path.join(FOLDER, FILENAME)
 check_and_process_file(FOLDER, FILENAME, URL, DOI)
 
 
-class AddCaseID(ds.FunctionTerm):
+class AddCaseID(ls.FunctionTerm):
     state: int
 
     def __init__(self):
         super().__init__()
         self.state: int = 0
 
-    def f(self, item: ds.DataItem) -> ds.DataItem:
+    def f(self, item: ls.DataItem) -> ls.DataItem:
         if item["InfectionSuspected"] != "":
             self.state += 1
 
@@ -29,5 +29,5 @@ class AddCaseID(ds.FunctionTerm):
 
 
 streamer = file.CSVStreamer(file_path=file_path, delay=1, poll_delay=2)
-circuit = streamer * AddCaseID() * ds.Print()
+circuit = streamer * AddCaseID() * ls.Print()
 circuit.start()
