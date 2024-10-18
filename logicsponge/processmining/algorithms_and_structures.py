@@ -176,41 +176,7 @@ class BaseStructure(PDFA, ABC):
         Makes prediction based on the current state.
         If include_stop is False, the stop action is excluded from the probability calculations.
         """
-        # Return None if the current state is invalid or has insufficient visits
-        if (
-            current_state is None
-            or self.state_info.get(current_state, {}).get("total_visits", 0) < self.min_total_visits
-        ):
-            return None
-
-        # Default probability vector with 'stop' action as [1.0, 0.0, ...] for other actions
-        default_probs = [1.0] + [0.0] * len(self.action_index)
-
-        # Get the probability distribution from state info or use default
-        probs = self.state_info.get(current_state, {}).get("probs", default_probs)
-
-        # If include_stop is False, exclude the stop action
-        if not self.include_stop:
-            # Exclude the stop action (assumed to be the first element in probs)
-            non_stop_probs = probs[1:]
-
-            # Check if there are no non-stop actions
-            if len(non_stop_probs) == 0:
-                return None
-
-            # If all non-stop actions have zero probability, return a uniform distribution
-            if sum(non_stop_probs) == 0:
-                num_actions = len(non_stop_probs)
-                uniform_probs = [1.0 / num_actions] * num_actions
-                return self.prediction_probs([0.0, *uniform_probs])
-
-            # Otherwise, normalize the probabilities over the non-stop actions
-            total_non_stop_prob = sum(non_stop_probs)
-            normalized_probs = [p / total_non_stop_prob for p in non_stop_probs]
-
-            return self.prediction_probs([0.0, *normalized_probs])
-
-        # If include_stop is True, return the original probability distribution
+        probs = self.state_probs(current_state)
         return self.prediction_probs(probs)
 
     def prediction_sequence(self, sequence: list[ActionName]) -> Prediction | None:
@@ -227,6 +193,64 @@ class BaseStructure(PDFA, ABC):
 
         return self.transitions[state][action]
 
+    def state_probs(self, current_state: StateId | None) -> list[float] | None:
+        """
+        Returns probabilities associated with a given state.
+        """
+        # Return None if the current state is invalid or has insufficient visits
+        if (
+            current_state is None
+            or self.state_info.get(current_state, {}).get("total_visits", 0) < self.min_total_visits
+        ):
+            return None
+
+        # Get the probability distribution from state info or return None if not available
+        state_info = self.state_info.get(current_state)
+        if state_info is None or "probs" not in state_info:
+            return None
+
+        probs = state_info["probs"]
+
+        # Handle the case where include_stop is False
+        if not self.include_stop:
+            # Exclude the stop action (assumed to be the first element in probs)
+            non_stop_probs = probs[1:]
+
+            if len(non_stop_probs) == 0:
+                return None
+
+            # If all non-stop actions have zero probability, return a uniform distribution
+            total_non_stop_prob = sum(non_stop_probs)
+            if total_non_stop_prob == 0:
+                num_actions = len(non_stop_probs)
+                uniform_probs = [1.0 / num_actions] * num_actions
+                return [0.0, *uniform_probs]
+
+            # Otherwise, normalize the probabilities over the non-stop actions
+            normalized_probs = [p / total_non_stop_prob for p in non_stop_probs]
+            return [0.0, *normalized_probs]
+
+        # If include_stop is True, return the original probability distribution
+        return probs
+
+    def state_dict(self, current_state: StateId | None) -> dict[ActionName, float] | None:
+        """
+        For a given state, returns dictionary mapping actions to probabilities.
+        """
+        probs = self.state_probs(current_state)
+
+        if probs is None:
+            return None
+
+        # Start with the "stop" action
+        probs_dict = {STOP: probs[0]}
+
+        # Add other actions
+        for action, index in self.action_index.items():
+            probs_dict[action] = probs[index]
+
+        return probs_dict
+
 
 # ============================================================
 # Frequency Prefix Tree
@@ -239,8 +263,6 @@ class FrequencyPrefixTree(BaseStructure):
         self.last_transition = None
 
         self.depth = depth
-
-        self.state_probs = {}
 
         self.distance_mask = None  # helper matrix to compute probabilistic bisimilarity distance
 
@@ -648,11 +670,6 @@ class NGram(BaseStructure):
 # ============================================================
 
 
-class Alergia(FrequencyPrefixTree):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-
-
-# ============================================================
-# Recurrent Neural Network (LSTM)
-# ============================================================
+# class Alergia(FrequencyPrefixTree):
+#     def __init__(self, *args, **kwargs) -> None:
+#         super().__init__(*args, **kwargs)

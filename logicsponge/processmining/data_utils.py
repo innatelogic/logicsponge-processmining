@@ -63,14 +63,14 @@ def add_input_symbols(data: list[list[ActionName]], inp: str) -> list[list[tuple
     return [add_input_symbols_sequence(sequence, inp) for sequence in data]
 
 
-def add_start_to_sequences(data: list[list[ActionName]], start: str) -> list[list[ActionName]]:
+def add_start_to_sequences(data: list[list[ActionName]], start: ActionName) -> list[list[ActionName]]:
     """
     Appends stop symbol to each sequence in the data.
     """
     return [[start, *seq] for seq in data]
 
 
-def add_stop_to_sequences(data: list[list[ActionName]], stop: str) -> list[list[ActionName]]:
+def add_stop_to_sequences(data: list[list[ActionName]], stop: ActionName) -> list[list[ActionName]]:
     """
     Appends stop symbol to each sequence in the data.
     """

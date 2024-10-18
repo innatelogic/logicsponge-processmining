@@ -10,7 +10,7 @@ CaseId = str | int | tuple[str | int, ...]
 StateId = int
 ActionName = str | int | tuple[str | int, ...]
 
-Prediction = tuple[str, list[str], float]
+Prediction = tuple[ActionName, list[ActionName], float]
 
 # ComposedState = StateId | tuple[StateId]
 ComposedState = Any
@@ -20,8 +20,8 @@ ComposedState = Any
 # Constants
 # ============================================================
 
-START = "start"  # start action
-STOP = "stop"  # stop action
+START: ActionName = "start"  # start action
+STOP: ActionName = "stop"  # stop action
 RANDOMIZED = False
 TOP_K = 3
 

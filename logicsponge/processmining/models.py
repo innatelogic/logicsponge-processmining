@@ -299,7 +299,7 @@ class Alergia(BasicMiner):
         self.current_state = self.initial_state
 
     @staticmethod
-    def get_probability_distribution(state: Any) -> dict[str, float]:
+    def get_probability_distribution(state: Any) -> dict[ActionName, float]:
         probability_distribution = {}
 
         for input_symbol, transitions in state.transitions.items():
@@ -309,7 +309,7 @@ class Alergia(BasicMiner):
 
         return probability_distribution["in"]
 
-    def prediction_probs(self, probs: dict[str, float]) -> Prediction:
+    def prediction_probs(self, probs: dict[ActionName, float]) -> Prediction:
         sorted_actions = sorted(probs.items(), key=lambda x: x[1], reverse=True)
         top_k_actions = [action for action, _ in sorted_actions[: self.top_k]]
 
