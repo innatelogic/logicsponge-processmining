@@ -29,11 +29,18 @@ logger = logging.getLogger(__name__)
 
 class BaseStructure(PDFA, ABC):
     def __init__(
-        self, *args, min_total_visits: int = 0, randomized: bool = RANDOMIZED, top_k: int = TOP_K, **kwargs
+        self,
+        *args,
+        min_total_visits: int = 0,
+        randomized: bool = RANDOMIZED,
+        top_k: int = TOP_K,
+        include_stop: bool = True,
+        **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
         self.randomized = randomized
         self.top_k = top_k
+        self.include_stop = include_stop
 
         self.case_info = {}  # provides state info
         # keys: state, suffix
@@ -47,6 +54,7 @@ class BaseStructure(PDFA, ABC):
         initial_state_object = self.create_state(state_id=initial_state)
         self.set_initial_state(initial_state)
         self.state_info[initial_state]["object"] = initial_state_object
+        self.state_info[initial_state]["access_string"] = ()
 
         self.initial_state = 0
 
@@ -165,17 +173,44 @@ class BaseStructure(PDFA, ABC):
 
     def prediction_state(self, current_state: StateId | None) -> Prediction | None:
         """
-        Makes prediction based on current state.
+        Makes prediction based on the current state.
+        If include_stop is False, the stop action is excluded from the probability calculations.
         """
+        # Return None if the current state is invalid or has insufficient visits
         if (
             current_state is None
             or self.state_info.get(current_state, {}).get("total_visits", 0) < self.min_total_visits
         ):
             return None
 
+        # Default probability vector with 'stop' action as [1.0, 0.0, ...] for other actions
         default_probs = [1.0] + [0.0] * len(self.action_index)
+
+        # Get the probability distribution from state info or use default
         probs = self.state_info.get(current_state, {}).get("probs", default_probs)
 
+        # If include_stop is False, exclude the stop action
+        if not self.include_stop:
+            # Exclude the stop action (assumed to be the first element in probs)
+            non_stop_probs = probs[1:]
+
+            # Check if there are no non-stop actions
+            if len(non_stop_probs) == 0:
+                return None
+
+            # If all non-stop actions have zero probability, return a uniform distribution
+            if sum(non_stop_probs) == 0:
+                num_actions = len(non_stop_probs)
+                uniform_probs = [1.0 / num_actions] * num_actions
+                return self.prediction_probs([0.0, *uniform_probs])
+
+            # Otherwise, normalize the probabilities over the non-stop actions
+            total_non_stop_prob = sum(non_stop_probs)
+            normalized_probs = [p / total_non_stop_prob for p in non_stop_probs]
+
+            return self.prediction_probs([0.0, *normalized_probs])
+
+        # If include_stop is True, return the original probability distribution
         return self.prediction_probs(probs)
 
     def prediction_sequence(self, sequence: list[ActionName]) -> Prediction | None:
@@ -291,7 +326,7 @@ class FrequencyPrefixTree(BaseStructure):
             self.index_action[idx] = action
 
             for state in self.state_info:
-                self.state_info[state]["probs"].append(0)
+                self.state_info[state]["probs"].append(0.0)
 
             self.initialize_distance_mask()
 
@@ -466,9 +501,13 @@ class FrequencyPrefixTree(BaseStructure):
 
 
 class NGram(BaseStructure):
-    def __init__(self, *args, window_length: int = 1, **kwargs) -> None:
+    def __init__(self, *args, window_length: int = 1, recover_lengths: list[int] | None = None, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.window_length = window_length
+        self.recover_lengths = [] if recover_lengths is None else recover_lengths
+
+        # Maps access string to its state; will be used to do backtracking in inference if transition is not possible.
+        self.access_strings = {(): self.initial_state}
 
     def create_state(self, state_id: StateId | None = None) -> State:
         """
@@ -486,6 +525,8 @@ class NGram(BaseStructure):
         self.state_info[state_id]["active_visits"] = 0
         self.state_info[state_id]["level"] = 0
         self.state_info[state_id]["probs"] = [1.0] + [0.0 for _ in self.action_index]
+
+        self.state_info[state_id]["access_string"] = {}
 
         self.transitions[state_id] = {}
 
@@ -511,6 +552,9 @@ class NGram(BaseStructure):
                 current_state = self.transitions[current_state][action]
             else:
                 next_state = self.create_state().state_id
+                access_string = self.state_info[current_state]["access_string"] + (action,)
+                self.state_info[next_state]["access_string"] = access_string
+                self.access_strings[access_string] = next_state
                 self.state_info[next_state]["level"] = self.state_info[current_state]["level"] + 1
                 # Update the transition dictionary instead of overwriting
                 self.transitions[current_state][action] = next_state
@@ -554,6 +598,9 @@ class NGram(BaseStructure):
             if current_state_level < self.window_length:
                 next_state = self.create_state().state_id
                 self.state_info[next_state]["level"] = current_state_level + 1
+                access_string = self.state_info[current_state]["access_string"] + (action,)
+                self.state_info[next_state]["access_string"] = access_string
+                self.access_strings[access_string] = next_state
             else:
                 next_state = self.follow_path(self.case_info[case_id]["suffix"])
             self.transitions[current_state][action] = next_state
@@ -572,12 +619,40 @@ class NGram(BaseStructure):
 
         self.last_transition = (current_state, action, next_state)
 
+    def next_state(self, state: StateId | None, action: ActionName) -> StateId | None:
+        """
+        Overwrites next_state from superclass to implement backtracking.
+        """
+        if state is None:
+            return None
+
+        next_state = super().next_state(state, action)
+
+        if next_state is not None:
+            return next_state
+
+        # Trying to recover
+        full_access_string = self.state_info[state]["access_string"] + (action,)
+
+        for i in self.recover_lengths:
+            access_string = () if i == 0 else full_access_string[-i:]
+            next_state = self.access_strings.get(access_string, None)
+            if next_state is not None:
+                return next_state
+
+        return None
+
 
 # ============================================================
-# Frequency Prefix Tree
+# Alergia
 # ============================================================
 
 
 class Alergia(FrequencyPrefixTree):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+
+
+# ============================================================
+# Recurrent Neural Network (LSTM)
+# ============================================================

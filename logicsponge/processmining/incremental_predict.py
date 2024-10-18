@@ -1,17 +1,60 @@
+import time
+
+from torch import nn, optim
+
 import logicsponge.core as ls
-from logicsponge.core import DataItem, dashboard, file
+from logicsponge.core import DataItem, dashboard
 from logicsponge.processmining.algorithms_and_structures import FrequencyPrefixTree, NGram
 from logicsponge.processmining.data_utils import handle_keys
-from logicsponge.processmining.models import BasicMiner, Fallback
-from logicsponge.processmining.test_data import data
+from logicsponge.processmining.models import BasicMiner, Fallback, NeuralNetworkMiner
+from logicsponge.processmining.neural_networks import LSTMModel
+
+# from logicsponge.processmining.test_data import data
+from logicsponge.processmining.test_data import dataset
 
 # ============================================================
 # Function Terms
 # ============================================================
 
 
+class ListStreamer(ls.SourceTerm):
+    """
+    For streaming from list.
+    """
+
+    def __init__(self, *args, list_name: list, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.list_name = list_name
+
+    def run(self):
+        for case_id, action in self.list_name:
+            out = DataItem({"case_id": case_id, "action": action})
+            self.output(out)
+            time.sleep(0.001)
+
+
+class AddStartSymbol(ls.FunctionTerm):
+    """
+    For streaming from list.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.case_ids = set()
+
+    def run(self, ds_view: ls.DataStreamView):
+        ds_view.next()
+        item = ds_view[-1]
+        case_id = item["case_id"]
+        if case_id not in self.case_ids:
+            out = DataItem({"case_id": case_id, "action": "start"})
+            self.output(out)
+            self.case_ids.add(case_id)
+        self.output(item)
+
+
 class DataPreparation(ls.FunctionTerm):
-    def __init__(self, *args, case_keys: list[str], action_keys: list[str], **kwargs):
+    def __init__(self, *args, case_keys: list[str | int], action_keys: list[str | int], **kwargs):
         super().__init__(*args, **kwargs)
         self.case_keys = case_keys
         self.action_keys = action_keys
@@ -26,39 +69,66 @@ class DataPreparation(ls.FunctionTerm):
         return DataItem({"case_id": handle_keys(self.case_keys, item), "action": handle_keys(self.action_keys, item)})
 
 
+class RemoveStuttering(ls.FunctionTerm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.last_action = {}
+
+    def run(self, ds_view: ls.DataStreamView):
+        ds_view.next()
+        item = ds_view[-1]
+        case_id = item["case_id"]
+        if case_id not in self.last_action or self.last_action[case_id] != item["action"]:
+            self.output(item)
+        self.last_action[case_id] = item["action"]
+
+
 class StreamingActionPredictor(ls.FunctionTerm):
     def __init__(self, *args, strategy, randomized: bool = True, top_k: int = 1, **kwargs):
         super().__init__(*args, **kwargs)
         self.top_k = top_k
         self.randomized = randomized
         self.strategy = strategy
+        self.case_ids = set()
 
-    def f(self, item: DataItem) -> DataItem:
-        prediction = self.strategy.prediction_case(item["case_id"])
-        self.strategy.update(item["case_id"], item["action"])
-        return DataItem(
-            {
-                "case_id": item["case_id"],
-                "prediction": prediction,
-                "action": item["action"],
-            }
-        )
+    def run(self, ds_view: ls.DataStreamView):
+        ds_view.next()
+        item = ds_view[-1]
+        case_id = item["case_id"]
+        if case_id not in self.case_ids:
+            self.strategy.update(item["case_id"], item["action"])
+            self.case_ids.add(case_id)
+        else:
+            prediction = self.strategy.prediction_case(item["case_id"])
+            self.strategy.update(item["case_id"], item["action"])
+            out = DataItem(
+                {
+                    "case_id": item["case_id"],
+                    "prediction": prediction,
+                    "action": item["action"],
+                }
+            )
+            self.output(out)
 
 
 class Evaluation(ls.FunctionTerm):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, top_k: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
         self.correct_predictions = 0
         self.total_predictions = 0
         self.missing_predictions = 0
+        self.top_k = top_k
 
     def f(self, item: DataItem) -> DataItem:
         if item["prediction"] is None:
             self.missing_predictions += 1
-        else:
-            if item["prediction"][0] == item["action"]:
+        elif self.top_k:
+            if item["action"] in item["prediction"][1]:
                 self.correct_predictions += 1
-            self.total_predictions += 1
+        elif item["action"] == item["prediction"][0]:
+            self.correct_predictions += 1
+
+        self.total_predictions += 1
 
         accuracy = (
             self.correct_predictions / (self.total_predictions + self.missing_predictions) * 100
@@ -82,46 +152,77 @@ class Evaluation(ls.FunctionTerm):
 # ====================================================
 
 fpt_streamer = StreamingActionPredictor(
-    strategy=BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=2)),
+    strategy=BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=2, include_stop=False)),
 )
 
 ngram_streamer = StreamingActionPredictor(
-    strategy=BasicMiner(algorithm=NGram(window_length=2)),
+    strategy=BasicMiner(algorithm=NGram(window_length=2, include_stop=False)),
+)
+
+ngram_streamer_4 = StreamingActionPredictor(
+    strategy=BasicMiner(algorithm=NGram(window_length=4, include_stop=False)),
 )
 
 fallback_streamer = StreamingActionPredictor(
     strategy=Fallback(
         models=[
-            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=2)),
-            BasicMiner(algorithm=NGram(window_length=2, min_total_visits=2)),
+            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20, include_stop=False)),
+            BasicMiner(algorithm=NGram(window_length=2, include_stop=False)),
         ]
     )
 )
 
+vocab_size = 50  # Assume an upper bound on the number of activities, or adjust dynamically
+embedding_dim = 50
+hidden_dim = 128
+output_dim = vocab_size  # Predict the next activity
+model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim)
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-# ====================================================
-# logicsponge
-# ====================================================
-
-streamer = file.CSVStreamer(file_path=data["file_path"], delay=0, poll_delay=2)
-circuit = (
-    streamer
-    * DataPreparation(case_keys=data["case_keys"], action_keys=data["action_keys"])
-    * ls.KeyFilter(keys=["case_id", "action"])
-    * (
-        (fpt_streamer * Evaluation("fpt"))
-        | (ngram_streamer * Evaluation("ngram"))
-        | (fallback_streamer * Evaluation("fallback"))
+lstm_streamer = StreamingActionPredictor(
+    strategy=NeuralNetworkMiner(
+        model=model,
+        criterion=criterion,
+        optimizer=optimizer,
+        batch_size=8,
     )
-    * ls.ToSingleStream(flatten=True)
-    * ls.KeyFilter(keys=["fpt.accuracy", "ngram.accuracy", "fallback.accuracy"])
-    * ls.AddIndex(key="index")
-    # * ls.Print()
-    * (dashboard.Plot("Accuracy", x="index", y=["fpt.accuracy", "ngram.accuracy", "fallback.accuracy"]))
 )
 
 
-circuit.start()
+# ====================================================
+# DataSponge
+# ====================================================
 
-dashboard.show_stats(circuit)
+acc_list = ["fpt.accuracy", "ngram.accuracy", "ngram_4.accuracy", "fallback.accuracy", "lstm.accuracy"]
+
+# streamer = file.CSVStreamer(file_path=data["file_path"], delay=0, poll_delay=2)
+streamer = ListStreamer(list_name=dataset, delay=0.1)
+
+sponge = (
+    streamer
+    # Only for CSV files:
+    # * DataPreparation(case_keys=data["case_keys"], action_keys=data["action_keys"])
+    * ls.KeyFilter(keys=["case_id", "action"])
+    # * RemoveStuttering()
+    * AddStartSymbol()
+    # * ls.Print()
+    * (
+        (fpt_streamer * Evaluation("fpt", top_k=False))
+        | (ngram_streamer * Evaluation("ngram", top_k=False))
+        | (ngram_streamer_4 * Evaluation("ngram_4", top_k=False))
+        | (fallback_streamer * Evaluation("fallback", top_k=False))
+        | (lstm_streamer * Evaluation("lstm", top_k=False))
+    )
+    * ls.ToSingleStream(flatten=True)
+    * ls.KeyFilter(keys=acc_list)
+    * ls.AddIndex(key="index")
+    # * ls.Print()
+    * (dashboard.Plot("Accuracy", x="index", y=acc_list))
+)
+
+
+sponge.start()
+
+dashboard.show_stats(sponge)
 dashboard.run()

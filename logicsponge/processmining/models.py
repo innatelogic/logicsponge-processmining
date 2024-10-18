@@ -1,10 +1,13 @@
 import logging
 import random
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from typing import Any
 
 import matplotlib as mpl
 import pandas as pd
+import torch
+from torch.nn.utils.rnn import pad_sequence
 
 from logicsponge.processmining.data_utils import add_input_symbols_sequence
 from logicsponge.processmining.globals import (
@@ -16,6 +19,7 @@ from logicsponge.processmining.globals import (
     ComposedState,
     Prediction,
 )
+from logicsponge.processmining.neural_networks import LSTMModel, RNNModel
 
 mpl.use("Agg")
 
@@ -80,8 +84,6 @@ class BaseStreamingMiner(ABC):
         Updates the statistics based on the actual action, the prediction, and the top-k predictions.
         """
         if prediction is None:
-            # Call the unparseable count update
-            # STATS["unparseable_count"]["update"](stats)
             stats["unparseable_count"] += 1
         else:
             predicted_action, top_k_actions, predicted_prob = prediction
@@ -128,60 +130,10 @@ class BaseStreamingMiner(ABC):
                 self.update_stats(actual_next_action, prediction, stats)
 
                 # Move to the next state
-                current_state = self.next_state(current_state, actual_next_action)
+                if i < len(sequence) - 1:
+                    current_state = self.next_state(current_state, actual_next_action)
 
         # Return summarized stats
-        return {STATS[key]["name"]: value for key, value in stats.items()}
-
-    def evaluate_incrementally(self, data: list[list[ActionName]]) -> dict[str, int]:
-        """
-        Processes batch, going through sequences incrementally. Only for batch mode.
-        """
-        # Initialize stats based on the STATS constant
-        stats = {key: value["init"] for key, value in STATS.items()}
-
-        for sequence in data:
-            current_state = self.initial_state
-
-            for i in range(len(sequence)):
-                if current_state is None:
-                    # Increment unparseable_count for the remaining unparseable sequence
-                    stats["unparseable_count"] += len(sequence) - i
-                    break
-
-                actual_next_action = sequence[i]  # The actual action in the sequence
-
-                # Get the prediction and top-k predictions
-                result = self.prediction_state(current_state)
-
-                # update statistics
-                self.update_stats(actual_next_action, result, stats)
-
-                # Move to the next state
-                current_state = self.next_state(current_state, actual_next_action)
-
-        # Return a summary of the statistics using the names from STATS
-        return {STATS[key]["name"]: value for key, value in stats.items()}
-
-    def evaluate_sequence(self, data: list[list[ActionName]]) -> dict[str, int]:
-        """
-        Evaluates batch processing whole sequences. Only for batch mode.
-        """
-        stats = {key: value["init"] for key, value in STATS.items()}
-
-        # Iterate through each sequence in the test set
-        for action_sequence in data:
-            for i in range(len(action_sequence)):
-                x = action_sequence[:i]
-                actual_next_action = action_sequence[i]
-
-                # Get the prediction and top-k predictions
-                result = self.prediction_sequence(x)
-
-                # update statistics
-                self.update_stats(actual_next_action, result, stats)
-
-        # Return a summary of the statistics using the names from STATS
         return {STATS[key]["name"]: value for key, value in stats.items()}
 
 
@@ -416,3 +368,214 @@ class Alergia(BasicMiner):
         self.algorithm.current_state = current_state
         self.algorithm.step_to("in", action)
         return self.algorithm.current_state
+
+
+# ============================================================
+# Neural Network Streaming Miner (RNN and LSTM)
+# ============================================================
+
+
+class NeuralNetworkMiner(BaseStreamingMiner, ABC):
+    def __init__(self, *args, model: RNNModel | LSTMModel, batch_size: int = 1, optimizer, criterion, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+        self.model = model  # The neural network
+        self.optimizer = optimizer
+        self.criterion = criterion
+
+        self.sequences = OrderedDict()  # Ordered dictionary to maintain insertion order
+        self.rr_index = 0  # Keeps track of the round-robin index
+        self.batch_size = batch_size
+
+        self.action_index = {}
+        self.index_action = {}
+
+    def get_sequences(self):
+        """
+        Return all sequences stored in the state.
+        """
+        return self.sequences
+
+    def get_sequence(self, case_id):
+        """
+        Return the sequence for a specific case_id.
+        """
+        return self.sequences.get(case_id, [])
+
+    def update(self, case_id: CaseId, action: ActionName) -> None:
+        """
+        Add an action to the sequence corresponding to the case_id.
+        Dynamically update the activity_to_idx mapping if a new action is encountered.
+        """
+        # Dynamically update activity_to_idx if the action is new
+        if action not in self.action_index:
+            current_idx = len(self.action_index) + 1  # Get the next available index
+            self.action_index[action] = current_idx
+            self.index_action[current_idx] = action
+
+        # Convert action to its corresponding index
+        action_idx = self.action_index[action]
+
+        # Add the action index to the sequence for the given case_id
+        if case_id not in self.sequences:
+            self.sequences[case_id] = []  # New case added
+        self.sequences[case_id].append(action_idx)
+
+        # Continue with the training step using the updated sequence
+        batch = self.select_batch(case_id)
+
+        # Ensure each sequence in the batch has at least two tokens
+        if not batch:
+            msg = "Skipping training step because no valid sequences were found."
+            logger.info(msg)
+            return None
+
+        # Convert the batch of sequences into tensors, padding them to the same length
+        batch_sequences = [torch.tensor(seq, dtype=torch.long) for seq in batch]
+        x_batch = pad_sequence(batch_sequences, batch_first=True, padding_value=0)
+
+        # Input is all but the last token in each sequence, target is shifted by one position
+        x_input = x_batch[:, :-1]  # Input sequence
+        y_target = x_batch[:, 1:].reshape(-1)  # Flatten the target for CrossEntropyLoss
+
+        self.optimizer.zero_grad()
+
+        # Forward pass through the model
+        outputs = self.model(x_input)
+
+        # Reshape outputs to [batch_size * sequence_length, vocab_size] for loss calculation
+        outputs = outputs.view(-1, outputs.shape[-1])
+
+        # Create a mask to ignore padding (y_target == 0)
+        mask = y_target != 0  # Mask out padding positions
+
+        # Apply the mask
+        outputs = outputs[mask]
+        y_target = y_target[mask]
+
+        # Compute loss
+        loss = self.criterion(outputs, y_target)
+
+        # Backward pass and gradient clipping
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+
+        self.optimizer.step()
+
+        return loss.item()
+
+    def select_batch(self, case_id):
+        """
+        Select a batch of sequences, using a round-robin approach.
+        Only select sequences that have at least two tokens (input + target).
+        """
+
+        valid_case_ids = [cid for cid, sequence in self.sequences.items() if len(sequence) > 1]
+
+        if len(valid_case_ids) < self.batch_size:
+            msg = f"Not enough case_ids to form a full batch, using {len(valid_case_ids)} case_ids."
+            logger.info(msg)
+            return [self.get_sequence(cid) for cid in valid_case_ids]  # Return all valid sequences
+
+        # Prepare the batch, starting with the current case_id
+        batch_case_ids = [case_id] if len(self.sequences[case_id]) > 1 else []
+
+        original_rr_index = self.rr_index  # Save the original index to detect when we complete a full cycle
+        count = 0
+
+        # Batch size - 1 if we've already added current case_id
+        required_cases = self.batch_size - 1 if batch_case_ids else self.batch_size
+
+        # Select additional case_ids in a round-robin manner, skipping the current case_id
+        while count < required_cases:
+            candidate_case_id = valid_case_ids[self.rr_index]
+
+            # Skip the current case_id
+            if candidate_case_id != case_id and len(self.sequences[candidate_case_id]) > 1:
+                batch_case_ids.append(candidate_case_id)
+                count += 1
+
+            # Move to the next index, wrap around if necessary
+            self.rr_index = (self.rr_index + 1) % len(valid_case_ids)
+
+            # Stop if we've completed a full round (returning to original index)
+            if self.rr_index == original_rr_index:
+                break
+
+        # batch = [self.get_sequence(cid) for cid in batch_case_ids]
+
+        # Fetch the actual sequences based on the selected case_ids
+        return [self.get_sequence(cid) for cid in batch_case_ids]
+
+    def prediction_case(self, case_id: CaseId) -> Prediction | None:
+        """
+        Predict the next action for a given case_id and return the top-k most likely actions along with the probability
+        of the top action.
+
+        Note that, here, a sequence is a sequence of action indices (rather than actions).
+        """
+
+        # Get the sequence for the case_id
+        index_sequence = self.get_sequence(case_id)
+
+        if not index_sequence or len(index_sequence) < 1:
+            return None
+
+        return self.prediction_idx_sequence(index_sequence)
+
+    def prediction_sequence(self, sequence: list[ActionName]) -> Prediction | None:
+        """
+        Predict the next action for a given sequence of actions and return the top-k most likely actions along with the
+        probability of the top action.
+        """
+        if not sequence or len(sequence) < 1:
+            return None
+
+        # Convert each action name to its corresponding index, return None if any action is unknown
+        index_sequence = []
+        for action in sequence:
+            action_idx = self.action_index.get(action)
+            if action_idx is None:
+                return None  # Return None if the action is not found in the index
+            index_sequence.append(action_idx)
+
+        return self.prediction_idx_sequence(index_sequence)
+
+    def prediction_idx_sequence(self, index_sequence: list[int]) -> Prediction | None:
+        """
+        Predict the next action for a given sequence of action indices.
+        """
+        # Convert to a tensor and add a batch dimension
+        input_sequence = torch.tensor(index_sequence, dtype=torch.long).unsqueeze(0)  # Shape [1, sequence_length]
+
+        # Pass the sequence through the model to get the output
+        self.model.eval()
+        with torch.no_grad():
+            output = self.model(input_sequence)
+
+        # Get the logits for the last time step (most recent action in the sequence)
+        logits = output[:, -1, :]  # Shape [1, vocab_size]
+
+        # Apply softmax to get the probabilities
+        probabilities = torch.softmax(logits, dim=-1)  # Shape [1, vocab_size]
+
+        # Get the top-k most likely actions and their probabilities
+        top_k_results = torch.topk(probabilities, self.top_k, dim=1)
+        top_k_indices = top_k_results.indices.squeeze(0).tolist()  # Shape [top_k]
+        top_k_probs = top_k_results.values.squeeze(0).tolist()  # Shape [top_k]
+
+        # Convert the top-k indices back to action names
+        top_k_actions = [self.index_action.get(idx, None) for idx in top_k_indices]
+
+        # If the most likely action is not found, return None
+        if top_k_actions[0] is None:
+            return None
+
+        # Return a tuple with the most likely action, the top-k actions, and the probability of the top action
+        return top_k_actions[0], top_k_actions, top_k_probs[0]
+
+    def next_state(self, *args, **kwargs):
+        pass  # Or return None, depending on your base class interface
+
+    def prediction_state(self, *args, **kwargs):
+        pass

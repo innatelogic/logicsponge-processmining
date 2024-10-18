@@ -5,18 +5,26 @@ import time
 import matplotlib as mpl
 import pandas as pd
 from aalpy.learning_algs import run_Alergia
+from torch import nn, optim
 
 from logicsponge.processmining.algorithms_and_structures import FrequencyPrefixTree, NGram
 from logicsponge.processmining.data_utils import (
     add_input_symbols,
+    add_start_to_sequences,
     add_stop_to_sequences,
     calculate_percentages,
     data_statistics,
     split_data,
     transform_to_seqs,
 )
-from logicsponge.processmining.globals import STATS, STOP
-from logicsponge.processmining.models import Alergia, BasicMiner, Fallback, Relativize
+from logicsponge.processmining.globals import START, STATS, STOP
+from logicsponge.processmining.models import (
+    Alergia,
+    BasicMiner,
+    Fallback,
+    Relativize,
+)
+from logicsponge.processmining.neural_networks import LSTMModel, PreprocessData, evaluate_rnn, train_rnn
 from logicsponge.processmining.test_data import dataset
 
 mpl.use("Agg")
@@ -38,14 +46,59 @@ random.seed(123)
 # Data preparation
 # ============================================================
 
-train_set, test_set = split_data(dataset, 0.1)
+nn_processor = PreprocessData()
+
+# Split dataset into train, validation (for RNNs), and test set
+train_set, remainder = split_data(dataset, 0.3)
+val_set, test_set = split_data(remainder, 0.5)
+
+# Transform into sequences
 train_set_transformed = transform_to_seqs(train_set)
+val_set_transformed = transform_to_seqs(val_set)
 test_set_transformed = transform_to_seqs(test_set)
+
+# Append STOP action
 train_set_transformed = add_stop_to_sequences(train_set_transformed, STOP)
+val_set_transformed = add_stop_to_sequences(val_set_transformed, STOP)
 test_set_transformed = add_stop_to_sequences(test_set_transformed, STOP)
-in_train_set_transformed = add_input_symbols(train_set_transformed, "in")
+
+# For RNNs: Append START action
+nn_train_set_transformed = add_start_to_sequences(train_set_transformed, START)
+nn_val_set_transformed = add_start_to_sequences(val_set_transformed, START)
+nn_test_set_transformed = add_start_to_sequences(test_set_transformed, START)
+
+nn_train_set_transformed = nn_processor.preprocess_data(nn_train_set_transformed)
+nn_val_set_transformed = nn_processor.preprocess_data(nn_val_set_transformed)
+nn_test_set_transformed = nn_processor.preprocess_data(nn_test_set_transformed)
+
+# For Alergia: Transform action into pair ("in", action)
+alergia_train_set_transformed = add_input_symbols(train_set_transformed, "in")
+
 
 data_statistics(test_set_transformed)
+
+
+# ============================================================
+# Reference models
+# ============================================================
+
+# pm_strategy = BasicMiner(algorithm=FrequencyPrefixTree())
+#
+# ngram_strategy = BasicMiner(algorithm=NGram(window_length=2))
+#
+# fallback_strategy = Fallback(
+#     models=[
+#         BasicMiner(algorithm=FrequencyPrefixTree()),
+#         BasicMiner(algorithm=NGram(window_length=2)),
+#     ]
+# )
+#
+# relativize_strategy = Relativize(
+#     models=[
+#         BasicMiner(algorithm=FrequencyPrefixTree()),
+#         BasicMiner(algorithm=NGram(window_length=2)),
+#     ]
+# )
 
 # ============================================================
 # Initialize process miners
@@ -53,15 +106,22 @@ data_statistics(test_set_transformed)
 
 pm_strategy = BasicMiner(algorithm=FrequencyPrefixTree())
 
-ngram_strategy = BasicMiner(algorithm=NGram(window_length=2))
+ngram_strategy_0 = BasicMiner(algorithm=NGram(window_length=0))
+
+ngram_strategy_2 = BasicMiner(algorithm=NGram(window_length=2))
+
+ngram_strategy_3 = BasicMiner(algorithm=NGram(window_length=3, recover_lengths=[3, 2, 1, 0]))
+
+ngram_strategy_4 = BasicMiner(algorithm=NGram(window_length=4, recover_lengths=[4, 3, 2, 1, 0]))
 
 fallback_strategy = Fallback(
     models=[
-        BasicMiner(algorithm=FrequencyPrefixTree()),
-        # BasicMiner(algorithm=NGram(window_length=3)),
-        BasicMiner(algorithm=NGram(window_length=2)),
-        # BasicMiner(algorithm=NGram(window_length=1)),
-        # BasicMiner(algorithm=NGram(window_length=0)),
+        BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
+        BasicMiner(
+            algorithm=NGram(
+                window_length=2,
+            )
+        ),
     ]
 )
 
@@ -80,20 +140,26 @@ relativize_strategy = Relativize(
 # ============================================================
 
 for case_id, action_name in train_set:
-    pm_strategy.update(case_id, action_name)
-    ngram_strategy.update(case_id, action_name)
+    ngram_strategy_0.update(case_id, action_name)
+    ngram_strategy_2.update(case_id, action_name)
+    ngram_strategy_3.update(case_id, action_name)
+    ngram_strategy_4.update(case_id, action_name)
     fallback_strategy.update(case_id, action_name)
+    pm_strategy.update(case_id, action_name)
     relativize_strategy.update(case_id, action_name)
 
-smm = run_Alergia(in_train_set_transformed, automaton_type="smm", eps=0.5, print_info=True)
+smm = run_Alergia(alergia_train_set_transformed, automaton_type="smm", eps=0.5, print_info=True)
 smm_strategy = Alergia(algorithm=smm)
 
 strategies = {
-    "pm": (pm_strategy, test_set_transformed),
-    "ngram": (ngram_strategy, test_set_transformed),
-    "fallback pm->ngram": (fallback_strategy, test_set_transformed),
-    "relativize pm->ngram": (relativize_strategy, test_set_transformed),
+    "ngram_0": (ngram_strategy_0, test_set_transformed),
+    "ngram_2": (ngram_strategy_2, test_set_transformed),
+    "ngram_3": (ngram_strategy_3, test_set_transformed),
+    "ngram_4": (ngram_strategy_4, test_set_transformed),
+    "fallback pm->ngram_2": (fallback_strategy, test_set_transformed),
     "alergia": (smm_strategy, test_set_transformed),
+    "pm": (pm_strategy, test_set_transformed),
+    "relativize pm->ngram": (relativize_strategy, test_set_transformed),
 }
 
 
@@ -102,7 +168,7 @@ strategies = {
 # ============================================================
 
 start_time = time.time()
-result = {name: strategy.evaluate(data, mode="seq") for name, (strategy, data) in strategies.items()}
+result = {name: strategy.evaluate(data, mode="incremental") for name, (strategy, data) in strategies.items()}
 end_time = time.time()
 elapsed_time = end_time - start_time
 msg = f"Time taken: {elapsed_time:.4f} seconds"
@@ -131,3 +197,29 @@ logger.info(pd.DataFrame(result).T.astype(float))
 # Print the percentage table (Table 2)
 logger.info("\nResults:")
 logger.info(result_percentages_df[[value["name"] for value in STATS.values()]])
+
+
+# ============================================================
+# RNN/LSTM Training and Evaluation
+# ============================================================
+
+vocab_size = 50  # Assume an upper bound on the number of activities, or adjust dynamically
+
+# Initialize the model, criterion, and optimizer
+embedding_dim = 50
+hidden_dim = 128
+output_dim = vocab_size  # Output used to predict the next activity
+
+model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim)
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+# Train the LSTM on the train set with batch size and sequence-to-sequence targets
+model = train_rnn(
+    model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=20
+)
+
+# Evaluate model with test set
+msg = "\n=====> Finished training, evaluating accuracy on test set..."
+logger.info(msg)
+evaluate_rnn(model, nn_test_set_transformed, dataset_type="Test")

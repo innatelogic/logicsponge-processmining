@@ -5,3 +5,12 @@ dash_cytoscape
 pot
 pm4py
 requests
+
+pandas
+matplotlib
+dash
+tqdm
+numpy
+sortedcontainers
+
+torch

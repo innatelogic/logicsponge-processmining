@@ -8,7 +8,7 @@ from typing import Any
 CaseId = str | int | tuple[str | int, ...]
 
 StateId = int
-ActionName = str | tuple[str, ...] | int | tuple[str, ...]
+ActionName = str | int | tuple[str | int, ...]
 
 Prediction = tuple[str, list[str], float]
 
@@ -20,9 +20,10 @@ ComposedState = Any
 # Constants
 # ============================================================
 
+START = "start"  # start action
 STOP = "stop"  # stop action
 RANDOMIZED = False
-TOP_K = 2
+TOP_K = 3
 
 DISCOUNT = 0.9
 

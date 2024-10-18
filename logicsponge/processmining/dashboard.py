@@ -1,14 +1,14 @@
 import dash
 import dash_cytoscape as cyto
 import matplotlib as mpl
-import pandas as pd
 from dash import State as DashState
 from dash import dcc, html
 from dash.dependencies import Input, Output
 
 from logicsponge.processmining.algorithms_and_structures import FrequencyPrefixTree
-from logicsponge.processmining.data_utils import handle_keys
-from logicsponge.processmining.test_data import data
+
+# from innatelogic.circuits.process_mining.test_data import data
+from logicsponge.processmining.test_data import dataset
 
 mpl.use("Agg")
 
@@ -17,15 +17,15 @@ mpl.use("Agg")
 # Data preparation
 # ============================================================
 
-csv_file = pd.read_csv(data["file_path"], delimiter=data["delimiter"])
-
-dataset = [
-    (
-        handle_keys(data["case_keys"], row),  # Process case_keys
-        handle_keys(data["action_keys"], row),  # Process action_keys
-    )
-    for index, row in csv_file.iterrows()
-]
+# csv_file = pd.read_csv(data["file_path"], delimiter=data["delimiter"])
+#
+# dataset = [
+#     (
+#         handle_keys(data["case_keys"], row),  # Process case_keys
+#         handle_keys(data["action_keys"], row),  # Process action_keys
+#     )
+#     for index, row in csv_file.iterrows()
+# ]
 
 pm = FrequencyPrefixTree(depth=1, min_total_visits=1)
 # pm = NGram("NGram", window_length=1)
@@ -122,7 +122,7 @@ app.layout = html.Div(
                         "target-arrow-color": "#53585F",
                         "line-color": "#53585F",
                         "width": 2,
-                        "font-size": "12px",
+                        "font-size": "18px",
                         "text-background-color": "white",
                         "text-background-opacity": 1,
                         "text-background-shape": "round-rectangle",

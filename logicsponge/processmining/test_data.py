@@ -2,11 +2,17 @@ import os
 
 import pandas as pd
 
-from logicsponge.processmining.data_utils import FileHandler, handle_keys
+from logicsponge.processmining.automata import PDFA
+from logicsponge.processmining.data_utils import FileHandler, handle_keys, shuffle_sequences
 from logicsponge.processmining.globals import ActionName, CaseId
 
 FOLDERNAME = "data"
 file_handler = FileHandler(folder=FOLDERNAME)
+
+
+DATA = "file"
+# DATA = "synthetic"
+# DATA = "PDFA"
 
 
 # ============================================================
@@ -22,6 +28,7 @@ data_collection = {
         "target_foldername": "data",
         "case_keys": ["case:concept:name"],
         "action_keys": ["lifecycle:transition"],
+        # "action_keys": ["concept:name", "lifecycle:transition"],
         "delimiter": ",",
     },
     "purchase": {
@@ -39,76 +46,98 @@ data_collection = {
 # File data loader
 # ============================================================
 
-data_name = "incidents"
-data = data_collection[data_name]
-file_path = os.path.join(FOLDERNAME, data["target_filename"])
-data["file_path"] = file_path
-file_handler.handle_file(file_type=data["filetype"], url=data["url"], filename=data["target_filename"], doi=data["doi"])
-
-csv_file = pd.read_csv(data["file_path"], delimiter=data["delimiter"])
-
-dataset: list[tuple[CaseId, ActionName]] = [
-    (
-        handle_keys(data["case_keys"], row),  # Process case_keys
-        handle_keys(data["action_keys"], row),  # Process action_keys
+if DATA == "file":
+    data_name = "incidents"
+    data = data_collection[data_name]
+    file_path = os.path.join(FOLDERNAME, data["target_filename"])
+    data["file_path"] = file_path
+    file_handler.handle_file(
+        file_type=data["filetype"], url=data["url"], filename=data["target_filename"], doi=data["doi"]
     )
-    for index, row in csv_file.iterrows()
-]
+
+    csv_file = pd.read_csv(data["file_path"], delimiter=data["delimiter"])
+
+    dataset: list[tuple[CaseId, ActionName]] = [
+        (
+            handle_keys(data["case_keys"], row),
+            handle_keys(data["action_keys"], row),
+        )
+        for index, row in csv_file.iterrows()
+    ]
 
 
 # ============================================================
-# Synthetic data ets
+# Synthetic data sets
 # ============================================================
 
-# dataset = []
-#
-# # Open the file and process it line by line
-# with open('/Users/bollig/innatelogic/git/circuits/innatelogic/circuits/process_mining/data/2.pautomac.train') as file:
-#     # Skip the first line
-#     next(file)
-#
-#     # Start line numbering from 1 for the second line onward
-#     for line_number, line in enumerate(file, start=1):
-#         # Split the line into individual string numbers and convert them to integers
-#         numbers = list(map(int, line.split()))
-#
-#         # For each number, create a tuple (line_number, number)
-#         dataset.extend((line_number, number) for number in numbers)
+if DATA == "synthetic":
+    sequences = []
+
+    # Open the file and process it line by line
+    with open(
+        "/Users/bollig/innatelogic/git/circuits/innatelogic/circuits/process_mining/data/13.pautomac.train"
+    ) as file:
+        # Skip the first line (a header)
+        next(file)
+
+        # Process each line to extract the sequences
+        for line in file:
+            # Split the line into individual string numbers and convert them to integers
+            numbers = list(map(int, line.split()))
+
+            # Ignore the first element of each line
+            if len(numbers) > 1:
+                # As 0 is padding symbol in LSTMs, add 1 to each number in the sequence after ignoring the first element
+                incremented_numbers = [num + 1 for num in numbers[1:]]
+
+                # Store the modified sequence
+                sequences.append(incremented_numbers)
+
+    dataset = shuffle_sequences(sequences, shuffle=False)
 
 
 # ============================================================
 # PDFA simulation
 # ============================================================
 
-# def translate_format(dataset):
-#     translated = []
-#     # Enumerate over the dataset, starting from 1 for the sequence number
-#     for seq_number, action_list in enumerate(dataset, start=1):
-#         # For each action in the action_list, append a tuple (seq_number, action) to the result
-#         translated.extend((seq_number, action) for action in action_list)
-#
-#     return translated
-#
-#
-# pdfa = PDFA()
-#
-# pdfa.add_actions(["a", "b"])
-#
-# pdfa.create_states(3)
+
+def translate_format(dataset: list[list[ActionName]]) -> list[tuple[CaseId, ActionName]]:
+    translated = []
+    # Enumerate over the dataset, starting from 1 for the sequence number
+    for seq_number, action_list in enumerate(dataset, start=1):
+        # For each action in the action_list, append a tuple (seq_number, action) to the result
+        translated.extend((seq_number, action) for action in action_list)
+
+    return translated
+
+
+if DATA == "PDFA":
+    pdfa = PDFA()
+
+    pdfa.add_actions(["a", "b"])
+
+    pdfa.create_states(3)
+    pdfa.set_initial_state(0)
+
+    pdfa.transitions[0]["a"] = 1
+    pdfa.transitions[0]["b"] = 2
+    pdfa.transitions[1]["a"] = 1
+    pdfa.transitions[1]["b"] = 1
+    pdfa.transitions[2]["a"] = 2
+    pdfa.transitions[2]["b"] = 2
+
+    pdfa.set_probs(0, [0.0, 0.5, 0.5])
+    pdfa.set_probs(1, [0.1, 0.1, 0.8])
+    pdfa.set_probs(2, [0.1, 0.8, 0.1])
+
+    dataset = translate_format(pdfa.simulate(10000))
+
+
+# pdfa.create_states(2)
 # pdfa.set_initial_state(0)
 #
 # pdfa.transitions[0]["a"] = 1
-# pdfa.transitions[0]["b"] = 2
-# pdfa.transitions[1]["a"] = 1
-# pdfa.transitions[1]["b"] = 1
-# pdfa.transitions[2]["a"] = 2
-# pdfa.transitions[2]["b"] = 2
+# pdfa.transitions[1]["b"] = 0
 #
-# pdfa.set_probs(0, [0.0, 0.5, 0.5])
-# pdfa.set_probs(1, [0.1, 0.1, 0.8])
-# pdfa.set_probs(2, [0.1, 0.8, 0.1])
-#
-# dataset = pdfa.simulate(100)
-# dataset = translate_format(dataset)
-#
-# # dataset[:20]
+# pdfa.set_probs(0, [0.1, 0.9, 0.0])
+# pdfa.set_probs(1, [0.1, 0.0, 0.9])

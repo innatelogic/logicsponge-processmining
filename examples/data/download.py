@@ -123,4 +123,3 @@ def check_and_process_file(folder: str, filename: str, url: str, doi: str | None
     os.remove(xes_file_path)
     msg = "Removed the original .gz and .xes files."
     logger.info(msg)
-

@@ -108,7 +108,7 @@ class PDFA(DFA):
                     break
 
                 # Map the index back to the action using self.index_action
-                action = self.index_action[action_choice]
+                action: ActionName = self.index_action[action_choice]
 
                 # Append the action to the sequence
                 sequence.append(action)

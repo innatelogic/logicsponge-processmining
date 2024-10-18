@@ -22,12 +22,52 @@ random.seed(123)
 # ============================================================
 
 
+def shuffle_sequences(sequences, shuffle=True):  # noqa: FBT002
+    """
+    Takes a list of sequences (list of lists) and returns a shuffled version
+    while preserving the order within each sequence.
+
+    Parameters:
+    sequences (list of lists): The sequences to be processed.
+    shuffle (bool): Whether to shuffle the sequence selection or not.
+
+    Returns:
+    list of tuples: A list containing tuples of (sequence_index, value).
+    """
+    # Create a list of indices to track the sequences
+    indices = list(range(len(sequences)))
+
+    # Resulting shuffled dataset
+    shuffled_dataset = []
+
+    # While there are still sequences with elements left
+    while indices:
+        chosen_index = random.choice(indices) if shuffle else indices[0]  # noqa: S311
+
+        # Pop the first element from the chosen sequence
+        value = sequences[chosen_index].pop(0)
+        shuffled_dataset.append((str(chosen_index), str(value)))
+
+        # If the chosen sequence is now empty, remove its index from consideration
+        if not sequences[chosen_index]:
+            indices.remove(chosen_index)
+
+    return shuffled_dataset
+
+
 def add_input_symbols_sequence(sequence: list[ActionName], inp: str) -> list[tuple[str, ActionName]]:
     return [(inp, elem) for elem in sequence]  # Add (inp, elem) for each element
 
 
 def add_input_symbols(data: list[list[ActionName]], inp: str) -> list[list[tuple[str, ActionName]]]:
     return [add_input_symbols_sequence(sequence, inp) for sequence in data]
+
+
+def add_start_to_sequences(data: list[list[ActionName]], start: str) -> list[list[ActionName]]:
+    """
+    Appends stop symbol to each sequence in the data.
+    """
+    return [[start, *seq] for seq in data]
 
 
 def add_stop_to_sequences(data: list[list[ActionName]], stop: str) -> list[list[ActionName]]:
@@ -57,7 +97,7 @@ def split_data(
     Splits the dataset into training and test sets, keeping actions grouped by case_id.
     """
     # Create a DataFrame from the dataset
-    df = pd.DataFrame(dataset, columns=["case_id", "action_name"])
+    df = pd.DataFrame(dataset, columns=["case_id", "action_name"])  # type: ignore
 
     # Group the data by 'case_id'
     grouped = df.groupby("case_id")
@@ -72,7 +112,7 @@ def split_data(
     shuffled_dataset = [(case_id, action) for case_id, actions in grouped_dataset for action in actions]
 
     # Create a new DataFrame if needed
-    shuffled_df = pd.DataFrame(shuffled_dataset, columns=["case_id", "action_name"])
+    shuffled_df = pd.DataFrame(shuffled_dataset, columns=["case_id", "action_name"])  # type: ignore
 
     # Get the unique case_ids
     unique_case_ids = shuffled_df["case_id"].unique()
@@ -85,16 +125,17 @@ def split_data(
     test_case_ids = unique_case_ids[train_size:]
 
     # Split the original dataset based on these case_ids
-    train_set_df = shuffled_df[shuffled_df["case_id"].isin(train_case_ids)]
-    test_set_df = shuffled_df[shuffled_df["case_id"].isin(test_case_ids)]
+    train_set_df = shuffled_df[shuffled_df["case_id"].isin(train_case_ids)]  # type: ignore
+    test_set_df = shuffled_df[shuffled_df["case_id"].isin(test_case_ids)]  # type: ignore
 
     # Convert the training and test sets back to list of tuples (case_id, action_name)
     train_set = cast(
         list[tuple[CaseId, ActionName]],
-        [(row.case_id, row.action_name) for row in train_set_df.itertuples(index=False)],
+        [(row.case_id, row.action_name) for row in train_set_df.itertuples(index=False)],  # type: ignore
     )
     test_set = cast(
-        list[tuple[CaseId, ActionName]], [(row.case_id, row.action_name) for row in test_set_df.itertuples(index=False)]
+        list[tuple[CaseId, ActionName]],
+        [(row.case_id, row.action_name) for row in test_set_df.itertuples(index=False)],  # type: ignore
     )
 
     return train_set, test_set
@@ -136,14 +177,14 @@ def calculate_percentages(result_percentages: dict, result: dict, strategy_name:
 
     # Calculate percentages for valid predictions
     result_percentages[strategy_name][correct_name] = calculate_percentage(
-        result[strategy_name][correct_name], total_valid
+        result[strategy_name][correct_name], total_all
     )
-    result_percentages[strategy_name][wrong_name] = calculate_percentage(result[strategy_name][wrong_name], total_valid)
+    result_percentages[strategy_name][wrong_name] = calculate_percentage(result[strategy_name][wrong_name], total_all)
     result_percentages[strategy_name][within_top_k_name] = calculate_percentage(
-        result[strategy_name][within_top_k_name], total_valid
+        result[strategy_name][within_top_k_name], total_all
     )
     result_percentages[strategy_name][wrong_top_k_name] = calculate_percentage(
-        result[strategy_name][wrong_top_k_name], total_valid
+        result[strategy_name][wrong_top_k_name], total_all
     )
 
     # Calculate percentages for total predictions including unparseable sequences
@@ -289,12 +330,13 @@ class FileHandler:
         raise ValueError(msg)
 
 
-def handle_keys(keys: list[str], row: pd.Series | DataItem) -> str | tuple[str, ...]:
+def handle_keys(keys: list[str | int], row: pd.Series | DataItem) -> str | int | tuple[str | int, ...]:
     """
     Handles the case and action keys, returning either a single value or a tuple of values.
     Ensures the return type matches the expected CaseId or ActionName.
     """
     if len(keys) == 1:
-        return cast(str, row[keys[0]])  # Return the value directly if there's only one key
+        return cast(str | int, row[keys[0]])  # Return the value directly if there's only one key
 
-    return cast(tuple[str, ...], tuple(row[key] for key in keys))
+    # return tuple(cast(str | int, row[key]) for key in keys)
+    return ", ".join(str(cast(str | int, row[key])) for key in keys)
