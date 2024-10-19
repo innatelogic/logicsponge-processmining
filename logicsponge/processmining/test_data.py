@@ -4,7 +4,7 @@ import pandas as pd
 
 from logicsponge.processmining.automata import PDFA
 from logicsponge.processmining.data_utils import FileHandler, handle_keys, shuffle_sequences
-from logicsponge.processmining.globals import ActionName, CaseId
+from logicsponge.processmining.globals import STOP, ActionName, CaseId
 
 FOLDERNAME = "data"
 file_handler = FileHandler(folder=FOLDERNAME)
@@ -75,7 +75,7 @@ if DATA == "synthetic":
 
     # Open the file and process it line by line
     with open(
-        "/Users/bollig/innatelogic/git/circuits/innatelogic/circuits/process_mining/data/13.pautomac.train"
+        "/Users/bollig/innatelogic/git/circuits/innatelogic/circuits/process_mining/data/22.pautomac.train"
     ) as file:
         # Skip the first line (a header)
         next(file)
@@ -91,7 +91,7 @@ if DATA == "synthetic":
                 incremented_numbers = [num + 1 for num in numbers[1:]]
 
                 # Store the modified sequence
-                sequences.append(incremented_numbers)
+                sequences.append([*incremented_numbers, STOP])
 
     dataset = shuffle_sequences(sequences, shuffle=False)
 

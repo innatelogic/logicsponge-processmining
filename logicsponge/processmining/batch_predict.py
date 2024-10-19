@@ -18,12 +18,7 @@ from logicsponge.processmining.data_utils import (
     transform_to_seqs,
 )
 from logicsponge.processmining.globals import START, STATS, STOP
-from logicsponge.processmining.models import (
-    Alergia,
-    BasicMiner,
-    Fallback,
-    Relativize,
-)
+from logicsponge.processmining.models import Alergia, BasicMiner, Fallback, HardVoting, Relativize, SoftVoting
 from logicsponge.processmining.neural_networks import LSTMModel, PreprocessData, evaluate_rnn, train_rnn
 from logicsponge.processmining.test_data import dataset
 
@@ -41,6 +36,8 @@ logger = logging.getLogger(__name__)
 
 random.seed(123)
 
+
+NN_training = False
 
 # ============================================================
 # Data preparation
@@ -62,15 +59,6 @@ train_set_transformed = add_stop_to_sequences(train_set_transformed, STOP)
 val_set_transformed = add_stop_to_sequences(val_set_transformed, STOP)
 test_set_transformed = add_stop_to_sequences(test_set_transformed, STOP)
 
-# For RNNs: Append START action
-nn_train_set_transformed = add_start_to_sequences(train_set_transformed, START)
-nn_val_set_transformed = add_start_to_sequences(val_set_transformed, START)
-nn_test_set_transformed = add_start_to_sequences(test_set_transformed, START)
-
-nn_train_set_transformed = nn_processor.preprocess_data(nn_train_set_transformed)
-nn_val_set_transformed = nn_processor.preprocess_data(nn_val_set_transformed)
-nn_test_set_transformed = nn_processor.preprocess_data(nn_test_set_transformed)
-
 # For Alergia: Transform action into pair ("in", action)
 alergia_train_set_transformed = add_input_symbols(train_set_transformed, "in")
 
@@ -82,7 +70,7 @@ data_statistics(test_set_transformed)
 # Reference models
 # ============================================================
 
-# pm_strategy = BasicMiner(algorithm=FrequencyPrefixTree())
+# fpt_strategy = BasicMiner(algorithm=FrequencyPrefixTree())
 #
 # ngram_strategy = BasicMiner(algorithm=NGram(window_length=2))
 #
@@ -104,11 +92,11 @@ data_statistics(test_set_transformed)
 # Initialize process miners
 # ============================================================
 
-pm_strategy = BasicMiner(algorithm=FrequencyPrefixTree())
+fpt_strategy = BasicMiner(algorithm=FrequencyPrefixTree())
 
 ngram_strategy_0 = BasicMiner(algorithm=NGram(window_length=0))
 
-ngram_strategy_2 = BasicMiner(algorithm=NGram(window_length=2))
+ngram_strategy_2 = BasicMiner(algorithm=NGram(window_length=2, recover_lengths=[2, 1, 0]))
 
 ngram_strategy_3 = BasicMiner(algorithm=NGram(window_length=3, recover_lengths=[3, 2, 1, 0]))
 
@@ -117,18 +105,32 @@ ngram_strategy_4 = BasicMiner(algorithm=NGram(window_length=4, recover_lengths=[
 fallback_strategy = Fallback(
     models=[
         BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
-        BasicMiner(
-            algorithm=NGram(
-                window_length=2,
-            )
-        ),
+        BasicMiner(algorithm=NGram(window_length=3, recover_lengths=[3, 2, 1, 0])),
+    ]
+)
+
+hard_voting_strategy = HardVoting(
+    models=[
+        BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
+        BasicMiner(algorithm=NGram(window_length=2, recover_lengths=[2, 1, 0])),
+        BasicMiner(algorithm=NGram(window_length=3, recover_lengths=[3, 2, 1, 0])),
+        BasicMiner(algorithm=NGram(window_length=4, recover_lengths=[4, 3, 2, 1, 0])),
+    ]
+)
+
+soft_voting_strategy = SoftVoting(
+    models=[
+        BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
+        BasicMiner(algorithm=NGram(window_length=2, recover_lengths=[2, 1, 0])),
+        BasicMiner(algorithm=NGram(window_length=3, recover_lengths=[3, 2, 1, 0])),
+        BasicMiner(algorithm=NGram(window_length=4, recover_lengths=[4, 3, 2, 1, 0])),
     ]
 )
 
 relativize_strategy = Relativize(
     models=[
-        BasicMiner(algorithm=FrequencyPrefixTree()),
-        BasicMiner(algorithm=NGram(window_length=2)),
+        BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
+        BasicMiner(algorithm=NGram(window_length=3, recover_lengths=[3, 2, 1, 0])),
     ]
 )
 
@@ -143,9 +145,11 @@ for case_id, action_name in train_set:
     ngram_strategy_0.update(case_id, action_name)
     ngram_strategy_2.update(case_id, action_name)
     ngram_strategy_3.update(case_id, action_name)
-    ngram_strategy_4.update(case_id, action_name)
+    # ngram_strategy_4.update(case_id, action_name)
     fallback_strategy.update(case_id, action_name)
-    pm_strategy.update(case_id, action_name)
+    hard_voting_strategy.update(case_id, action_name)
+    soft_voting_strategy.update(case_id, action_name)
+    fpt_strategy.update(case_id, action_name)
     relativize_strategy.update(case_id, action_name)
 
 smm = run_Alergia(alergia_train_set_transformed, automaton_type="smm", eps=0.5, print_info=True)
@@ -155,11 +159,13 @@ strategies = {
     "ngram_0": (ngram_strategy_0, test_set_transformed),
     "ngram_2": (ngram_strategy_2, test_set_transformed),
     "ngram_3": (ngram_strategy_3, test_set_transformed),
-    "ngram_4": (ngram_strategy_4, test_set_transformed),
-    "fallback pm->ngram_2": (fallback_strategy, test_set_transformed),
+    # "ngram_4": (ngram_strategy_4, test_set_transformed),
+    "fallback fpt->ngram_3": (fallback_strategy, test_set_transformed),
+    "hard voting": (hard_voting_strategy, test_set_transformed),
+    "soft voting": (soft_voting_strategy, test_set_transformed),
     "alergia": (smm_strategy, test_set_transformed),
-    "pm": (pm_strategy, test_set_transformed),
-    "relativize pm->ngram": (relativize_strategy, test_set_transformed),
+    "fpt": (fpt_strategy, test_set_transformed),
+    "relativize fpt->ngram": (relativize_strategy, test_set_transformed),
 }
 
 
@@ -203,23 +209,33 @@ logger.info(result_percentages_df[[value["name"] for value in STATS.values()]])
 # RNN/LSTM Training and Evaluation
 # ============================================================
 
-vocab_size = 50  # Assume an upper bound on the number of activities, or adjust dynamically
+if NN_training:
+    # For RNNs: Append START action
+    nn_train_set_transformed = add_start_to_sequences(train_set_transformed, START)
+    nn_val_set_transformed = add_start_to_sequences(val_set_transformed, START)
+    nn_test_set_transformed = add_start_to_sequences(test_set_transformed, START)
 
-# Initialize the model, criterion, and optimizer
-embedding_dim = 50
-hidden_dim = 128
-output_dim = vocab_size  # Output used to predict the next activity
+    nn_train_set_transformed = nn_processor.preprocess_data(nn_train_set_transformed)
+    nn_val_set_transformed = nn_processor.preprocess_data(nn_val_set_transformed)
+    nn_test_set_transformed = nn_processor.preprocess_data(nn_test_set_transformed)
 
-model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim)
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+    vocab_size = 50  # Assume an upper bound on the number of activities, or adjust dynamically
 
-# Train the LSTM on the train set with batch size and sequence-to-sequence targets
-model = train_rnn(
-    model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=20
-)
+    # Initialize the model, criterion, and optimizer
+    embedding_dim = 50
+    hidden_dim = 128
+    output_dim = vocab_size  # Output used to predict the next activity
 
-# Evaluate model with test set
-msg = "\n=====> Finished training, evaluating accuracy on test set..."
-logger.info(msg)
-evaluate_rnn(model, nn_test_set_transformed, dataset_type="Test")
+    model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+    # Train the LSTM on the train set with batch size and sequence-to-sequence targets
+    model = train_rnn(
+        model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=20
+    )
+
+    # Evaluate model with test set
+    msg = "\n=====> Finished training, evaluating accuracy on test set..."
+    logger.info(msg)
+    evaluate_rnn(model, nn_test_set_transformed, dataset_type="Test")

@@ -233,14 +233,22 @@ class BaseStructure(PDFA, ABC):
         # If include_stop is True, return the original probability distribution
         return probs
 
-    def state_dict(self, current_state: StateId | None) -> dict[ActionName, float] | None:
+    def case_dict(self, case_id: CaseId) -> dict[ActionName, float]:
         """
-        For a given state, returns dictionary mapping actions to probabilities.
+        For a given case, returns dictionary mapping actions to probabilities.
         """
+        if case_id not in self.case_info:
+            current_state = self.initial_state
+        else:
+            current_state = self.case_info[case_id].get("state", None)
+
+        if current_state is None:
+            return {}
+
         probs = self.state_probs(current_state)
 
         if probs is None:
-            return None
+            return {}
 
         # Start with the "stop" action
         probs_dict = {STOP: probs[0]}
@@ -250,6 +258,32 @@ class BaseStructure(PDFA, ABC):
             probs_dict[action] = probs[index]
 
         return probs_dict
+
+    def state_dict(self, current_state: StateId | None) -> dict[ActionName, float]:
+        """
+        For a given state, returns dictionary mapping actions to probabilities.
+        """
+        probs = self.state_probs(current_state)
+
+        if probs is None:
+            return {}
+
+        # Start with the "stop" action
+        probs_dict = {STOP: probs[0]}
+
+        # Add other actions
+        for action, index in self.action_index.items():
+            probs_dict[action] = probs[index]
+
+        return probs_dict
+
+    def sequence_dict(self, sequence: list[ActionName]) -> dict[ActionName, float]:
+        """
+        For a given sequence, returns dictionary mapping actions to probabilities.
+        """
+        current_state = self.parse_sequence(sequence)
+
+        return self.state_dict(current_state)
 
 
 # ============================================================

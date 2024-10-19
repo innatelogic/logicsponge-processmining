@@ -1,7 +1,7 @@
 import logging
 import random
 from abc import ABC, abstractmethod
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from typing import Any
 
 import matplotlib as mpl
@@ -77,6 +77,24 @@ class BaseStreamingMiner(ABC):
         """
         Makes a prediction for a given sequence. Only for batch mode.
         """
+
+    # @abstractmethod
+    # def case_dict(self, case_id: CaseId) -> dict[ActionName, float] | None:
+    #     """
+    #     Returns probability dictionary for a given case.
+    #     """
+    #
+    # @abstractmethod
+    # def state_dict(self, state_id: ComposedState | None) -> dict[ActionName, float] | None:
+    #     """
+    #     Returns probability dictionary for a given case.
+    #     """
+    #
+    # @abstractmethod
+    # def sequence_dict(self, sequence: list[ActionName]) -> dict[ActionName, float] | None:
+    #     """
+    #     Returns probability dictionary for a given sequence.
+    #     """
 
     @staticmethod
     def update_stats(actual_next_action: ActionName, prediction: Prediction | None, stats: dict[str, int]) -> None:
@@ -169,6 +187,12 @@ class BasicMiner(BaseStreamingMiner):
     def prediction_sequence(self, sequence: list[ActionName]) -> Prediction | None:
         return self.algorithm.prediction_sequence(sequence)
 
+    # def case_dict(self, case_id: CaseId) -> dict[ActionName, float] | None:
+    #     return self.algorithm.case_dict(case_id)
+    #
+    # def state_dict(self, state_id: ComposedState | None) -> dict[ActionName, float] | None:
+    #     return self.algorithm.state_dict(state_id)
+
 
 # ============================================================
 # Multi Streaming Miner (using several building blocks)
@@ -202,6 +226,135 @@ class MultiMiner(BaseStreamingMiner, ABC):
 
         # Otherwise, return the tuple of next states
         return tuple(next_states)
+
+
+# ============================================================
+# Ensemble Methods Derived from Multi Streaming Miner
+# ============================================================
+
+
+class HardVoting(MultiMiner):
+    @staticmethod
+    def voting_prediction(predictions: list[Prediction | None]) -> Prediction | None:
+        valid_predictions = [pred for pred in predictions if pred is not None]
+
+        if not valid_predictions:
+            return None
+
+        # Extract only the action part of each valid prediction for voting
+        action_predictions = [pred[0] for pred in valid_predictions]
+
+        # Count the frequency of each action in the valid predictions
+        action_counter = Counter(action_predictions)
+
+        # Find the action(s) with the highest count
+        most_common = action_counter.most_common()  # List of (action, count) sorted by frequency
+
+        # If there is only one action with the highest count, return it
+        highest_count = most_common[0][1]
+        most_voted_actions = [action for action, count in most_common if count == highest_count]
+
+        if len(most_voted_actions) == 1:
+            # If there is only one action with the highest votes, return it
+            return most_voted_actions[0], [], 0.0
+
+        # In the case of a tie, return the prediction according to the order of models
+        for pred in valid_predictions:
+            if pred[0] in most_voted_actions:
+                return pred[0], [], 0.0
+
+        # Not reachable
+        return None
+
+    def prediction_case(self, case_id: CaseId) -> Prediction | None:
+        """
+        Return the hard voting of predictions from the ensemble.
+        """
+        # Gather all predictions from the models in the ensemble
+        predictions = [model.prediction_case(case_id) for model in self.models]
+
+        return self.voting_prediction(predictions)
+
+    def prediction_state(self, state: ComposedState | None) -> Prediction | None:
+        """
+        Return the majority vote.
+        """
+        if state is None:
+            return None
+
+        predictions = [
+            model.prediction_state(model_state) for model, model_state in zip(self.models, state, strict=True)
+        ]
+
+        return self.voting_prediction(predictions)
+
+    def prediction_sequence(self, sequence: list[ActionName]) -> Prediction | None:
+        """
+        Return the majority vote.
+        """
+        predictions = [model.prediction_sequence(sequence) for model in self.models]
+
+        return self.voting_prediction(predictions)
+
+
+class SoftVoting(MultiMiner):
+    def voting_prediction(self, prob_dicts: list[dict[ActionName, float]]) -> Prediction | None:
+        combined_probs = {}
+
+        # Iterate over all probability dictionaries
+        for prob_dict in prob_dicts:
+            for action, prob in prob_dict.items():
+                # Accumulate the probabilities for each action
+                if action not in combined_probs:
+                    combined_probs[action] = 0.0
+                combined_probs[action] += prob
+
+        # If there are no actions, return None
+        if not combined_probs:
+            return None
+
+        # Find action with highest combined probability
+        most_probable_action = max(combined_probs, key=lambda k: combined_probs[k])
+
+        highest_probability = combined_probs[most_probable_action] / len(self.models)
+
+        # Return the most probable action, an empty list for top-k actions, and the probability
+        return most_probable_action, [], highest_probability
+
+    def prediction_case(self, case_id: CaseId) -> Prediction | None:
+        """
+        Return the hard voting of predictions from the ensemble.
+        """
+        prob_dicts = [model.algorithm.case_dict(case_id) for model in self.models]  # type: ignore
+
+        return self.voting_prediction(prob_dicts)
+
+    def prediction_state(self, state: ComposedState | None) -> Prediction | None:
+        """
+        Return the majority vote.
+        """
+        if state is None:
+            return None
+
+        prob_dicts = [
+            model.algorithm.state_dict(model_state)  # type: ignore
+            for model, model_state in zip(self.models, state, strict=True)
+        ]
+
+        return self.voting_prediction(prob_dicts)
+
+    def prediction_sequence(self, sequence: list[ActionName]) -> Prediction | None:
+        """
+        Return the majority vote.
+        """
+        prob_dicts = [model.algorithm.sequence_dict(sequence) for model in self.models]  # type: ignore
+
+        return self.voting_prediction(prob_dicts)
+
+
+# ============================================================
+# Other Models Derived from Multi Streaming Miner
+# ============================================================
 
 
 class Fallback(MultiMiner):
