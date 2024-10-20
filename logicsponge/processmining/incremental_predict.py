@@ -4,7 +4,15 @@ import logicsponge.core as ls
 from logicsponge.core import DataItem, dashboard
 from logicsponge.processmining.algorithms_and_structures import FrequencyPrefixTree, NGram
 from logicsponge.processmining.data_utils import handle_keys
-from logicsponge.processmining.models import BasicMiner, Fallback, HardVoting, NeuralNetworkMiner, SoftVoting
+from logicsponge.processmining.globals import probs_prediction
+from logicsponge.processmining.models import (
+    BasicMiner,
+    Fallback,
+    HardVoting,
+    NeuralNetworkMiner,
+    SoftVoting,
+    StreamingMiner,
+)
 from logicsponge.processmining.neural_networks import LSTMModel
 
 # from logicsponge.processmining.test_data import data
@@ -84,10 +92,8 @@ class RemoveStuttering(ls.FunctionTerm):
 
 
 class StreamingActionPredictor(ls.FunctionTerm):
-    def __init__(self, *args, strategy, randomized: bool = True, top_k: int = 1, **kwargs):
+    def __init__(self, *args, strategy: StreamingMiner, **kwargs):
         super().__init__(*args, **kwargs)
-        self.top_k = top_k
-        self.randomized = randomized
         self.strategy = strategy
         self.case_ids = set()
 
@@ -99,7 +105,8 @@ class StreamingActionPredictor(ls.FunctionTerm):
             self.strategy.update(item["case_id"], item["action"])
             self.case_ids.add(case_id)
         else:
-            prediction = self.strategy.prediction_case(item["case_id"])
+            probs = self.strategy.case_probs(item["case_id"])
+            prediction = probs_prediction(probs)
             self.strategy.update(item["case_id"], item["action"])
             out = DataItem(
                 {
@@ -151,45 +158,45 @@ class Evaluation(ls.FunctionTerm):
 # Initialize process miners
 # ====================================================
 
-fpt_streamer = StreamingActionPredictor(
-    strategy=BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=2, include_stop=INCLUDE_STOP)),
+fpt = StreamingActionPredictor(
+    strategy=BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=2)),
 )
 
-ngram_streamer_2 = StreamingActionPredictor(
-    strategy=BasicMiner(algorithm=NGram(window_length=2, include_stop=INCLUDE_STOP)),
+ngram_2 = StreamingActionPredictor(
+    strategy=BasicMiner(algorithm=NGram(window_length=2)),
 )
 
-ngram_streamer_4 = StreamingActionPredictor(
-    strategy=BasicMiner(algorithm=NGram(window_length=4, include_stop=INCLUDE_STOP)),
+ngram_4 = StreamingActionPredictor(
+    strategy=BasicMiner(algorithm=NGram(window_length=4)),
 )
 
-fallback_streamer = StreamingActionPredictor(
+fallback = StreamingActionPredictor(
     strategy=Fallback(
         models=[
-            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20, include_stop=INCLUDE_STOP)),
-            BasicMiner(algorithm=NGram(window_length=3, include_stop=INCLUDE_STOP)),
+            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
+            BasicMiner(algorithm=NGram(window_length=3)),
         ]
     )
 )
 
-hard_voting_streamer = StreamingActionPredictor(
+hard_voting = StreamingActionPredictor(
     strategy=HardVoting(
         models=[
-            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20, include_stop=INCLUDE_STOP)),
-            BasicMiner(algorithm=NGram(window_length=2, include_stop=INCLUDE_STOP)),
-            BasicMiner(algorithm=NGram(window_length=3, include_stop=INCLUDE_STOP)),
-            BasicMiner(algorithm=NGram(window_length=4, include_stop=INCLUDE_STOP)),
+            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
+            BasicMiner(algorithm=NGram(window_length=2)),
+            BasicMiner(algorithm=NGram(window_length=3)),
+            BasicMiner(algorithm=NGram(window_length=4)),
         ]
     )
 )
 
-soft_voting_streamer = StreamingActionPredictor(
+soft_voting = StreamingActionPredictor(
     strategy=SoftVoting(
         models=[
-            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20, include_stop=INCLUDE_STOP)),
-            BasicMiner(algorithm=NGram(window_length=2, include_stop=INCLUDE_STOP)),
-            BasicMiner(algorithm=NGram(window_length=3, include_stop=INCLUDE_STOP)),
-            BasicMiner(algorithm=NGram(window_length=4, include_stop=INCLUDE_STOP)),
+            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
+            BasicMiner(algorithm=NGram(window_length=2)),
+            BasicMiner(algorithm=NGram(window_length=3)),
+            BasicMiner(algorithm=NGram(window_length=4)),
         ]
     )
 )
@@ -203,7 +210,7 @@ model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-lstm_streamer = StreamingActionPredictor(
+lstm = StreamingActionPredictor(
     strategy=NeuralNetworkMiner(
         model=model,
         criterion=criterion,
@@ -224,7 +231,7 @@ acc_list = [
     "fallback.accuracy",
     "hard_voting.accuracy",
     "soft_voting.accuracy",
-    # "lstm.accuracy",
+    "lstm.accuracy",
 ]
 
 # streamer = file.CSVStreamer(file_path=data["file_path"], delay=0, poll_delay=2)
@@ -239,13 +246,13 @@ sponge = (
     * AddStartSymbol()
     # * ls.Print()
     * (
-        (fpt_streamer * Evaluation("fpt"))
-        | (ngram_streamer_2 * Evaluation("ngram_2"))
-        | (ngram_streamer_4 * Evaluation("ngram_4"))
-        | (fallback_streamer * Evaluation("fallback"))
-        | (hard_voting_streamer * Evaluation("hard_voting"))
-        | (soft_voting_streamer * Evaluation("soft_voting"))
-        # | (lstm_streamer * Evaluation("lstm"))
+        (fpt * Evaluation("fpt"))
+        | (ngram_2 * Evaluation("ngram_2"))
+        | (ngram_4 * Evaluation("ngram_4"))
+        | (fallback * Evaluation("fallback"))
+        | (hard_voting * Evaluation("hard_voting"))
+        | (soft_voting * Evaluation("soft_voting"))
+        | (lstm * Evaluation("lstm"))
     )
     * ls.ToSingleStream(flatten=True)
     * ls.KeyFilter(keys=acc_list)

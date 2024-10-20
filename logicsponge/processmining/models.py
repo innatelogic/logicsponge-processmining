@@ -11,13 +11,14 @@ from torch.nn.utils.rnn import pad_sequence
 
 from logicsponge.processmining.data_utils import add_input_symbols_sequence
 from logicsponge.processmining.globals import (
-    RANDOMIZED,
     STATS,
-    TOP_K,
+    STOP,
     ActionName,
     CaseId,
     ComposedState,
     Prediction,
+    Probs,
+    probs_prediction,
 )
 from logicsponge.processmining.neural_networks import LSTMModel, RNNModel
 
@@ -36,65 +37,13 @@ random.seed(123)
 # ============================================================
 
 
-class BaseStreamingMiner(ABC):
+class StreamingMiner(ABC):
     """
     The Base Streaming Miner (for both streaming and batch mode)
     """
 
-    def __init__(self, randomized: bool = RANDOMIZED, top_k: int = TOP_K) -> None:  # noqa: FBT001
-        self.randomized = randomized
-        self.top_k = top_k
-
-        self.algorithm = None
-        self.initial_state = None
-
-    @abstractmethod
-    def update(self, case_id: CaseId, action: ActionName) -> None:
-        """
-        Updates Strategy.
-        """
-
-    @abstractmethod
-    def next_state(self, current_state: ComposedState | None, action: ActionName) -> ComposedState | None:
-        """
-        Takes a transition from the current state.
-        """
-
-    @abstractmethod
-    def prediction_case(self, case_id: CaseId) -> Prediction | None:
-        """
-        Makes a prediction for a given case id.
-        """
-
-    @abstractmethod
-    def prediction_state(self, state: ComposedState | None) -> Prediction | None:
-        """
-        Makes a prediction for a given state.
-        """
-
-    @abstractmethod
-    def prediction_sequence(self, sequence: list[ActionName]) -> Prediction | None:
-        """
-        Makes a prediction for a given sequence. Only for batch mode.
-        """
-
-    # @abstractmethod
-    # def case_dict(self, case_id: CaseId) -> dict[ActionName, float] | None:
-    #     """
-    #     Returns probability dictionary for a given case.
-    #     """
-    #
-    # @abstractmethod
-    # def state_dict(self, state_id: ComposedState | None) -> dict[ActionName, float] | None:
-    #     """
-    #     Returns probability dictionary for a given case.
-    #     """
-    #
-    # @abstractmethod
-    # def sequence_dict(self, sequence: list[ActionName]) -> dict[ActionName, float] | None:
-    #     """
-    #     Returns probability dictionary for a given sequence.
-    #     """
+    def __init__(self) -> None:
+        self.initial_state: ComposedState | None = None
 
     @staticmethod
     def update_stats(actual_next_action: ActionName, prediction: Prediction | None, stats: dict[str, int]) -> None:
@@ -139,10 +88,13 @@ class BaseStreamingMiner(ABC):
 
                 if mode == "incremental":
                     # Prediction for incremental mode (step by step)
-                    prediction = self.prediction_state(current_state)
+                    probs = self.state_probs(current_state)
+                    prediction = probs_prediction(probs)
+
                 else:
                     # Prediction for sequence mode (whole sequence)
-                    prediction = self.prediction_sequence(sequence[:i])
+                    probs = self.sequence_probs(sequence[:i])
+                    prediction = probs_prediction(probs)
 
                 # Update statistics based on the prediction
                 self.update_stats(actual_next_action, prediction, stats)
@@ -154,16 +106,46 @@ class BaseStreamingMiner(ABC):
         # Return summarized stats
         return {STATS[key]["name"]: value for key, value in stats.items()}
 
+    @abstractmethod
+    def update(self, case_id: CaseId, action: ActionName) -> None:
+        """
+        Updates Strategy.
+        """
+
+    @abstractmethod
+    def next_state(self, current_state: ComposedState | None, action: ActionName) -> ComposedState | None:
+        """
+        Takes a transition from the current state.
+        """
+
+    @abstractmethod
+    def state_probs(self, state: ComposedState | None) -> Probs:
+        """
+        Returns probability dictionary based on state.
+        """
+
+    @abstractmethod
+    def case_probs(self, case_id: CaseId) -> Probs:
+        """
+        Returns probability dictionary based on case.
+        """
+
+    @abstractmethod
+    def sequence_probs(self, sequence: list[ActionName]) -> Probs:
+        """
+        Returns probability dictionary based on sequence.
+        """
+
 
 # ============================================================
 # Standard Streaming Miner (using one building block)
 # ============================================================
 
 
-class BasicMiner(BaseStreamingMiner):
+class BasicMiner(StreamingMiner):
     # model is usually BaseStructure (apart from Alergia)
-    def __init__(self, *args, algorithm: Any, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(self, algorithm: Any) -> None:
+        super().__init__()
         self.algorithm = algorithm
 
         if self.algorithm is None:
@@ -178,20 +160,14 @@ class BasicMiner(BaseStreamingMiner):
     def next_state(self, current_state: ComposedState | None, action: ActionName) -> ComposedState | None:
         return self.algorithm.next_state(current_state, action)
 
-    def prediction_case(self, case_id: CaseId) -> Prediction | None:
-        return self.algorithm.prediction_case(case_id)
+    def state_probs(self, state: ComposedState | None) -> Probs:
+        return self.algorithm.state_probs(state)
 
-    def prediction_state(self, state: ComposedState | None) -> Prediction | None:
-        return self.algorithm.prediction_state(state)
+    def case_probs(self, case_id: CaseId) -> Probs:
+        return self.algorithm.case_probs(case_id)
 
-    def prediction_sequence(self, sequence: list[ActionName]) -> Prediction | None:
-        return self.algorithm.prediction_sequence(sequence)
-
-    # def case_dict(self, case_id: CaseId) -> dict[ActionName, float] | None:
-    #     return self.algorithm.case_dict(case_id)
-    #
-    # def state_dict(self, state_id: ComposedState | None) -> dict[ActionName, float] | None:
-    #     return self.algorithm.state_dict(state_id)
+    def sequence_probs(self, sequence: list[ActionName]) -> Probs:
+        return self.algorithm.sequence_probs(sequence)
 
 
 # ============================================================
@@ -199,13 +175,10 @@ class BasicMiner(BaseStreamingMiner):
 # ============================================================
 
 
-class MultiMiner(BaseStreamingMiner, ABC):
-    def __init__(self, *args, models: list[BaseStreamingMiner], **kwargs) -> None:
+class MultiMiner(StreamingMiner, ABC):
+    def __init__(self, *args, models: list[StreamingMiner], **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.models = models
-
-        for model in self.models:
-            model.randomized = self.randomized
 
         self.initial_state = self.initial_state = tuple(model.initial_state for model in self.models)
 
@@ -235,11 +208,21 @@ class MultiMiner(BaseStreamingMiner, ABC):
 
 class HardVoting(MultiMiner):
     @staticmethod
-    def voting_prediction(predictions: list[Prediction | None]) -> Prediction | None:
-        valid_predictions = [pred for pred in predictions if pred is not None]
+    def voting_prediction(probs_list: list[Probs]) -> Probs:
+        """
+        Perform hard voting based on the most frequent action in the predictions and return
+        the winning action as a probability dictionary with a probability of 1.0.
+        If there is a tie, select the action based on the first occurrence in the order of the models.
+        """
+        # Collect valid predictions
+        valid_predictions = []
+        for probs in probs_list:
+            prediction = probs_prediction(probs)
+            if prediction is not None:
+                valid_predictions.append(prediction)
 
         if not valid_predictions:
-            return None
+            return {}
 
         # Extract only the action part of each valid prediction for voting
         action_predictions = [pred[0] for pred in valid_predictions]
@@ -250,106 +233,105 @@ class HardVoting(MultiMiner):
         # Find the action(s) with the highest count
         most_common = action_counter.most_common()  # List of (action, count) sorted by frequency
 
-        # If there is only one action with the highest count, return it
+        # Get the highest count
         highest_count = most_common[0][1]
         most_voted_actions = [action for action, count in most_common if count == highest_count]
 
+        selected_action = STOP
+
+        # If there is only one action with the highest count, select that action
         if len(most_voted_actions) == 1:
-            # If there is only one action with the highest votes, return it
-            return most_voted_actions[0], [], 0.0
+            selected_action = most_voted_actions[0]
+        else:
+            # In case of a tie, choose based on the first occurrence among the models' input
+            for pred in valid_predictions:
+                if pred[0] in most_voted_actions:
+                    selected_action = pred[0]
+                    break
 
-        # In the case of a tie, return the prediction according to the order of models
-        for pred in valid_predictions:
-            if pred[0] in most_voted_actions:
-                return pred[0], [], 0.0
+        # Create a result dictionary with only the selected action
+        return {selected_action: 1.0}
 
-        # Not reachable
-        return None
-
-    def prediction_case(self, case_id: CaseId) -> Prediction | None:
-        """
-        Return the hard voting of predictions from the ensemble.
-        """
-        # Gather all predictions from the models in the ensemble
-        predictions = [model.prediction_case(case_id) for model in self.models]
-
-        return self.voting_prediction(predictions)
-
-    def prediction_state(self, state: ComposedState | None) -> Prediction | None:
+    def state_probs(self, state: ComposedState | None) -> Probs:
         """
         Return the majority vote.
         """
         if state is None:
-            return None
+            return {}
 
-        predictions = [
-            model.prediction_state(model_state) for model, model_state in zip(self.models, state, strict=True)
-        ]
+        probs_list = [model.state_probs(model_state) for model, model_state in zip(self.models, state, strict=True)]
 
-        return self.voting_prediction(predictions)
+        return self.voting_prediction(probs_list)
 
-    def prediction_sequence(self, sequence: list[ActionName]) -> Prediction | None:
+    def case_probs(self, case_id: CaseId) -> Probs:
+        """
+        Return the hard voting of predictions from the ensemble.
+        """
+        probs_list = [model.case_probs(case_id) for model in self.models]
+
+        return self.voting_prediction(probs_list)
+
+    def sequence_probs(self, sequence: list[ActionName]) -> Probs:
         """
         Return the majority vote.
         """
-        predictions = [model.prediction_sequence(sequence) for model in self.models]
+        probs_list = [model.sequence_probs(sequence) for model in self.models]
 
-        return self.voting_prediction(predictions)
+        return self.voting_prediction(probs_list)
 
 
 class SoftVoting(MultiMiner):
-    def voting_prediction(self, prob_dicts: list[dict[ActionName, float]]) -> Prediction | None:
+    @staticmethod
+    def voting_prediction(probs_list: list[Probs]) -> Probs:
         combined_probs = {}
 
-        # Iterate over all probability dictionaries
-        for prob_dict in prob_dicts:
+        # Iterate over all probability dictionaries and accumulate the probabilities for each action
+        for prob_dict in probs_list:
             for action, prob in prob_dict.items():
-                # Accumulate the probabilities for each action
                 if action not in combined_probs:
                     combined_probs[action] = 0.0
                 combined_probs[action] += prob
 
-        # If there are no actions, return None
+        # If there are no actions, return an empty dictionary
         if not combined_probs:
-            return None
+            return {}
 
-        # Find action with highest combined probability
-        most_probable_action = max(combined_probs, key=lambda k: combined_probs[k])
+        # Normalize the combined probabilities so that they sum to 1
+        total_prob = sum(combined_probs.values())
 
-        highest_probability = combined_probs[most_probable_action] / len(self.models)
+        # Ensure we do not divide by zero (though combined_probs being empty is already checked)
+        if total_prob > 0:
+            combined_probs = {action: prob / total_prob for action, prob in combined_probs.items()}
 
-        # Return the most probable action, an empty list for top-k actions, and the probability
-        return most_probable_action, [], highest_probability
+        # Return the normalized probability dictionary
+        return combined_probs
 
-    def prediction_case(self, case_id: CaseId) -> Prediction | None:
-        """
-        Return the hard voting of predictions from the ensemble.
-        """
-        prob_dicts = [model.algorithm.case_dict(case_id) for model in self.models]  # type: ignore
-
-        return self.voting_prediction(prob_dicts)
-
-    def prediction_state(self, state: ComposedState | None) -> Prediction | None:
+    def state_probs(self, state: ComposedState | None) -> Probs:
         """
         Return the majority vote.
         """
         if state is None:
-            return None
+            return {}
 
-        prob_dicts = [
-            model.algorithm.state_dict(model_state)  # type: ignore
-            for model, model_state in zip(self.models, state, strict=True)
-        ]
+        probs_list = [model.state_probs(model_state) for model, model_state in zip(self.models, state, strict=True)]
 
-        return self.voting_prediction(prob_dicts)
+        return self.voting_prediction(probs_list)
 
-    def prediction_sequence(self, sequence: list[ActionName]) -> Prediction | None:
+    def case_probs(self, case_id: CaseId) -> Probs:
+        """
+        Return the hard voting of predictions from the ensemble.
+        """
+        probs_list = [model.case_probs(case_id) for model in self.models]
+
+        return self.voting_prediction(probs_list)
+
+    def sequence_probs(self, sequence: list[ActionName]) -> Probs:
         """
         Return the majority vote.
         """
-        prob_dicts = [model.algorithm.sequence_dict(sequence) for model in self.models]  # type: ignore
+        probs_list = [model.sequence_probs(sequence) for model in self.models]
 
-        return self.voting_prediction(prob_dicts)
+        return self.voting_prediction(probs_list)
 
 
 # ============================================================
@@ -358,47 +340,47 @@ class SoftVoting(MultiMiner):
 
 
 class Fallback(MultiMiner):
-    def prediction_case(self, case_id: CaseId) -> Prediction | None:
+    def state_probs(self, state: ComposedState | None) -> Probs:
         """
-        Return the first non-None prediction from the models, cascading through the models in order.
-        """
-        for model in self.models:
-            prediction = model.prediction_case(case_id)
-            if prediction is not None:
-                return prediction
-
-        # If all models return None
-        return None
-
-    def prediction_state(self, state: ComposedState | None) -> Prediction | None:
-        """
-        Return the first non-None prediction from the models, cascading through the models in order.
+        Return the first non-None probabilities from the models, cascading through the models in order.
         Each model gets its corresponding state from the ComposedState.
         """
         if state is None:
-            return None
+            return {}
 
         # Iterate through the models and their corresponding states
         for model, model_state in zip(self.models, state, strict=True):
-            prediction = model.prediction_state(model_state)
-            if prediction is not None:
-                return prediction
+            probs = model.state_probs(model_state)
+            if probs:
+                return probs
 
         # If all models return None
-        return None
+        return {}
 
-    def prediction_sequence(self, sequence: list[ActionName]) -> Prediction | None:
+    def case_probs(self, case_id: CaseId) -> Probs:
         """
-        Return the first non-None prediction from the models for the given sequence,
+        Return the first non-None probabilities from the models, cascading through the models in order.
+        """
+        for model in self.models:
+            probs = model.case_probs(case_id)
+            if probs:
+                return probs
+
+        # If all models return None
+        return {}
+
+    def sequence_probs(self, sequence: list[ActionName]) -> Probs:
+        """
+        Return the first non-None probabilities from the models for the given sequence,
         cascading through the models in order.
         """
         for model in self.models:
-            prediction = model.prediction_sequence(sequence)
-            if prediction is not None:
-                return prediction
+            probs = model.sequence_probs(sequence)
+            if probs:
+                return probs
 
         # If all models return None
-        return None
+        return {}
 
 
 class Relativize(MultiMiner):
@@ -411,34 +393,34 @@ class Relativize(MultiMiner):
         self.model1 = self.models[0]
         self.model2 = self.models[1]
 
-    def prediction_case(self, case_id: CaseId) -> Prediction | None:
-        prediction = self.model1.prediction_case(case_id)
-
-        if prediction is not None:
-            prediction = self.model2.prediction_case(case_id)
-
-        return prediction
-
-    def prediction_state(self, state: ComposedState | None) -> Prediction | None:
+    def state_probs(self, state: ComposedState | None) -> Probs:
         if state is None:
-            return None
+            return {}
 
         (state1, state2) = state
 
-        prediction = self.model1.prediction_state(state1)
+        probs = self.model1.state_probs(state1)
 
-        if prediction is not None:
-            prediction = self.model2.prediction_state(state2)
+        if probs:
+            probs = self.model2.state_probs(state2)
 
-        return prediction
+        return probs
 
-    def prediction_sequence(self, sequence: list[ActionName]) -> Prediction | None:
-        prediction = self.model1.prediction_sequence(sequence)
+    def case_probs(self, case_id: CaseId) -> Probs:
+        probs = self.model1.case_probs(case_id)
 
-        if prediction is not None:
-            prediction = self.model2.prediction_sequence(sequence)
+        if probs:
+            probs = self.model2.case_probs(case_id)
 
-        return prediction
+        return probs
+
+    def sequence_probs(self, sequence: list[ActionName]) -> Probs:
+        probs = self.model1.sequence_probs(sequence)
+
+        if probs is not None:
+            probs = self.model2.sequence_probs(sequence)
+
+        return probs
 
 
 # ============================================================
@@ -452,7 +434,7 @@ class Alergia(BasicMiner):
         self.current_state = self.initial_state
 
     @staticmethod
-    def get_probability_distribution(state: Any) -> dict[ActionName, float]:
+    def get_probability_distribution(state: Any) -> Probs:
         probability_distribution = {}
 
         for input_symbol, transitions in state.transitions.items():
@@ -462,30 +444,11 @@ class Alergia(BasicMiner):
 
         return probability_distribution["in"]
 
-    def prediction_probs(self, probs: dict[ActionName, float]) -> Prediction:
-        sorted_actions = sorted(probs.items(), key=lambda x: x[1], reverse=True)
-        top_k_actions = [action for action, _ in sorted_actions[: self.top_k]]
-
-        # Select the next action
-        if self.randomized:
-            # Choose randomly based on the probabilities
-            actions, probabilities = zip(*sorted_actions, strict=True)
-            next_action = random.choices(actions, weights=probabilities, k=1)[0]  # noqa: S311
-        else:
-            # Choose the action with the highest probability
-            next_action = top_k_actions[0]
-
-        # Get the probability of the selected action from the original probs dict
-        next_action_prob = probs[next_action]
-
-        return next_action, top_k_actions, next_action_prob
-
-    def prediction_case(self, case_id: CaseId) -> None:  # noqa: ARG002
+    def case_probs(self, case_id: CaseId) -> Probs:  # noqa: ARG002
         """
         This method is not used in this subclass.
         """
-        msg = "This method is not implemented for this subclass."
-        raise NotImplementedError(msg)
+        return {}
 
     def update(self, case_id: CaseId, action: ActionName) -> None:  # noqa: ARG002
         """
@@ -494,13 +457,10 @@ class Alergia(BasicMiner):
         msg = "This method is not implemented for this subclass."
         raise NotImplementedError(msg)
 
-    def prediction_state(self, state: Any) -> Prediction | None:
-        probs = self.get_probability_distribution(state)
+    def state_probs(self, state: Any) -> Probs:
+        return self.get_probability_distribution(state)
 
-        # Sort probabilities in descending order to get top-k actions
-        return self.prediction_probs(probs)
-
-    def prediction_sequence(self, sequence: list[ActionName]) -> Prediction | None:
+    def sequence_probs(self, sequence: list[ActionName]) -> Probs:
         transformed_sequence = add_input_symbols_sequence(sequence, "in")
 
         self.algorithm.reset_to_initial()
@@ -509,9 +469,7 @@ class Alergia(BasicMiner):
             self.algorithm.step_to(symbol[0], symbol[1])
 
         # Get probability distribution for the current state
-        probs = self.get_probability_distribution(self.algorithm.current_state)
-
-        return self.prediction_probs(probs)
+        return self.get_probability_distribution(self.algorithm.current_state)
 
     def step(self, action):
         self.algorithm.step_to("in", action)
@@ -528,10 +486,9 @@ class Alergia(BasicMiner):
 # ============================================================
 
 
-class NeuralNetworkMiner(BaseStreamingMiner, ABC):
-    def __init__(self, *args, model: RNNModel | LSTMModel, batch_size: int = 1, optimizer, criterion, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-
+class NeuralNetworkMiner(StreamingMiner):
+    def __init__(self, model: RNNModel | LSTMModel, batch_size: int, optimizer, criterion) -> None:
+        super().__init__()
         self.model = model  # The neural network
         self.optimizer = optimizer
         self.criterion = criterion
@@ -660,7 +617,7 @@ class NeuralNetworkMiner(BaseStreamingMiner, ABC):
         # Fetch the actual sequences based on the selected case_ids
         return [self.get_sequence(cid) for cid in batch_case_ids]
 
-    def prediction_case(self, case_id: CaseId) -> Prediction | None:
+    def case_probs(self, case_id: CaseId) -> Probs:
         """
         Predict the next action for a given case_id and return the top-k most likely actions along with the probability
         of the top action.
@@ -672,29 +629,29 @@ class NeuralNetworkMiner(BaseStreamingMiner, ABC):
         index_sequence = self.get_sequence(case_id)
 
         if not index_sequence or len(index_sequence) < 1:
-            return None
+            return {}
 
-        return self.prediction_idx_sequence(index_sequence)
+        return self.idx_sequence_probs(index_sequence)
 
-    def prediction_sequence(self, sequence: list[ActionName]) -> Prediction | None:
+    def sequence_probs(self, sequence: list[ActionName]) -> Probs:
         """
         Predict the next action for a given sequence of actions and return the top-k most likely actions along with the
         probability of the top action.
         """
         if not sequence or len(sequence) < 1:
-            return None
+            return {}
 
         # Convert each action name to its corresponding index, return None if any action is unknown
         index_sequence = []
         for action in sequence:
             action_idx = self.action_index.get(action)
             if action_idx is None:
-                return None  # Return None if the action is not found in the index
+                return {}  # Return None if the action is not found in the index
             index_sequence.append(action_idx)
 
-        return self.prediction_idx_sequence(index_sequence)
+        return self.idx_sequence_probs(index_sequence)
 
-    def prediction_idx_sequence(self, index_sequence: list[int]) -> Prediction | None:
+    def idx_sequence_probs(self, index_sequence: list[int]) -> Probs:
         """
         Predict the next action for a given sequence of action indices.
         """
@@ -712,23 +669,17 @@ class NeuralNetworkMiner(BaseStreamingMiner, ABC):
         # Apply softmax to get the probabilities
         probabilities = torch.softmax(logits, dim=-1)  # Shape [1, vocab_size]
 
-        # Get the top-k most likely actions and their probabilities
-        top_k_results = torch.topk(probabilities, self.top_k, dim=1)
-        top_k_indices = top_k_results.indices.squeeze(0).tolist()  # Shape [top_k]
-        top_k_probs = top_k_results.values.squeeze(0).tolist()  # Shape [top_k]
+        # Convert the tensor to a list of probabilities
+        probabilities = probabilities.squeeze(0).tolist()  # Shape [vocab_size]
 
-        # Convert the top-k indices back to action names
-        top_k_actions = [self.index_action.get(idx, None) for idx in top_k_indices]
-
-        # If the most likely action is not found, return None
-        if top_k_actions[0] is None:
-            return None
-
-        # Return a tuple with the most likely action, the top-k actions, and the probability of the top action
-        return top_k_actions[0], top_k_actions, top_k_probs[0]
+        return {
+            self.index_action[idx]: prob
+            for idx, prob in enumerate(probabilities)
+            if self.index_action.get(idx) is not None
+        }
 
     def next_state(self, *args, **kwargs):
         pass  # Or return None, depending on your base class interface
 
-    def prediction_state(self, *args, **kwargs):
-        pass
+    def state_probs(self, state: ComposedState | None) -> Probs:  # noqa: ARG002
+        return {}

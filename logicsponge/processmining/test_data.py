@@ -126,9 +126,9 @@ if DATA == "PDFA":
     pdfa.transitions[2]["a"] = 2
     pdfa.transitions[2]["b"] = 2
 
-    pdfa.set_probs(0, [0.0, 0.5, 0.5])
-    pdfa.set_probs(1, [0.1, 0.1, 0.8])
-    pdfa.set_probs(2, [0.1, 0.8, 0.1])
+    pdfa.set_probs(0, {STOP: 0.0, "a": 0.5, "b": 0.5})
+    pdfa.set_probs(1, {STOP: 0.1, "a": 0.1, "b": 0.8})
+    pdfa.set_probs(2, {STOP: 0.1, "a": 0.8, "b": 0.1})
 
     dataset = translate_format(pdfa.simulate(10000))
 

@@ -1,6 +1,7 @@
 import random
+from collections import OrderedDict
 
-from logicsponge.processmining.globals import ActionName, StateId
+from logicsponge.processmining.globals import STOP, ActionName, Probs, StateId
 
 
 class State:
@@ -16,8 +17,7 @@ class Automaton:
         self.transitions = {}
         self.initial_state = None
 
-        self.action_index = {}
-        self.index_action = {}
+        self.actions = OrderedDict()  # set of actions excluding STOP
 
     def set_initial_state(self, state_id: StateId) -> None:
         self.initial_state = state_id
@@ -33,7 +33,6 @@ class Automaton:
 
         self.state_info[state_id] = {}
         self.state_info[state_id]["object"] = new_state
-        self.state_info[state_id]["probs"] = [1.0] + [0.0 for _ in self.action_index]
 
         self.transitions[state_id] = {}
 
@@ -63,6 +62,8 @@ class DFA(Automaton):
         # In DFA, each symbol leads to exactly one state
         self.transitions[source][action] = target
 
+        self.actions[action] = 0
+
     def __str__(self) -> str:
         result = [f"DFA with {len(self.state_info)} states."]
         return "\n".join(result)
@@ -71,23 +72,13 @@ class DFA(Automaton):
 class PDFA(DFA):
     def add_actions(self, actions: list) -> None:
         for action in actions:
-            idx = len(self.action_index) + 1
-            self.action_index[action] = idx
-            self.index_action[idx] = action
+            self.actions[action] = 0
 
     def set_probs(self, state, probs):
-        # Check if the length of probs is equal to len(self.action_index) + 1
-        if len(probs) == len(self.action_index) + 1:
-            # Ensure state exists in state_info
-            if state not in self.state_info:
-                self.state_info[state] = {}
+        if state not in self.state_info:
+            self.state_info[state] = {}
 
-            # Set the probabilities for the state
-            self.state_info[state]["probs"] = probs
-        else:
-            # Raise an error or handle the case where the lengths don't match
-            msg = "Length of probs and action_index do not match."
-            raise ValueError(msg)
+        self.state_info[state]["probs"] = probs
 
     def simulate(self, n_runs: int) -> list[list[ActionName]]:
         dataset = []
@@ -97,24 +88,28 @@ class PDFA(DFA):
             sequence = []
 
             while True:
-                # Get the probabilities for the current state
-                probs = self.state_info[current_state]["probs"]
+                # Get the probabilities for the current state as a dictionary
+                probs: Probs = self.state_info[current_state]["probs"]
 
-                # Choose an action or stop based on the probabilities
-                action_choice = random.choices(range(len(probs)), weights=probs, k=1)[0]  # noqa: S311
-
-                # If the chosen action is 0, we stop (this is the stopping action)
-                if action_choice == 0:
+                # If there are no probabilities, stop the simulation
+                if not probs:
                     break
 
-                # Map the index back to the action using self.index_action
-                action: ActionName = self.index_action[action_choice]
+                # Extract actions and their corresponding probabilities, sorted for consistency
+                actions, probabilities = zip(*probs.items(), strict=True)
+
+                # Choose an action based on the probabilities
+                action_choice: ActionName = random.choices(actions, weights=probabilities, k=1)[0]  # noqa: S311
+
+                # If the chosen action is STOP, we stop (this is the stopping action)
+                if action_choice == STOP:
+                    break
 
                 # Append the action to the sequence
-                sequence.append(action)
+                sequence.append(action_choice)
 
                 # Transition to the next state based on the chosen action
-                current_state = self.transitions[current_state][action]
+                current_state = self.transitions[current_state][action_choice]
 
             # Add the generated sequence to the dataset
             dataset.append(sequence)

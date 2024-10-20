@@ -92,45 +92,45 @@ data_statistics(test_set_transformed)
 # Initialize process miners
 # ============================================================
 
-fpt_strategy = BasicMiner(algorithm=FrequencyPrefixTree())
+fpt = BasicMiner(algorithm=FrequencyPrefixTree())
 
-ngram_strategy_0 = BasicMiner(algorithm=NGram(window_length=0))
+ngram_0 = BasicMiner(algorithm=NGram(window_length=0))
 
-ngram_strategy_2 = BasicMiner(algorithm=NGram(window_length=2, recover_lengths=[2, 1, 0]))
+ngram_2 = BasicMiner(algorithm=NGram(window_length=2))
 
-ngram_strategy_3 = BasicMiner(algorithm=NGram(window_length=3, recover_lengths=[3, 2, 1, 0]))
+ngram_3 = BasicMiner(algorithm=NGram(window_length=3))
 
-ngram_strategy_4 = BasicMiner(algorithm=NGram(window_length=4, recover_lengths=[4, 3, 2, 1, 0]))
+ngram_4 = BasicMiner(algorithm=NGram(window_length=4))
 
-fallback_strategy = Fallback(
+fallback = Fallback(
     models=[
         BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
-        BasicMiner(algorithm=NGram(window_length=3, recover_lengths=[3, 2, 1, 0])),
+        BasicMiner(algorithm=NGram(window_length=3)),
     ]
 )
 
-hard_voting_strategy = HardVoting(
+hard_voting = HardVoting(
     models=[
         BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
-        BasicMiner(algorithm=NGram(window_length=2, recover_lengths=[2, 1, 0])),
-        BasicMiner(algorithm=NGram(window_length=3, recover_lengths=[3, 2, 1, 0])),
-        BasicMiner(algorithm=NGram(window_length=4, recover_lengths=[4, 3, 2, 1, 0])),
+        BasicMiner(algorithm=NGram(window_length=2)),
+        BasicMiner(algorithm=NGram(window_length=3)),
+        BasicMiner(algorithm=NGram(window_length=4)),
     ]
 )
 
-soft_voting_strategy = SoftVoting(
+soft_voting = SoftVoting(
     models=[
         BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
-        BasicMiner(algorithm=NGram(window_length=2, recover_lengths=[2, 1, 0])),
-        BasicMiner(algorithm=NGram(window_length=3, recover_lengths=[3, 2, 1, 0])),
-        BasicMiner(algorithm=NGram(window_length=4, recover_lengths=[4, 3, 2, 1, 0])),
+        BasicMiner(algorithm=NGram(window_length=2)),
+        BasicMiner(algorithm=NGram(window_length=3)),
+        BasicMiner(algorithm=NGram(window_length=4)),
     ]
 )
 
-relativize_strategy = Relativize(
+relativize = Relativize(
     models=[
         BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
-        BasicMiner(algorithm=NGram(window_length=3, recover_lengths=[3, 2, 1, 0])),
+        BasicMiner(algorithm=NGram(window_length=3)),
     ]
 )
 
@@ -142,30 +142,28 @@ relativize_strategy = Relativize(
 # ============================================================
 
 for case_id, action_name in train_set:
-    ngram_strategy_0.update(case_id, action_name)
-    ngram_strategy_2.update(case_id, action_name)
-    ngram_strategy_3.update(case_id, action_name)
-    # ngram_strategy_4.update(case_id, action_name)
-    fallback_strategy.update(case_id, action_name)
-    hard_voting_strategy.update(case_id, action_name)
-    soft_voting_strategy.update(case_id, action_name)
-    fpt_strategy.update(case_id, action_name)
-    relativize_strategy.update(case_id, action_name)
+    fpt.update(case_id, action_name)
+    ngram_0.update(case_id, action_name)
+    ngram_2.update(case_id, action_name)
+    ngram_3.update(case_id, action_name)
+    fallback.update(case_id, action_name)
+    hard_voting.update(case_id, action_name)
+    soft_voting.update(case_id, action_name)
+    relativize.update(case_id, action_name)
 
-smm = run_Alergia(alergia_train_set_transformed, automaton_type="smm", eps=0.5, print_info=True)
-smm_strategy = Alergia(algorithm=smm)
+algorithm = run_Alergia(alergia_train_set_transformed, automaton_type="smm", eps=0.5, print_info=True)
+smm = Alergia(algorithm=algorithm)
 
 strategies = {
-    "ngram_0": (ngram_strategy_0, test_set_transformed),
-    "ngram_2": (ngram_strategy_2, test_set_transformed),
-    "ngram_3": (ngram_strategy_3, test_set_transformed),
-    # "ngram_4": (ngram_strategy_4, test_set_transformed),
-    "fallback fpt->ngram_3": (fallback_strategy, test_set_transformed),
-    "hard voting": (hard_voting_strategy, test_set_transformed),
-    "soft voting": (soft_voting_strategy, test_set_transformed),
-    "alergia": (smm_strategy, test_set_transformed),
-    "fpt": (fpt_strategy, test_set_transformed),
-    "relativize fpt->ngram": (relativize_strategy, test_set_transformed),
+    "fpt": (fpt, test_set_transformed),
+    "ngram_0": (ngram_0, test_set_transformed),
+    "ngram_2": (ngram_2, test_set_transformed),
+    "ngram_3": (ngram_3, test_set_transformed),
+    "fallback fpt->ngram_3": (fallback, test_set_transformed),
+    "hard voting": (hard_voting, test_set_transformed),
+    "soft voting": (soft_voting, test_set_transformed),
+    "relativize fpt->ngram": (relativize, test_set_transformed),
+    "alergia": (smm, test_set_transformed),
 }
 
 
