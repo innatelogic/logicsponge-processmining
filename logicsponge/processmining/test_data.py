@@ -10,8 +10,8 @@ FOLDERNAME = "data"
 file_handler = FileHandler(folder=FOLDERNAME)
 
 
-DATA = "file"
-# DATA = "synthetic"
+# DATA = "file"
+DATA = "synthetic"
 # DATA = "PDFA"
 
 
@@ -75,7 +75,7 @@ if DATA == "synthetic":
 
     # Open the file and process it line by line
     with open(
-        "/Users/bollig/innatelogic/git/circuits/innatelogic/circuits/process_mining/data/1.pautomac.train"
+        "/Users/bollig/innatelogic/git/circuits/innatelogic/circuits/process_mining/data/13.pautomac.train"
     ) as file:
         # Skip the first line (a header)
         next(file)

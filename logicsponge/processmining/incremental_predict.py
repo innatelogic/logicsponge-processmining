@@ -141,9 +141,6 @@ class Evaluation(ls.FunctionTerm):
             else 0
         )
 
-        with open("/Users/bollig/Desktop/iout2.txt", "a") as file:
-            file.write(f"{item["prediction"][0]} {item["prediction"][2]} \n")
-
         return DataItem(
             {
                 "prediction": item["prediction"],
@@ -159,10 +156,8 @@ class Evaluation(ls.FunctionTerm):
 # Initialize process miners
 # ====================================================
 
-INCLUDE_STOP = False
-
 config = {
-    "include_stop": INCLUDE_STOP,
+    "include_stop": True,
 }
 
 fpt = StreamingActionPredictor(
