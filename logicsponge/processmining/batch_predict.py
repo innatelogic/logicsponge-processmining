@@ -92,21 +92,28 @@ data_statistics(test_set_transformed)
 # Initialize process miners
 # ============================================================
 
-fpt = BasicMiner(algorithm=FrequencyPrefixTree())
+INCLUDE_STOP = True
 
-ngram_0 = BasicMiner(algorithm=NGram(window_length=0))
+config = {
+    "include_stop": INCLUDE_STOP,
+}
 
-ngram_2 = BasicMiner(algorithm=NGram(window_length=2))
+fpt = BasicMiner(algorithm=FrequencyPrefixTree(), config=config)
 
-ngram_3 = BasicMiner(algorithm=NGram(window_length=3))
+ngram_0 = BasicMiner(algorithm=NGram(window_length=0), config=config)
 
-ngram_4 = BasicMiner(algorithm=NGram(window_length=4))
+ngram_2 = BasicMiner(algorithm=NGram(window_length=2), config=config)
+
+ngram_3 = BasicMiner(algorithm=NGram(window_length=3), config=config)
+
+ngram_4 = BasicMiner(algorithm=NGram(window_length=4), config=config)
 
 fallback = Fallback(
     models=[
         BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
         BasicMiner(algorithm=NGram(window_length=3)),
-    ]
+    ],
+    config=config,
 )
 
 hard_voting = HardVoting(
@@ -115,7 +122,8 @@ hard_voting = HardVoting(
         BasicMiner(algorithm=NGram(window_length=2)),
         BasicMiner(algorithm=NGram(window_length=3)),
         BasicMiner(algorithm=NGram(window_length=4)),
-    ]
+    ],
+    config=config,
 )
 
 soft_voting = SoftVoting(
@@ -124,14 +132,16 @@ soft_voting = SoftVoting(
         BasicMiner(algorithm=NGram(window_length=2)),
         BasicMiner(algorithm=NGram(window_length=3)),
         BasicMiner(algorithm=NGram(window_length=4)),
-    ]
+    ],
+    config=config,
 )
 
 relativize = Relativize(
     models=[
         BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
         BasicMiner(algorithm=NGram(window_length=3)),
-    ]
+    ],
+    config=config,
 )
 
 # Alergia is initialized and trained below in one go.
@@ -146,6 +156,7 @@ for case_id, action_name in train_set:
     ngram_0.update(case_id, action_name)
     ngram_2.update(case_id, action_name)
     ngram_3.update(case_id, action_name)
+    ngram_4.update(case_id, action_name)
     fallback.update(case_id, action_name)
     hard_voting.update(case_id, action_name)
     soft_voting.update(case_id, action_name)
@@ -159,6 +170,7 @@ strategies = {
     "ngram_0": (ngram_0, test_set_transformed),
     "ngram_2": (ngram_2, test_set_transformed),
     "ngram_3": (ngram_3, test_set_transformed),
+    "ngram_4": (ngram_4, test_set_transformed),
     "fallback fpt->ngram_3": (fallback, test_set_transformed),
     "hard voting": (hard_voting, test_set_transformed),
     "soft voting": (soft_voting, test_set_transformed),

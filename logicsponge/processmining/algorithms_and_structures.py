@@ -183,7 +183,7 @@ class FrequencyPrefixTree(BaseStructure):
         """
         Updates DFA tree structure of the process miner object by adding a new action to case
         """
-        self.actions[action] = 0
+        self.add_action(action)
 
         if case_id not in self.case_info:
             self.case_info[case_id] = {}
@@ -267,7 +267,7 @@ class NGram(BaseStructure):
         """
         Updates DFA tree structure of the process miner object by adding a new action to case
         """
-        self.actions[action] = 0
+        self.add_action(action)
 
         if case_id not in self.case_info:
             self.case_info[case_id] = {}

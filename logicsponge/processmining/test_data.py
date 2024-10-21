@@ -75,7 +75,7 @@ if DATA == "synthetic":
 
     # Open the file and process it line by line
     with open(
-        "/Users/bollig/innatelogic/git/circuits/innatelogic/circuits/process_mining/data/22.pautomac.train"
+        "/Users/bollig/innatelogic/git/circuits/innatelogic/circuits/process_mining/data/1.pautomac.train"
     ) as file:
         # Skip the first line (a header)
         next(file)
@@ -130,7 +130,7 @@ if DATA == "PDFA":
     pdfa.set_probs(1, {STOP: 0.1, "a": 0.1, "b": 0.8})
     pdfa.set_probs(2, {STOP: 0.1, "a": 0.8, "b": 0.1})
 
-    dataset = translate_format(pdfa.simulate(10000))
+    dataset = translate_format(pdfa.simulate(1000))
 
 
 # pdfa.create_states(2)

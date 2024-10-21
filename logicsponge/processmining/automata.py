@@ -19,6 +19,14 @@ class Automaton:
 
         self.actions = OrderedDict()  # set of actions excluding STOP
 
+    def add_action(self, action: ActionName) -> None:
+        if action != STOP:
+            self.actions[action] = True
+
+    def add_actions(self, actions: list[ActionName]) -> None:
+        for action in actions:
+            self.add_action(action)
+
     def set_initial_state(self, state_id: StateId) -> None:
         self.initial_state = state_id
 
@@ -62,7 +70,7 @@ class DFA(Automaton):
         # In DFA, each symbol leads to exactly one state
         self.transitions[source][action] = target
 
-        self.actions[action] = 0
+        self.add_action(action)
 
     def __str__(self) -> str:
         result = [f"DFA with {len(self.state_info)} states."]
@@ -70,10 +78,6 @@ class DFA(Automaton):
 
 
 class PDFA(DFA):
-    def add_actions(self, actions: list) -> None:
-        for action in actions:
-            self.actions[action] = 0
-
     def set_probs(self, state, probs):
         if state not in self.state_info:
             self.state_info[state] = {}

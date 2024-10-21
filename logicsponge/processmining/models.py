@@ -1,3 +1,4 @@
+import copy
 import logging
 import random
 from abc import ABC, abstractmethod
@@ -11,6 +12,7 @@ from torch.nn.utils.rnn import pad_sequence
 
 from logicsponge.processmining.data_utils import add_input_symbols_sequence
 from logicsponge.processmining.globals import (
+    CONFIG,
     STATS,
     STOP,
     ActionName,
@@ -42,7 +44,15 @@ class StreamingMiner(ABC):
     The Base Streaming Miner (for both streaming and batch mode)
     """
 
-    def __init__(self) -> None:
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
+        # Use CONFIG as a fallback if no specific config is provided
+        self.config = copy.deepcopy(CONFIG)
+
+        # If a specific configuration is provided, update the default copy with its values
+        if config is not None:
+            self.config.update(config)
+
+        # Set the initial state (or other initialization tasks)
         self.initial_state: ComposedState | None = None
 
     @staticmethod
@@ -89,12 +99,11 @@ class StreamingMiner(ABC):
                 if mode == "incremental":
                     # Prediction for incremental mode (step by step)
                     probs = self.state_probs(current_state)
-                    prediction = probs_prediction(probs)
-
+                    prediction = probs_prediction(probs, self.config)
                 else:
                     # Prediction for sequence mode (whole sequence)
                     probs = self.sequence_probs(sequence[:i])
-                    prediction = probs_prediction(probs)
+                    prediction = probs_prediction(probs, self.config)
 
                 # Update statistics based on the prediction
                 self.update_stats(actual_next_action, prediction, stats)
@@ -143,9 +152,8 @@ class StreamingMiner(ABC):
 
 
 class BasicMiner(StreamingMiner):
-    # model is usually BaseStructure (apart from Alergia)
-    def __init__(self, algorithm: Any) -> None:
-        super().__init__()
+    def __init__(self, *args, algorithm: Any, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
         self.algorithm = algorithm
 
         if self.algorithm is None:
@@ -207,8 +215,10 @@ class MultiMiner(StreamingMiner, ABC):
 
 
 class HardVoting(MultiMiner):
-    @staticmethod
-    def voting_prediction(probs_list: list[Probs]) -> Probs:
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+    def voting_prediction(self, probs_list: list[Probs]) -> Probs:
         """
         Perform hard voting based on the most frequent action in the predictions and return
         the winning action as a probability dictionary with a probability of 1.0.
@@ -217,7 +227,7 @@ class HardVoting(MultiMiner):
         # Collect valid predictions
         valid_predictions = []
         for probs in probs_list:
-            prediction = probs_prediction(probs)
+            prediction = probs_prediction(probs, self.config)
             if prediction is not None:
                 valid_predictions.append(prediction)
 
@@ -281,6 +291,9 @@ class HardVoting(MultiMiner):
 
 
 class SoftVoting(MultiMiner):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
     @staticmethod
     def voting_prediction(probs_list: list[Probs]) -> Probs:
         combined_probs = {}
@@ -340,9 +353,12 @@ class SoftVoting(MultiMiner):
 
 
 class Fallback(MultiMiner):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
     def state_probs(self, state: ComposedState | None) -> Probs:
         """
-        Return the first non-None probabilities from the models, cascading through the models in order.
+        Return the first non-{} probabilities from the models, cascading through the models in order.
         Each model gets its corresponding state from the ComposedState.
         """
         if state is None:
@@ -359,7 +375,7 @@ class Fallback(MultiMiner):
 
     def case_probs(self, case_id: CaseId) -> Probs:
         """
-        Return the first non-None probabilities from the models, cascading through the models in order.
+        Return the first non-{} probabilities from the models, cascading through the models in order.
         """
         for model in self.models:
             probs = model.case_probs(case_id)
@@ -371,7 +387,7 @@ class Fallback(MultiMiner):
 
     def sequence_probs(self, sequence: list[ActionName]) -> Probs:
         """
-        Return the first non-None probabilities from the models for the given sequence,
+        Return the first non-{} probabilities from the models for the given sequence,
         cascading through the models in order.
         """
         for model in self.models:
@@ -487,8 +503,8 @@ class Alergia(BasicMiner):
 
 
 class NeuralNetworkMiner(StreamingMiner):
-    def __init__(self, model: RNNModel | LSTMModel, batch_size: int, optimizer, criterion) -> None:
-        super().__init__()
+    def __init__(self, *args, model: RNNModel | LSTMModel, batch_size: int, optimizer, criterion, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
         self.model = model  # The neural network
         self.optimizer = optimizer
         self.criterion = criterion

@@ -18,8 +18,6 @@ from logicsponge.processmining.neural_networks import LSTMModel
 # from logicsponge.processmining.test_data import data
 from logicsponge.processmining.test_data import dataset
 
-INCLUDE_STOP = True
-
 # ============================================================
 # Function Terms
 # ============================================================
@@ -106,7 +104,7 @@ class StreamingActionPredictor(ls.FunctionTerm):
             self.case_ids.add(case_id)
         else:
             probs = self.strategy.case_probs(item["case_id"])
-            prediction = probs_prediction(probs)
+            prediction = probs_prediction(probs, self.strategy.config)
             self.strategy.update(item["case_id"], item["action"])
             out = DataItem(
                 {
@@ -143,6 +141,9 @@ class Evaluation(ls.FunctionTerm):
             else 0
         )
 
+        with open("/Users/bollig/Desktop/iout2.txt", "a") as file:
+            file.write(f"{item["prediction"][0]} {item["prediction"][2]} \n")
+
         return DataItem(
             {
                 "prediction": item["prediction"],
@@ -158,16 +159,22 @@ class Evaluation(ls.FunctionTerm):
 # Initialize process miners
 # ====================================================
 
+INCLUDE_STOP = False
+
+config = {
+    "include_stop": INCLUDE_STOP,
+}
+
 fpt = StreamingActionPredictor(
-    strategy=BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=2)),
+    strategy=BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=2), config=config),
 )
 
 ngram_2 = StreamingActionPredictor(
-    strategy=BasicMiner(algorithm=NGram(window_length=2)),
+    strategy=BasicMiner(algorithm=NGram(window_length=2), config=config),
 )
 
 ngram_4 = StreamingActionPredictor(
-    strategy=BasicMiner(algorithm=NGram(window_length=4)),
+    strategy=BasicMiner(algorithm=NGram(window_length=4), config=config),
 )
 
 fallback = StreamingActionPredictor(
@@ -175,7 +182,8 @@ fallback = StreamingActionPredictor(
         models=[
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
             BasicMiner(algorithm=NGram(window_length=3)),
-        ]
+        ],
+        config=config,
     )
 )
 
@@ -186,7 +194,8 @@ hard_voting = StreamingActionPredictor(
             BasicMiner(algorithm=NGram(window_length=2)),
             BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
-        ]
+        ],
+        config=config,
     )
 )
 
@@ -197,7 +206,8 @@ soft_voting = StreamingActionPredictor(
             BasicMiner(algorithm=NGram(window_length=2)),
             BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
-        ]
+        ],
+        config=config,
     )
 )
 
@@ -216,6 +226,7 @@ lstm = StreamingActionPredictor(
         criterion=criterion,
         optimizer=optimizer,
         batch_size=8,
+        config=config,
     )
 )
 
