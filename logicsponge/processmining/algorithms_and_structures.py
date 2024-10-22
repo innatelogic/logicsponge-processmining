@@ -38,6 +38,12 @@ class BaseStructure(PDFA, ABC):
 
         self.initial_state = 0
 
+    def initialize_case(self, case_id: CaseId):
+        self.case_info[case_id] = {}
+        self.case_info[case_id]["state"] = self.initial_state
+        self.state_info[self.initial_state]["total_visits"] += 1
+        self.state_info[self.initial_state]["active_visits"] += 1
+
     def get_visit_statistics(self) -> tuple[int, float]:
         """
         Returns the maximum total visits and the average total visits over all states.
@@ -186,10 +192,7 @@ class FrequencyPrefixTree(BaseStructure):
         self.add_action(action)
 
         if case_id not in self.case_info:
-            self.case_info[case_id] = {}
-            self.case_info[case_id]["state"] = self.initial_state
-            self.state_info[self.initial_state]["total_visits"] += 1
-            self.state_info[self.initial_state]["active_visits"] += 1
+            self.initialize_case(case_id)
 
         current_state = self.case_info[case_id]["state"]
 
@@ -270,11 +273,8 @@ class NGram(BaseStructure):
         self.add_action(action)
 
         if case_id not in self.case_info:
-            self.case_info[case_id] = {}
-            self.case_info[case_id]["state"] = self.initial_state
+            self.initialize_case(case_id)
             self.case_info[case_id]["suffix"] = deque(maxlen=self.window_length)
-            self.state_info[self.initial_state]["total_visits"] += 1
-            self.state_info[self.initial_state]["active_visits"] += 1
 
         self.case_info[case_id]["suffix"].append(action)
         current_state = self.case_info[case_id]["state"]
@@ -332,3 +332,57 @@ class NGram(BaseStructure):
                 return next_state
 
         return None
+
+
+# ============================================================
+# Bag Miner
+# ============================================================
+
+
+class Bag(BaseStructure):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        initial_set: frozenset = frozenset()
+        self.state_info[self.initial_state]["action_set"] = frozenset()
+        self.action_sets: dict[frozenset, StateId] = {initial_set: self.initial_state}
+
+    def update(self, case_id: CaseId, action: ActionName) -> None:
+        """
+        Updates DFA tree structure of the process miner object by adding a new action to case
+        """
+        self.add_action(action)
+
+        if case_id not in self.case_info:
+            self.initialize_case(case_id)
+
+        current_state = self.case_info[case_id]["state"]
+
+        if current_state not in self.transitions:
+            self.transitions[current_state] = {}
+
+        if action in self.transitions[current_state]:
+            next_state = self.transitions[current_state][action]
+        else:
+            self.state_info[current_state]["action_frequency"][action] = 0
+
+            current_set = self.state_info[current_state]["action_set"]
+            next_set = current_set.union({action})
+            if next_set in self.action_sets:
+                next_state = self.action_sets[next_set]
+            else:
+                next_state = self.create_state().state_id
+                self.state_info[next_state]["action_set"] = next_set
+                self.action_sets[next_set] = next_state
+
+            self.transitions[current_state][action] = next_state
+
+        self.case_info[case_id]["state"] = next_state
+        self.state_info[next_state]["total_visits"] += 1
+        self.state_info[current_state]["action_frequency"][action] += 1
+        self.state_info[current_state]["active_visits"] -= 1
+        self.state_info[next_state]["active_visits"] += 1
+
+        self.update_state_probs(current_state)
+        self.update_state_probs(next_state)
+
+        self.last_transition = (current_state, action, next_state)

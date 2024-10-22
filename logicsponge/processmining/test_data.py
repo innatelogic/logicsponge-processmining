@@ -10,8 +10,8 @@ FOLDERNAME = "data"
 file_handler = FileHandler(folder=FOLDERNAME)
 
 
-# DATA = "file"
-DATA = "synthetic"
+DATA = "file"
+# DATA = "synthetic"
 # DATA = "PDFA"
 
 

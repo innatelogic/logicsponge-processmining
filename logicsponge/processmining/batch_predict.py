@@ -7,7 +7,7 @@ import pandas as pd
 from aalpy.learning_algs import run_Alergia
 from torch import nn, optim
 
-from logicsponge.processmining.algorithms_and_structures import FrequencyPrefixTree, NGram
+from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
 from logicsponge.processmining.data_utils import (
     add_input_symbols,
     add_start_to_sequences,
@@ -100,6 +100,8 @@ config = {
 
 fpt = BasicMiner(algorithm=FrequencyPrefixTree(), config=config)
 
+bag = BasicMiner(algorithm=Bag(), config=config)
+
 ngram_0 = BasicMiner(algorithm=NGram(window_length=0), config=config)
 
 ngram_2 = BasicMiner(algorithm=NGram(window_length=2), config=config)
@@ -118,6 +120,7 @@ fallback = Fallback(
 
 hard_voting = HardVoting(
     models=[
+        # BasicMiner(algorithm=Bag()),
         BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
         BasicMiner(algorithm=NGram(window_length=2)),
         BasicMiner(algorithm=NGram(window_length=3)),
@@ -128,6 +131,7 @@ hard_voting = HardVoting(
 
 soft_voting = SoftVoting(
     models=[
+        # BasicMiner(algorithm=Bag()),
         BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
         BasicMiner(algorithm=NGram(window_length=2)),
         BasicMiner(algorithm=NGram(window_length=3)),
@@ -153,6 +157,7 @@ relativize = Relativize(
 
 for case_id, action_name in train_set:
     fpt.update(case_id, action_name)
+    bag.update(case_id, action_name)
     ngram_0.update(case_id, action_name)
     ngram_2.update(case_id, action_name)
     ngram_3.update(case_id, action_name)
@@ -167,6 +172,7 @@ smm = Alergia(algorithm=algorithm)
 
 strategies = {
     "fpt": (fpt, test_set_transformed),
+    "bag": (bag, test_set_transformed),
     "ngram_0": (ngram_0, test_set_transformed),
     "ngram_2": (ngram_2, test_set_transformed),
     "ngram_3": (ngram_3, test_set_transformed),

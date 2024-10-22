@@ -62,22 +62,7 @@ class Automaton:
         raise NotImplementedError
 
 
-class DFA(Automaton):
-    def add_transition(self, source: StateId, action: ActionName, target: StateId) -> None:
-        if source not in self.transitions:
-            self.transitions[source] = {}
-
-        # In DFA, each symbol leads to exactly one state
-        self.transitions[source][action] = target
-
-        self.add_action(action)
-
-    def __str__(self) -> str:
-        result = [f"DFA with {len(self.state_info)} states."]
-        return "\n".join(result)
-
-
-class PDFA(DFA):
+class PDFA(Automaton):
     def set_probs(self, state, probs):
         if state not in self.state_info:
             self.state_info[state] = {}
