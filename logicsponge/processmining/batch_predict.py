@@ -92,10 +92,9 @@ data_statistics(test_set_transformed)
 # Initialize process miners
 # ============================================================
 
-INCLUDE_STOP = True
 
 config = {
-    "include_stop": INCLUDE_STOP,
+    "include_stop": True,
 }
 
 fpt = BasicMiner(algorithm=FrequencyPrefixTree(), config=config)
@@ -178,9 +177,9 @@ strategies = {
     "ngram_3": (ngram_3, test_set_transformed),
     "ngram_4": (ngram_4, test_set_transformed),
     "fallback fpt->ngram_3": (fallback, test_set_transformed),
+    "relativize fpt->ngram_3": (relativize, test_set_transformed),
     "hard voting": (hard_voting, test_set_transformed),
     "soft voting": (soft_voting, test_set_transformed),
-    "relativize fpt->ngram": (relativize, test_set_transformed),
     "alergia": (smm, test_set_transformed),
 }
 

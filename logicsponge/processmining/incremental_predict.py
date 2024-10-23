@@ -1,11 +1,15 @@
+import logging
+import time
+
 from torch import nn, optim
 
 import logicsponge.core as ls
 from logicsponge.core import DataItem, dashboard
-from logicsponge.processmining.algorithms_and_structures import FrequencyPrefixTree, NGram
+from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
 from logicsponge.processmining.data_utils import handle_keys
 from logicsponge.processmining.globals import probs_prediction
 from logicsponge.processmining.models import (
+    AdaptiveVoting,
     BasicMiner,
     Fallback,
     HardVoting,
@@ -17,6 +21,8 @@ from logicsponge.processmining.neural_networks import LSTMModel
 
 # from logicsponge.processmining.test_data import data
 from logicsponge.processmining.test_data import dataset
+
+logger = logging.getLogger(__name__)
 
 # ============================================================
 # Function Terms
@@ -37,6 +43,9 @@ class ListStreamer(ls.SourceTerm):
             out = DataItem({"case_id": case_id, "action": action})
             self.output(out)
             # time.sleep(0.001)
+
+        logging.info("Finished streaming.")
+        time.sleep(600)
 
 
 class AddStartSymbol(ls.FunctionTerm):
@@ -157,11 +166,15 @@ class Evaluation(ls.FunctionTerm):
 # ====================================================
 
 config = {
-    "include_stop": True,
+    "include_stop": False,
 }
 
 fpt = StreamingActionPredictor(
     strategy=BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=2), config=config),
+)
+
+bag = StreamingActionPredictor(
+    strategy=BasicMiner(algorithm=Bag(), config=config),
 )
 
 ngram_2 = StreamingActionPredictor(
@@ -207,6 +220,19 @@ soft_voting = StreamingActionPredictor(
 )
 
 
+adaptive_voting = StreamingActionPredictor(
+    strategy=AdaptiveVoting(
+        models=[
+            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
+            BasicMiner(algorithm=NGram(window_length=2)),
+            BasicMiner(algorithm=NGram(window_length=3)),
+            BasicMiner(algorithm=NGram(window_length=4)),
+        ],
+        config=config,
+    )
+)
+
+
 vocab_size = 50  # Assume an upper bound on the number of activities, or adjust dynamically
 embedding_dim = 50
 hidden_dim = 128
@@ -232,12 +258,14 @@ lstm = StreamingActionPredictor(
 
 acc_list = [
     "fpt.accuracy",
+    "bag.accuracy",
     "ngram_2.accuracy",
     "ngram_4.accuracy",
     "fallback.accuracy",
     "hard_voting.accuracy",
     "soft_voting.accuracy",
-    "lstm.accuracy",
+    "adaptive_voting.accuracy",
+    # "lstm.accuracy",
 ]
 
 # streamer = file.CSVStreamer(file_path=data["file_path"], delay=0, poll_delay=2)
@@ -253,12 +281,14 @@ sponge = (
     # * ls.Print()
     * (
         (fpt * Evaluation("fpt"))
+        | (bag * Evaluation("bag"))
         | (ngram_2 * Evaluation("ngram_2"))
         | (ngram_4 * Evaluation("ngram_4"))
         | (fallback * Evaluation("fallback"))
         | (hard_voting * Evaluation("hard_voting"))
         | (soft_voting * Evaluation("soft_voting"))
-        | (lstm * Evaluation("lstm"))
+        | (adaptive_voting * Evaluation("adaptive_voting"))
+        # | (lstm * Evaluation("lstm"))
     )
     * ls.ToSingleStream(flatten=True)
     * ls.KeyFilter(keys=acc_list)

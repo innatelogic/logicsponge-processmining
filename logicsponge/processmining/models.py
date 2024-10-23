@@ -347,6 +347,81 @@ class SoftVoting(MultiMiner):
         return self.voting_prediction(probs_list)
 
 
+class AdaptiveVoting(MultiMiner):
+    """
+    To be used only in streaming mode.
+    In batch mode, it will stick to the model with the highest training accuracy.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # Initialize prediction tracking for each model
+        self.total_predictions = 0
+        self.correct_predictions = [0] * len(self.models)
+
+    def update(self, case_id: CaseId, action: ActionName) -> None:
+        """
+        Overwritten to account for keeping track of accuracies.
+        """
+        self.total_predictions += 1
+
+        for i, model in enumerate(self.models):
+            prediction = probs_prediction(model.case_probs(case_id), config=self.config)
+            if prediction is not None and prediction[0] == action:
+                self.correct_predictions[i] += 1
+
+            model.update(case_id, action)
+
+    def get_accuracies(self) -> list[float]:
+        """
+        Returns the accuracy of each model as a list of floats.
+        """
+        total = self.total_predictions
+        return [correct / total if total > 0 else 0.0 for correct in self.correct_predictions]
+
+    def select_best_model(self) -> int:
+        """
+        Returns the index of the model with the highest accuracy.
+        """
+        accuracies = self.get_accuracies()
+        return accuracies.index(max(accuracies))
+
+    def state_probs(self, state: ComposedState | None) -> Probs:
+        """
+        Return the probability distribution from the model with the best accuracy so far.
+        """
+        if state is None:
+            return {}
+
+        # Get the best model
+        best_model_index = self.select_best_model()
+        best_model = self.models[best_model_index]
+
+        best_model_state = state[best_model_index]
+
+        return best_model.state_probs(best_model_state)
+
+    def case_probs(self, case_id: CaseId) -> Probs:
+        """
+        Return the probability distribution from the model with the best accuracy so far.
+        """
+        # Get the best model
+        best_model_index = self.select_best_model()
+        best_model = self.models[best_model_index]
+
+        return best_model.case_probs(case_id)
+
+    def sequence_probs(self, sequence: list[ActionName]) -> Probs:
+        """
+        Return the probability distribution from the model with the best accuracy so far.
+        """
+        # Get the best model
+        best_model_index = self.select_best_model()
+        best_model = self.models[best_model_index]
+
+        return best_model.sequence_probs(sequence)
+
+
 # ============================================================
 # Other Models Derived from Multi Streaming Miner
 # ============================================================
