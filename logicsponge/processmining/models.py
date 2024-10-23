@@ -3,7 +3,6 @@ import logging
 import random
 from abc import ABC, abstractmethod
 from collections import Counter, OrderedDict
-from math import log
 from typing import Any
 
 import matplotlib as mpl
@@ -115,7 +114,6 @@ class StreamingMiner(ABC):
                 # Move to the next state
                 if i < len(sequence) - 1:
                     current_state = self.next_state(current_state, actual_next_action)
-
 
     @abstractmethod
     def update(self, case_id: CaseId, action: ActionName) -> None:
