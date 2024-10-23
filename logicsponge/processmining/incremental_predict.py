@@ -134,12 +134,12 @@ class Evaluation(ls.FunctionTerm):
         self.top_actions = top_actions
 
     def f(self, item: DataItem) -> DataItem:
-        if item["prediction"] is None:
+        if not item["prediction"]:
             self.missing_predictions += 1
         elif self.top_actions:
-            if item["action"] in item["prediction"][1]:
+            if item["action"] in item["prediction"]["top_k_actions"]:
                 self.correct_predictions += 1
-        elif item["action"] == item["prediction"][0]:
+        elif item["action"] == item["prediction"]["action"]:
             self.correct_predictions += 1
 
         self.total_predictions += 1

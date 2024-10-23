@@ -55,15 +55,25 @@ class StreamingMiner(ABC):
         # Set the initial state (or other initialization tasks)
         self.initial_state: ComposedState | None = None
 
+        # Statistics for batch mode
+        self.statistics = {
+            "total_predictions": 0,
+            "correct_predictions": 0,
+            "unparseable": 0,
+            "logarithmic_loss": 0.0,
+        }
+
     @staticmethod
-    def update_stats(actual_next_action: ActionName, prediction: Prediction | None, stats: dict[str, int]) -> None:
+    def update_stats(actual_next_action: ActionName, prediction: Prediction, stats: dict[str, int]) -> None:
         """
         Updates the statistics based on the actual action, the prediction, and the top-k predictions.
         """
-        if prediction is None:
+        if not prediction:
             stats["unparseable_count"] += 1
         else:
-            predicted_action, top_k_actions, predicted_prob = prediction
+            predicted_action = prediction["action"]
+            top_k_actions = prediction["top_k_actions"]
+            predicted_prob = prediction["probability"]
 
             # Loop through each metric and call its update function
             for stat in STATS.values():
@@ -79,6 +89,7 @@ class StreamingMiner(ABC):
 
     def evaluate(self, data: list[list[ActionName]], mode: str = "incremental") -> dict[str, int]:
         """
+        Evaluation in batch mode.
         Evaluates the dataset either incrementally or by full sequence.
         Modes: 'incremental' or 'sequence'.
         """
@@ -218,7 +229,7 @@ class HardVoting(MultiMiner):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
-    def voting_prediction(self, probs_list: list[Probs]) -> Probs:
+    def voting_probs(self, probs_list: list[Probs]) -> Probs:
         """
         Perform hard voting based on the most frequent action in the predictions and return
         the winning action as a probability dictionary with a probability of 1.0.
@@ -228,14 +239,14 @@ class HardVoting(MultiMiner):
         valid_predictions = []
         for probs in probs_list:
             prediction = probs_prediction(probs, self.config)
-            if prediction is not None:
+            if prediction:
                 valid_predictions.append(prediction)
 
         if not valid_predictions:
             return {}
 
         # Extract only the action part of each valid prediction for voting
-        action_predictions = [pred[0] for pred in valid_predictions]
+        action_predictions = [pred["action"] for pred in valid_predictions]
 
         # Count the frequency of each action in the valid predictions
         action_counter = Counter(action_predictions)
@@ -255,12 +266,12 @@ class HardVoting(MultiMiner):
         else:
             # In case of a tie, choose based on the first occurrence among the models' input
             for pred in valid_predictions:
-                if pred[0] in most_voted_actions:
-                    selected_action = pred[0]
+                if pred["action"] in most_voted_actions:
+                    selected_action = pred["action"]
                     break
 
         # Create a result dictionary with only the selected action
-        return {selected_action: 1.0}
+        return {STOP: 0.0, selected_action: 1.0}  # include STOP as an invariant
 
     def state_probs(self, state: ComposedState | None) -> Probs:
         """
@@ -271,7 +282,7 @@ class HardVoting(MultiMiner):
 
         probs_list = [model.state_probs(model_state) for model, model_state in zip(self.models, state, strict=True)]
 
-        return self.voting_prediction(probs_list)
+        return self.voting_probs(probs_list)
 
     def case_probs(self, case_id: CaseId) -> Probs:
         """
@@ -279,7 +290,7 @@ class HardVoting(MultiMiner):
         """
         probs_list = [model.case_probs(case_id) for model in self.models]
 
-        return self.voting_prediction(probs_list)
+        return self.voting_probs(probs_list)
 
     def sequence_probs(self, sequence: list[ActionName]) -> Probs:
         """
@@ -287,7 +298,7 @@ class HardVoting(MultiMiner):
         """
         probs_list = [model.sequence_probs(sequence) for model in self.models]
 
-        return self.voting_prediction(probs_list)
+        return self.voting_probs(probs_list)
 
 
 class SoftVoting(MultiMiner):
@@ -295,7 +306,7 @@ class SoftVoting(MultiMiner):
         super().__init__(*args, **kwargs)
 
     @staticmethod
-    def voting_prediction(probs_list: list[Probs]) -> Probs:
+    def voting_probs(probs_list: list[Probs]) -> Probs:
         combined_probs = {}
 
         # Iterate over all probability dictionaries and accumulate the probabilities for each action
@@ -328,7 +339,7 @@ class SoftVoting(MultiMiner):
 
         probs_list = [model.state_probs(model_state) for model, model_state in zip(self.models, state, strict=True)]
 
-        return self.voting_prediction(probs_list)
+        return self.voting_probs(probs_list)
 
     def case_probs(self, case_id: CaseId) -> Probs:
         """
@@ -336,7 +347,7 @@ class SoftVoting(MultiMiner):
         """
         probs_list = [model.case_probs(case_id) for model in self.models]
 
-        return self.voting_prediction(probs_list)
+        return self.voting_probs(probs_list)
 
     def sequence_probs(self, sequence: list[ActionName]) -> Probs:
         """
@@ -344,7 +355,7 @@ class SoftVoting(MultiMiner):
         """
         probs_list = [model.sequence_probs(sequence) for model in self.models]
 
-        return self.voting_prediction(probs_list)
+        return self.voting_probs(probs_list)
 
 
 class AdaptiveVoting(MultiMiner):
@@ -367,7 +378,7 @@ class AdaptiveVoting(MultiMiner):
 
         for i, model in enumerate(self.models):
             prediction = probs_prediction(model.case_probs(case_id), config=self.config)
-            if prediction is not None and prediction[0] == action:
+            if prediction and prediction["action"] == action:
                 self.correct_predictions[i] += 1
 
             model.update(case_id, action)
@@ -508,7 +519,7 @@ class Relativize(MultiMiner):
     def sequence_probs(self, sequence: list[ActionName]) -> Probs:
         probs = self.model1.sequence_probs(sequence)
 
-        if probs is not None:
+        if probs:
             probs = self.model2.sequence_probs(sequence)
 
         return probs

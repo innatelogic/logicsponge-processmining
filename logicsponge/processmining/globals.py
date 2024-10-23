@@ -16,7 +16,8 @@ ComposedState = Any
 
 ActionName = str | int | tuple[str | int, ...]
 
-Prediction = tuple[ActionName, list[ActionName], float]
+# Prediction = tuple[ActionName, list[ActionName], float]
+Prediction = dict[str, Any]
 
 Probs = dict[ActionName, float]
 
@@ -43,7 +44,7 @@ CONFIG = {
 # ==========================================================
 
 
-def probs_prediction(probs: Probs, config: dict[str, Any] | None = None) -> tuple | None:
+def probs_prediction(probs: Probs, config: dict[str, Any] | None = None) -> Prediction:
     """
     Returns the top-k actions based on their probabilities.
     If STOP has a probability of 1.0 and there are no other actions, return None.
@@ -57,7 +58,7 @@ def probs_prediction(probs: Probs, config: dict[str, Any] | None = None) -> tupl
 
     # If there are no probabilities, return None
     if not probs:
-        return None
+        return {}
 
     # Create a copy of probs to avoid modifying the original dictionary
     probs_copy = probs.copy()
@@ -68,7 +69,7 @@ def probs_prediction(probs: Probs, config: dict[str, Any] | None = None) -> tupl
 
         # If STOP has a probability of 1 and there are no other actions available, return None
         if stop_probability == 1.0 and len(probs_copy) == 1:
-            return None
+            return {}
 
         # If STOP has a probability of 1 but there are other actions, give a uniform distribution to the other actions
         if stop_probability == 1.0 and len(probs_copy) > 1:
@@ -100,7 +101,7 @@ def probs_prediction(probs: Probs, config: dict[str, Any] | None = None) -> tupl
 
     # If there are no probabilities after filtering, return None
     if not probs_copy:
-        return None
+        return {}
 
     # Convert dictionary to a list of items (actions and probabilities)
     actions, probabilities = zip(*probs_copy.items(), strict=True)
@@ -127,7 +128,7 @@ def probs_prediction(probs: Probs, config: dict[str, Any] | None = None) -> tupl
     highest_probability = float(probabilities_array[actions.index(predicted_action)])
 
     # Return the predicted action, top-k actions, and the probability of the predicted action
-    return predicted_action, top_k_actions, highest_probability
+    return {"action": predicted_action, "top_k_actions": top_k_actions, "probability": highest_probability}
 
 
 # ============================================================
