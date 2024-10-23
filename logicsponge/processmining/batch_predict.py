@@ -12,12 +12,11 @@ from logicsponge.processmining.data_utils import (
     add_input_symbols,
     add_start_to_sequences,
     add_stop_to_sequences,
-    calculate_percentages,
     data_statistics,
     split_data,
     transform_to_seqs,
 )
-from logicsponge.processmining.globals import START, STATS, STOP
+from logicsponge.processmining.globals import START, STOP
 from logicsponge.processmining.models import Alergia, BasicMiner, Fallback, HardVoting, Relativize, SoftVoting
 from logicsponge.processmining.neural_networks import LSTMModel, PreprocessData, evaluate_rnn, train_rnn
 from logicsponge.processmining.test_data import dataset
@@ -65,28 +64,6 @@ alergia_train_set_transformed = add_input_symbols(train_set_transformed, "in")
 
 data_statistics(test_set_transformed)
 
-
-# ============================================================
-# Reference models
-# ============================================================
-
-# fpt_strategy = BasicMiner(algorithm=FrequencyPrefixTree())
-#
-# ngram_strategy = BasicMiner(algorithm=NGram(window_length=2))
-#
-# fallback_strategy = Fallback(
-#     models=[
-#         BasicMiner(algorithm=FrequencyPrefixTree()),
-#         BasicMiner(algorithm=NGram(window_length=2)),
-#     ]
-# )
-#
-# relativize_strategy = Relativize(
-#     models=[
-#         BasicMiner(algorithm=FrequencyPrefixTree()),
-#         BasicMiner(algorithm=NGram(window_length=2)),
-#     ]
-# )
 
 # ============================================================
 # Initialize process miners
@@ -189,8 +166,10 @@ strategies = {
 # ============================================================
 
 start_time = time.time()
-result = {name: strategy.evaluate(data, mode="incremental") for name, (strategy, data) in strategies.items()}
+for strategy, data in strategies.values():
+    strategy.evaluate(data, mode="incremental")
 end_time = time.time()
+
 elapsed_time = end_time - start_time
 msg = f"Time taken: {elapsed_time:.4f} seconds"
 logger.info(msg)
@@ -200,25 +179,33 @@ logger.info(msg)
 # Show results
 # ============================================================
 
-# Convert result to DataFrame and ensure columns are floats for percentage calculation
-# Initialize the result_percentages dictionary
-result_percentages = {strategy: {key["name"]: 0 for key in STATS.values()} for strategy in strategies}
+data = {
+    "Model": [],
+    "Correct (%)": [],
+    "Wrong (%)": [],
+    "Empty (%)": [],
+    "Correct (Total)": [],
+    "Total Predictions": [],
+}
 
-# Apply percentage calculation for each strategy
-for strategy_name in strategies:
-    calculate_percentages(result_percentages, result, strategy_name)
+for name, (strategy, _) in strategies.items():
+    stats = strategy.stats
+    total = stats["total_predictions"]
 
-# Convert result_percentages to DataFrame for logging/printing
-result_percentages_df = pd.DataFrame(result_percentages).T.astype(float)
+    correct_percentage = (stats["correct_predictions"] / total * 100) if total > 0 else 0
+    wrong_percentage = (stats["wrong_predictions"] / total * 100) if total > 0 else 0
+    empty_percentage = (stats["empty_predictions"] / total * 100) if total > 0 else 0
 
-# Print full count table (Table 1)
-logger.info("Count Table:")
-logger.info(pd.DataFrame(result).T.astype(float))
+    data["Model"].append(name)
+    data["Correct (%)"].append(correct_percentage)
+    data["Wrong (%)"].append(wrong_percentage)
+    data["Empty (%)"].append(empty_percentage)
+    data["Correct (Total)"].append(stats["correct_predictions"])
+    data["Total Predictions"].append(stats["total_predictions"])
 
-# Print the percentage table (Table 2)
-logger.info("\nResults:")
-logger.info(result_percentages_df[[value["name"] for value in STATS.values()]])
-
+# Create a DataFrame and print it
+df = pd.DataFrame(data)
+logger.info(df)
 
 # ============================================================
 # RNN/LSTM Training and Evaluation
@@ -251,6 +238,6 @@ if NN_training:
     )
 
     # Evaluate model with test set
-    msg = "\n=====> Finished training, evaluating accuracy on test set..."
+    msg = "\nFinished training, evaluating accuracy on test set..."
     logger.info(msg)
     evaluate_rnn(model, nn_test_set_transformed, dataset_type="Test")

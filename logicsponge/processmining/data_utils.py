@@ -10,7 +10,7 @@ import pm4py
 import requests
 
 from logicsponge.core import DataItem
-from logicsponge.processmining.globals import STATS, ActionName, CaseId
+from logicsponge.processmining.globals import ActionName, CaseId
 
 logger = logging.getLogger(__name__)
 
@@ -151,53 +151,6 @@ def data_statistics(data: list[list[ActionName]]) -> None:
     average_length = total_length / len(data) if data else 0
     msg = f"Total number of actions in test set: {total_length}\nAverage length of test sequences: {average_length}"
     logger.info(msg)
-
-
-def calculate_percentages(result_percentages: dict, result: dict, strategy_name: str) -> None:
-    """
-    Function to calculate percentages and average log loss for each strategy on the dictionary level.
-    """
-    # Extract names from STATS for the relevant categories
-    correct_name = STATS["correct_count"]["name"]
-    wrong_name = STATS["wrong_count"]["name"]
-    within_top_k_name = STATS["within_top_k_count"]["name"]
-    wrong_top_k_name = STATS["wrong_top_k_count"]["name"]
-    unparseable_name = STATS["unparseable_count"]["name"]
-    log_loss_name = STATS["log_loss"]["name"]
-
-    # Total valid predictions (correct + wrong)
-    total_valid = result[strategy_name][correct_name] + result[strategy_name][wrong_name]
-
-    # Total predictions including unparseable sequences
-    total_all = total_valid + result[strategy_name][unparseable_name]
-
-    # Helper function to calculate percentage
-    def calculate_percentage(value, total):
-        return (value / total) * 100 if total > 0 else 0
-
-    # Calculate percentages for valid predictions
-    result_percentages[strategy_name][correct_name] = calculate_percentage(
-        result[strategy_name][correct_name], total_all
-    )
-    result_percentages[strategy_name][wrong_name] = calculate_percentage(result[strategy_name][wrong_name], total_all)
-    result_percentages[strategy_name][within_top_k_name] = calculate_percentage(
-        result[strategy_name][within_top_k_name], total_all
-    )
-    result_percentages[strategy_name][wrong_top_k_name] = calculate_percentage(
-        result[strategy_name][wrong_top_k_name], total_all
-    )
-
-    # Calculate percentages for total predictions including unparseable sequences
-    result_percentages[strategy_name][unparseable_name] = calculate_percentage(
-        result[strategy_name][unparseable_name], total_all
-    )
-
-    # Calculate the average log loss
-    if total_valid > 0:
-        avg_log_loss = result[strategy_name][log_loss_name] / total_valid
-        result_percentages[strategy_name][log_loss_name] = avg_log_loss
-    else:
-        result_percentages[strategy_name][log_loss_name] = 0
 
 
 # ============================================================

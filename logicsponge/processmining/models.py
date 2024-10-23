@@ -3,6 +3,7 @@ import logging
 import random
 from abc import ABC, abstractmethod
 from collections import Counter, OrderedDict
+from math import log
 from typing import Any
 
 import matplotlib as mpl
@@ -13,7 +14,6 @@ from torch.nn.utils.rnn import pad_sequence
 from logicsponge.processmining.data_utils import add_input_symbols_sequence
 from logicsponge.processmining.globals import (
     CONFIG,
-    STATS,
     STOP,
     ActionName,
     CaseId,
@@ -56,53 +56,46 @@ class StreamingMiner(ABC):
         self.initial_state: ComposedState | None = None
 
         # Statistics for batch mode
-        self.statistics = {
+        self.stats = {
             "total_predictions": 0,
             "correct_predictions": 0,
-            "unparseable": 0,
-            "logarithmic_loss": 0.0,
+            "wrong_predictions": 0,
+            "empty_predictions": 0,
+            "log_loss": 0.0,  # not implemented yet
         }
 
-    @staticmethod
-    def update_stats(actual_next_action: ActionName, prediction: Prediction, stats: dict[str, int]) -> None:
+    def update_stats(self, actual_next_action: ActionName, prediction: Prediction) -> None:
         """
         Updates the statistics based on the actual action, the prediction, and the top-k predictions.
         """
+        self.stats["total_predictions"] += 1
+
         if not prediction:
-            stats["unparseable_count"] += 1
+            self.stats["empty_predictions"] += 1
         else:
             predicted_action = prediction["action"]
-            top_k_actions = prediction["top_k_actions"]
-            predicted_prob = prediction["probability"]
 
-            # Loop through each metric and call its update function
-            for stat in STATS.values():
-                if "update" in stat:
-                    # Pass all arguments as keyword arguments
-                    stat["update"](
-                        stats,
-                        actual=actual_next_action,
-                        predicted=predicted_action,
-                        top_k=top_k_actions,
-                        predicted_prob=predicted_prob,
-                    )
+            if actual_next_action == predicted_action:
+                self.stats["correct_predictions"] += 1
 
-    def evaluate(self, data: list[list[ActionName]], mode: str = "incremental") -> dict[str, int]:
+            if actual_next_action != predicted_action:
+                self.stats["wrong_predictions"] += 1
+
+    def evaluate(self, data: list[list[ActionName]], mode: str = "incremental") -> None:
         """
         Evaluation in batch mode.
         Evaluates the dataset either incrementally or by full sequence.
         Modes: 'incremental' or 'sequence'.
         """
         # Initialize stats
-        stats = {key: value["init"] for key, value in STATS.items()}
-
         for sequence in data:
             current_state = self.initial_state
 
             for i in range(len(sequence)):
                 if current_state is None:
                     # If unparseable, count all remaining actions
-                    stats["unparseable_count"] += len(sequence) - i
+                    self.stats["empty_predictions"] += len(sequence) - i
+                    self.stats["total_predictions"] += len(sequence) - i
                     break
 
                 actual_next_action = sequence[i]
@@ -117,14 +110,12 @@ class StreamingMiner(ABC):
                     prediction = probs_prediction(probs, self.config)
 
                 # Update statistics based on the prediction
-                self.update_stats(actual_next_action, prediction, stats)
+                self.update_stats(actual_next_action, prediction)
 
                 # Move to the next state
                 if i < len(sequence) - 1:
                     current_state = self.next_state(current_state, actual_next_action)
 
-        # Return summarized stats
-        return {STATS[key]["name"]: value for key, value in stats.items()}
 
     @abstractmethod
     def update(self, case_id: CaseId, action: ActionName) -> None:
@@ -456,7 +447,7 @@ class Fallback(MultiMiner):
             if probs:
                 return probs
 
-        # If all models return None
+        # If all models return {}
         return {}
 
     def case_probs(self, case_id: CaseId) -> Probs:
