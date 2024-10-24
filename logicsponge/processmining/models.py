@@ -18,7 +18,7 @@ from logicsponge.processmining.globals import (
     CaseId,
     ComposedState,
     Prediction,
-    Probs,
+    ProbDistr,
     probs_prediction,
 )
 from logicsponge.processmining.neural_networks import LSTMModel, RNNModel
@@ -128,19 +128,19 @@ class StreamingMiner(ABC):
         """
 
     @abstractmethod
-    def state_probs(self, state: ComposedState | None) -> Probs:
+    def state_probs(self, state: ComposedState | None) -> ProbDistr:
         """
         Returns probability dictionary based on state.
         """
 
     @abstractmethod
-    def case_probs(self, case_id: CaseId) -> Probs:
+    def case_probs(self, case_id: CaseId) -> ProbDistr:
         """
         Returns probability dictionary based on case.
         """
 
     @abstractmethod
-    def sequence_probs(self, sequence: list[ActionName]) -> Probs:
+    def sequence_probs(self, sequence: list[ActionName]) -> ProbDistr:
         """
         Returns probability dictionary based on sequence.
         """
@@ -168,13 +168,13 @@ class BasicMiner(StreamingMiner):
     def next_state(self, current_state: ComposedState | None, action: ActionName) -> ComposedState | None:
         return self.algorithm.next_state(current_state, action)
 
-    def state_probs(self, state: ComposedState | None) -> Probs:
+    def state_probs(self, state: ComposedState | None) -> ProbDistr:
         return self.algorithm.state_probs(state)
 
-    def case_probs(self, case_id: CaseId) -> Probs:
+    def case_probs(self, case_id: CaseId) -> ProbDistr:
         return self.algorithm.case_probs(case_id)
 
-    def sequence_probs(self, sequence: list[ActionName]) -> Probs:
+    def sequence_probs(self, sequence: list[ActionName]) -> ProbDistr:
         return self.algorithm.sequence_probs(sequence)
 
 
@@ -218,7 +218,7 @@ class HardVoting(MultiMiner):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
-    def voting_probs(self, probs_list: list[Probs]) -> Probs:
+    def voting_probs(self, probs_list: list[ProbDistr]) -> ProbDistr:
         """
         Perform hard voting based on the most frequent action in the predictions and return
         the winning action as a probability dictionary with a probability of 1.0.
@@ -262,7 +262,7 @@ class HardVoting(MultiMiner):
         # Create a result dictionary with only the selected action
         return {STOP: 0.0, selected_action: 1.0}  # include STOP as an invariant
 
-    def state_probs(self, state: ComposedState | None) -> Probs:
+    def state_probs(self, state: ComposedState | None) -> ProbDistr:
         """
         Return the majority vote.
         """
@@ -273,7 +273,7 @@ class HardVoting(MultiMiner):
 
         return self.voting_probs(probs_list)
 
-    def case_probs(self, case_id: CaseId) -> Probs:
+    def case_probs(self, case_id: CaseId) -> ProbDistr:
         """
         Return the hard voting of predictions from the ensemble.
         """
@@ -281,7 +281,7 @@ class HardVoting(MultiMiner):
 
         return self.voting_probs(probs_list)
 
-    def sequence_probs(self, sequence: list[ActionName]) -> Probs:
+    def sequence_probs(self, sequence: list[ActionName]) -> ProbDistr:
         """
         Return the majority vote.
         """
@@ -295,7 +295,7 @@ class SoftVoting(MultiMiner):
         super().__init__(*args, **kwargs)
 
     @staticmethod
-    def voting_probs(probs_list: list[Probs]) -> Probs:
+    def voting_probs(probs_list: list[ProbDistr]) -> ProbDistr:
         combined_probs = {}
 
         # Iterate over all probability dictionaries and accumulate the probabilities for each action
@@ -319,7 +319,7 @@ class SoftVoting(MultiMiner):
         # Return the normalized probability dictionary
         return combined_probs
 
-    def state_probs(self, state: ComposedState | None) -> Probs:
+    def state_probs(self, state: ComposedState | None) -> ProbDistr:
         """
         Return the majority vote.
         """
@@ -330,7 +330,7 @@ class SoftVoting(MultiMiner):
 
         return self.voting_probs(probs_list)
 
-    def case_probs(self, case_id: CaseId) -> Probs:
+    def case_probs(self, case_id: CaseId) -> ProbDistr:
         """
         Return the hard voting of predictions from the ensemble.
         """
@@ -338,7 +338,7 @@ class SoftVoting(MultiMiner):
 
         return self.voting_probs(probs_list)
 
-    def sequence_probs(self, sequence: list[ActionName]) -> Probs:
+    def sequence_probs(self, sequence: list[ActionName]) -> ProbDistr:
         """
         Return the majority vote.
         """
@@ -386,7 +386,7 @@ class AdaptiveVoting(MultiMiner):
         accuracies = self.get_accuracies()
         return accuracies.index(max(accuracies))
 
-    def state_probs(self, state: ComposedState | None) -> Probs:
+    def state_probs(self, state: ComposedState | None) -> ProbDistr:
         """
         Return the probability distribution from the model with the best accuracy so far.
         """
@@ -401,7 +401,7 @@ class AdaptiveVoting(MultiMiner):
 
         return best_model.state_probs(best_model_state)
 
-    def case_probs(self, case_id: CaseId) -> Probs:
+    def case_probs(self, case_id: CaseId) -> ProbDistr:
         """
         Return the probability distribution from the model with the best accuracy so far.
         """
@@ -411,7 +411,7 @@ class AdaptiveVoting(MultiMiner):
 
         return best_model.case_probs(case_id)
 
-    def sequence_probs(self, sequence: list[ActionName]) -> Probs:
+    def sequence_probs(self, sequence: list[ActionName]) -> ProbDistr:
         """
         Return the probability distribution from the model with the best accuracy so far.
         """
@@ -431,7 +431,7 @@ class Fallback(MultiMiner):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
-    def state_probs(self, state: ComposedState | None) -> Probs:
+    def state_probs(self, state: ComposedState | None) -> ProbDistr:
         """
         Return the first non-{} probabilities from the models, cascading through the models in order.
         Each model gets its corresponding state from the ComposedState.
@@ -448,7 +448,7 @@ class Fallback(MultiMiner):
         # If all models return {}
         return {}
 
-    def case_probs(self, case_id: CaseId) -> Probs:
+    def case_probs(self, case_id: CaseId) -> ProbDistr:
         """
         Return the first non-{} probabilities from the models, cascading through the models in order.
         """
@@ -460,7 +460,7 @@ class Fallback(MultiMiner):
         # If all models return None
         return {}
 
-    def sequence_probs(self, sequence: list[ActionName]) -> Probs:
+    def sequence_probs(self, sequence: list[ActionName]) -> ProbDistr:
         """
         Return the first non-{} probabilities from the models for the given sequence,
         cascading through the models in order.
@@ -484,7 +484,7 @@ class Relativize(MultiMiner):
         self.model1 = self.models[0]
         self.model2 = self.models[1]
 
-    def state_probs(self, state: ComposedState | None) -> Probs:
+    def state_probs(self, state: ComposedState | None) -> ProbDistr:
         if state is None:
             return {}
 
@@ -497,7 +497,7 @@ class Relativize(MultiMiner):
 
         return probs
 
-    def case_probs(self, case_id: CaseId) -> Probs:
+    def case_probs(self, case_id: CaseId) -> ProbDistr:
         probs = self.model1.case_probs(case_id)
 
         if probs:
@@ -505,7 +505,7 @@ class Relativize(MultiMiner):
 
         return probs
 
-    def sequence_probs(self, sequence: list[ActionName]) -> Probs:
+    def sequence_probs(self, sequence: list[ActionName]) -> ProbDistr:
         probs = self.model1.sequence_probs(sequence)
 
         if probs:
@@ -525,7 +525,7 @@ class Alergia(BasicMiner):
         self.current_state = self.initial_state
 
     @staticmethod
-    def get_probability_distribution(state: Any) -> Probs:
+    def get_probability_distribution(state: Any) -> ProbDistr:
         probability_distribution = {}
 
         for input_symbol, transitions in state.transitions.items():
@@ -535,7 +535,7 @@ class Alergia(BasicMiner):
 
         return probability_distribution["in"]
 
-    def case_probs(self, case_id: CaseId) -> Probs:  # noqa: ARG002
+    def case_probs(self, case_id: CaseId) -> ProbDistr:  # noqa: ARG002
         """
         This method is not used in this subclass.
         """
@@ -548,10 +548,10 @@ class Alergia(BasicMiner):
         msg = "This method is not implemented for this subclass."
         raise NotImplementedError(msg)
 
-    def state_probs(self, state: Any) -> Probs:
+    def state_probs(self, state: Any) -> ProbDistr:
         return self.get_probability_distribution(state)
 
-    def sequence_probs(self, sequence: list[ActionName]) -> Probs:
+    def sequence_probs(self, sequence: list[ActionName]) -> ProbDistr:
         transformed_sequence = add_input_symbols_sequence(sequence, "in")
 
         self.algorithm.reset_to_initial()
@@ -708,7 +708,7 @@ class NeuralNetworkMiner(StreamingMiner):
         # Fetch the actual sequences based on the selected case_ids
         return [self.get_sequence(cid) for cid in batch_case_ids]
 
-    def case_probs(self, case_id: CaseId) -> Probs:
+    def case_probs(self, case_id: CaseId) -> ProbDistr:
         """
         Predict the next action for a given case_id and return the top-k most likely actions along with the probability
         of the top action.
@@ -724,7 +724,7 @@ class NeuralNetworkMiner(StreamingMiner):
 
         return self.idx_sequence_probs(index_sequence)
 
-    def sequence_probs(self, sequence: list[ActionName]) -> Probs:
+    def sequence_probs(self, sequence: list[ActionName]) -> ProbDistr:
         """
         Predict the next action for a given sequence of actions and return the top-k most likely actions along with the
         probability of the top action.
@@ -742,7 +742,7 @@ class NeuralNetworkMiner(StreamingMiner):
 
         return self.idx_sequence_probs(index_sequence)
 
-    def idx_sequence_probs(self, index_sequence: list[int]) -> Probs:
+    def idx_sequence_probs(self, index_sequence: list[int]) -> ProbDistr:
         """
         Predict the next action for a given sequence of action indices.
         """
@@ -772,5 +772,5 @@ class NeuralNetworkMiner(StreamingMiner):
     def next_state(self, *args, **kwargs):
         pass  # Or return None, depending on your base class interface
 
-    def state_probs(self, state: ComposedState | None) -> Probs:  # noqa: ARG002
+    def state_probs(self, state: ComposedState | None) -> ProbDistr:  # noqa: ARG002
         return {}

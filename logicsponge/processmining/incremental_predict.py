@@ -118,8 +118,8 @@ class StreamingActionPredictor(ls.FunctionTerm):
             out = DataItem(
                 {
                     "case_id": item["case_id"],
-                    "prediction": prediction,
-                    "action": item["action"],
+                    "prediction": prediction,  # containing predicted action
+                    "action": item["action"],  # actual action
                 }
             )
             self.output(out)

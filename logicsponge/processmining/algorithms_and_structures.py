@@ -7,7 +7,7 @@ from logicsponge.processmining.globals import (
     STOP,
     ActionName,
     CaseId,
-    Probs,
+    ProbDistr,
     StateId,
 )
 
@@ -147,7 +147,7 @@ class BaseStructure(PDFA, ABC):
 
         return self.transitions[state][action]
 
-    def state_probs(self, state: StateId | None) -> Probs:
+    def state_probs(self, state: StateId | None) -> ProbDistr:
         """
         Returns probabilities based on state.
         """
@@ -157,7 +157,7 @@ class BaseStructure(PDFA, ABC):
 
         return self.state_info[state]["probs"]
 
-    def case_probs(self, case_id: CaseId) -> Probs:
+    def case_probs(self, case_id: CaseId) -> ProbDistr:
         """
         Returns probabilities based on case.
         """
@@ -165,7 +165,7 @@ class BaseStructure(PDFA, ABC):
 
         return self.state_probs(state)
 
-    def sequence_probs(self, sequence: list[ActionName]) -> Probs:
+    def sequence_probs(self, sequence: list[ActionName]) -> ProbDistr:
         """
         Returns probabilities based on sequence.
         """

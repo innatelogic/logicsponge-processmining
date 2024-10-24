@@ -1,7 +1,7 @@
 import random
 from collections import OrderedDict
 
-from logicsponge.processmining.globals import STOP, ActionName, Probs, StateId
+from logicsponge.processmining.globals import STOP, ActionName, ProbDistr, StateId
 
 
 class State:
@@ -78,7 +78,7 @@ class PDFA(Automaton):
 
             while True:
                 # Get the probabilities for the current state as a dictionary
-                probs: Probs = self.state_info[current_state]["probs"]
+                probs: ProbDistr = self.state_info[current_state]["probs"]
 
                 # If there are no probabilities, stop the simulation
                 if not probs:

@@ -18,7 +18,7 @@ ActionName = str | int | tuple[str | int, ...]
 # Prediction = tuple[ActionName, list[ActionName], float]
 Prediction = dict[str, Any]
 
-Probs = dict[ActionName, float]
+ProbDistr = dict[ActionName, float]
 
 
 # ============================================================
@@ -43,7 +43,7 @@ CONFIG = {
 # ==========================================================
 
 
-def probs_prediction(probs: Probs, config: dict[str, Any] | None = None) -> Prediction:
+def probs_prediction(probs: ProbDistr, config: dict[str, Any] | None = None) -> Prediction:
     """
     Returns the top-k actions based on their probabilities.
     If STOP has a probability of 1.0 and there are no other actions, return None.
