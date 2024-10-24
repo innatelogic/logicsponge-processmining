@@ -541,12 +541,10 @@ class Alergia(BasicMiner):
         """
         return {}
 
-    def update(self, case_id: CaseId, action: ActionName) -> None:  # noqa: ARG002
+    def update(self, case_id: CaseId, action: ActionName) -> None:
         """
         This method is not used in this subclass.
         """
-        msg = "This method is not implemented for this subclass."
-        raise NotImplementedError(msg)
 
     def state_probs(self, state: Any) -> ProbDistr:
         return self.get_probability_distribution(state)
