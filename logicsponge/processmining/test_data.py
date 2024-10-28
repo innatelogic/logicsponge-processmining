@@ -3,7 +3,7 @@ import os
 import pandas as pd
 
 from logicsponge.processmining.automata import PDFA
-from logicsponge.processmining.data_utils import FileHandler, handle_keys, shuffle_sequences
+from logicsponge.processmining.data_utils import FileHandler, handle_keys, interleave_sequences
 from logicsponge.processmining.globals import STOP, ActionName, CaseId
 
 FOLDERNAME = "data"
@@ -85,7 +85,7 @@ data_collection = {
 # ============================================================
 
 if DATA == "file":
-    data_name = "BPI_Challenge_2013"
+    data_name = "BPI_Challenge_2019"
     data = data_collection[data_name]
     file_path = os.path.join(FOLDERNAME, data["target_filename"])
     data["file_path"] = file_path
@@ -131,7 +131,7 @@ if DATA == "synthetic":
                 # Store the modified sequence
                 sequences.append([*incremented_numbers, STOP])
 
-    dataset = shuffle_sequences(sequences, random_index=False)
+    dataset = interleave_sequences(sequences, random_index=False)
 
 
 # ============================================================
@@ -157,7 +157,7 @@ if DATA == "PDFA":
     pdfa.set_probs(1, {STOP: 0.1, "a": 0.1, "b": 0.8})
     pdfa.set_probs(2, {STOP: 0.1, "a": 0.8, "b": 0.1})
 
-    dataset = shuffle_sequences(pdfa.simulate(1000))
+    dataset = interleave_sequences(pdfa.simulate(1000))
 
 
 # pdfa.create_states(2)

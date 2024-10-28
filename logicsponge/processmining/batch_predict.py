@@ -1,9 +1,10 @@
 import logging
-import random
 import time
 
 import matplotlib as mpl
+import numpy as np
 import pandas as pd
+from aalpy.learning_algs import run_Alergia
 from torch import nn, optim
 
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
@@ -12,12 +13,12 @@ from logicsponge.processmining.data_utils import (
     add_start_to_sequences,
     add_stop_to_sequences,
     data_statistics,
-    shuffle_sequences,
+    interleave_sequences,
     split_sequence_data,
     transform_to_seqs,
 )
 from logicsponge.processmining.globals import START, STOP
-from logicsponge.processmining.models import BasicMiner, Fallback, HardVoting, Relativize, SoftVoting
+from logicsponge.processmining.models import Alergia, BasicMiner, Fallback, HardVoting, Relativize, SoftVoting
 from logicsponge.processmining.neural_networks import LSTMModel, PreprocessData, evaluate_rnn, train_rnn
 from logicsponge.processmining.test_data import dataset
 
@@ -33,234 +34,261 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-random.seed(123)
+# random.seed(123)
 
-
-NN_training = True
+NN_training = False
 
 # ============================================================
 # Data preparation
 # ============================================================
 
-# nn_processor = PreprocessData()
-#
-# # Split dataset into train, validation (for RNNs), and test set
-# train_set, remainder = split_data(dataset, 0.3)
-# val_set, test_set = split_data(remainder, 0.5)
-#
-# # Transform into sequences
-# train_set_transformed = transform_to_seqs(train_set)
-# val_set_transformed = transform_to_seqs(val_set)
-# test_set_transformed = transform_to_seqs(test_set)
-#
-# # Append STOP action
-# train_set_transformed = add_stop_to_sequences(train_set_transformed, STOP)
-# val_set_transformed = add_stop_to_sequences(val_set_transformed, STOP)
-# test_set_transformed = add_stop_to_sequences(test_set_transformed, STOP)
-#
-# # For Alergia: Transform action into pair ("in", action)
-# alergia_train_set_transformed = add_input_symbols(train_set_transformed, "in")
-#
-# data_statistics(test_set_transformed)
-
-
-# ============================================================
-# Alternative data preparation
-# ============================================================
-
 nn_processor = PreprocessData()
-
 data = transform_to_seqs(dataset)
 data_statistics(data)
 
-train_set_transformed, remainder = split_sequence_data(data, 0.3)
-val_set_transformed, test_set_transformed = split_sequence_data(remainder, 0.5)
-
-# train_set for process miners
-train_set = shuffle_sequences(train_set_transformed, False)
-
-# Append STOP action
-train_set_transformed = add_stop_to_sequences(train_set_transformed, STOP)
-val_set_transformed = add_stop_to_sequences(val_set_transformed, STOP)
-test_set_transformed = add_stop_to_sequences(test_set_transformed, STOP)
-
-# For Alergia: Transform action into pair ("in", action)
-alergia_train_set_transformed = add_input_symbols(train_set_transformed, "in")
-
-
 # ============================================================
-# Initialize process miners
+# Define the number of iterations
 # ============================================================
 
+n_iterations = 5
 
-config = {
-    "include_stop": True,
+# Store metrics across iterations
+all_metrics = {
+    name: []
+    for name in [
+        "fpt",
+        "bag",
+        "ngram_1",
+        "ngram_2",
+        "ngram_3",
+        "ngram_4",
+        "ngram_5",
+        "ngram_6",
+        "fallback fpt->ngram_4",
+        "hard voting",
+        "soft voting",
+        "alergia",
+        "LSTM",
+    ]
 }
 
-fpt = BasicMiner(algorithm=FrequencyPrefixTree(), config=config)
+# Repeat the experiment n_iterations times
+for iteration in range(n_iterations):
+    msg = f"Starting iteration {iteration + 1}/{n_iterations}..."
+    logger.info(msg)
 
-bag = BasicMiner(algorithm=Bag(), config=config)
+    # ============================================================
+    # Data Splitting
+    # ============================================================
+    train_set_transformed, remainder = split_sequence_data(data, 0.3, random_shuffle=True, seed=iteration)
+    val_set_transformed, test_set_transformed = split_sequence_data(remainder, 0.5, random_shuffle=True, seed=iteration)
 
-ngram_0 = BasicMiner(algorithm=NGram(window_length=0), config=config)
+    # Train set for process miners
+    train_set = interleave_sequences(train_set_transformed, False)
 
-ngram_2 = BasicMiner(algorithm=NGram(window_length=2), config=config)
+    # Append STOP action
+    train_set_transformed = add_stop_to_sequences(train_set_transformed, STOP)
+    val_set_transformed = add_stop_to_sequences(val_set_transformed, STOP)
+    test_set_transformed = add_stop_to_sequences(test_set_transformed, STOP)
 
-ngram_3 = BasicMiner(algorithm=NGram(window_length=3), config=config)
+    data_statistics(test_set_transformed)
 
-ngram_4 = BasicMiner(algorithm=NGram(window_length=4), config=config)
+    alergia_train_set_transformed = add_input_symbols(train_set_transformed, "in")
 
-fallback = Fallback(
-    models=[
-        BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
-        BasicMiner(algorithm=NGram(window_length=3)),
-    ],
-    config=config,
-)
+    # ============================================================
+    # Initialize Process Miners
+    # ============================================================
 
-hard_voting = HardVoting(
-    models=[
-        BasicMiner(algorithm=Bag()),
-        BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
-        BasicMiner(algorithm=NGram(window_length=2)),
-        BasicMiner(algorithm=NGram(window_length=3)),
-        BasicMiner(algorithm=NGram(window_length=4)),
-    ],
-    config=config,
-)
+    config = {
+        "include_stop": True,
+    }
 
-soft_voting = SoftVoting(
-    models=[
-        # BasicMiner(algorithm=Bag()),
-        BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
-        BasicMiner(algorithm=NGram(window_length=2)),
-        BasicMiner(algorithm=NGram(window_length=3)),
-        BasicMiner(algorithm=NGram(window_length=4)),
-    ],
-    config=config,
-)
+    fpt = BasicMiner(algorithm=FrequencyPrefixTree(), config=config)
 
-relativize = Relativize(
-    models=[
-        BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=5)),
-        BasicMiner(algorithm=NGram(window_length=3)),
-    ],
-    config=config,
-)
+    bag = BasicMiner(algorithm=Bag(), config=config)
 
-# Alergia is initialized and trained below in one go.
+    ngram_1 = BasicMiner(algorithm=NGram(window_length=0), config=config)
 
+    ngram_2 = BasicMiner(algorithm=NGram(window_length=1), config=config)
 
-# ============================================================
-# Training of process miners
-# ============================================================
+    ngram_3 = BasicMiner(algorithm=NGram(window_length=2), config=config)
 
-for case_id, action_name in train_set:
-    fpt.update(case_id, action_name)
-    bag.update(case_id, action_name)
-    ngram_0.update(case_id, action_name)
-    ngram_2.update(case_id, action_name)
-    ngram_3.update(case_id, action_name)
-    ngram_4.update(case_id, action_name)
-    fallback.update(case_id, action_name)
-    hard_voting.update(case_id, action_name)
-    soft_voting.update(case_id, action_name)
-    relativize.update(case_id, action_name)
+    ngram_4 = BasicMiner(algorithm=NGram(window_length=3), config=config)
 
-# algorithm = run_Alergia(alergia_train_set_transformed, automaton_type="smm", eps=0.5, print_info=True)
-# smm = Alergia(algorithm=algorithm)
+    ngram_5 = BasicMiner(algorithm=NGram(window_length=4), config=config)
 
-strategies = {
-    "fpt": (fpt, test_set_transformed),
-    "bag": (bag, test_set_transformed),
-    "ngram_0": (ngram_0, test_set_transformed),
-    "ngram_2": (ngram_2, test_set_transformed),
-    "ngram_3": (ngram_3, test_set_transformed),
-    "ngram_4": (ngram_4, test_set_transformed),
-    "fallback fpt->ngram_3": (fallback, test_set_transformed),
-    "relativize fpt->ngram_3": (relativize, test_set_transformed),
-    "hard voting": (hard_voting, test_set_transformed),
-    "soft voting": (soft_voting, test_set_transformed),
-    # "alergia": (smm, test_set_transformed),
-}
+    ngram_6 = BasicMiner(algorithm=NGram(window_length=5), config=config)
 
-
-# ============================================================
-# Run evaluation
-# ============================================================
-
-start_time = time.time()
-for strategy, data in strategies.values():
-    strategy.evaluate(data, mode="incremental")
-end_time = time.time()
-
-elapsed_time = end_time - start_time
-msg = f"Time taken: {elapsed_time:.4f} seconds"
-logger.info(msg)
-
-
-# ============================================================
-# Show results
-# ============================================================
-
-data = {
-    "Model": [],
-    "Correct (%)": [],
-    "Wrong (%)": [],
-    "Empty (%)": [],
-    "Correct (Total)": [],
-    "Total Predictions": [],
-}
-
-for name, (strategy, _) in strategies.items():
-    stats = strategy.stats
-    total = stats["total_predictions"]
-
-    correct_percentage = (stats["correct_predictions"] / total * 100) if total > 0 else 0
-    wrong_percentage = (stats["wrong_predictions"] / total * 100) if total > 0 else 0
-    empty_percentage = (stats["empty_predictions"] / total * 100) if total > 0 else 0
-
-    data["Model"].append(name)
-    data["Correct (%)"].append(correct_percentage)
-    data["Wrong (%)"].append(wrong_percentage)
-    data["Empty (%)"].append(empty_percentage)
-    data["Correct (Total)"].append(stats["correct_predictions"])
-    data["Total Predictions"].append(stats["total_predictions"])
-
-# Create a DataFrame and print it
-df = pd.DataFrame(data)
-logger.info(df)
-
-# ============================================================
-# RNN/LSTM Training and Evaluation
-# ============================================================
-
-if NN_training:
-    # For RNNs: Append START action
-    nn_train_set_transformed = add_start_to_sequences(train_set_transformed, START)
-    nn_val_set_transformed = add_start_to_sequences(val_set_transformed, START)
-    nn_test_set_transformed = add_start_to_sequences(test_set_transformed, START)
-
-    nn_train_set_transformed = nn_processor.preprocess_data(nn_train_set_transformed)
-    nn_val_set_transformed = nn_processor.preprocess_data(nn_val_set_transformed)
-    nn_test_set_transformed = nn_processor.preprocess_data(nn_test_set_transformed)
-
-    vocab_size = 50  # Assume an upper bound on the number of activities, or adjust dynamically
-
-    # Initialize the model, criterion, and optimizer
-    embedding_dim = 50
-    hidden_dim = 128
-    output_dim = vocab_size  # Output used to predict the next activity
-
-    model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
-
-    # Train the LSTM on the train set with batch size and sequence-to-sequence targets
-    model = train_rnn(
-        model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=20
+    fallback = Fallback(
+        models=[
+            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=1)),
+            BasicMiner(algorithm=NGram(window_length=3)),
+        ],
+        config=config,
     )
 
-    # Evaluate model with test set
-    msg = "\nFinished training, evaluating accuracy on test set..."
+    hard_voting = HardVoting(
+        models=[
+            BasicMiner(algorithm=Bag()),
+            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
+            BasicMiner(algorithm=NGram(window_length=2)),
+            BasicMiner(algorithm=NGram(window_length=3)),
+            BasicMiner(algorithm=NGram(window_length=4)),
+        ],
+        config=config,
+    )
+
+    soft_voting = SoftVoting(
+        models=[
+            BasicMiner(algorithm=Bag()),
+            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
+            BasicMiner(algorithm=NGram(window_length=2)),
+            BasicMiner(algorithm=NGram(window_length=3)),
+            BasicMiner(algorithm=NGram(window_length=4)),
+        ],
+        config=config,
+    )
+
+    relativize = Relativize(
+        models=[
+            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
+            BasicMiner(algorithm=NGram(window_length=3)),
+        ],
+        config=config,
+    )
+
+    # Train Process Miners
+    start_time = time.time()
+    for case_id, action_name in train_set:
+        fpt.update(case_id, action_name)
+        bag.update(case_id, action_name)
+        ngram_1.update(case_id, action_name)
+        ngram_2.update(case_id, action_name)
+        ngram_3.update(case_id, action_name)
+        ngram_4.update(case_id, action_name)
+        ngram_5.update(case_id, action_name)
+        ngram_6.update(case_id, action_name)
+        fallback.update(case_id, action_name)
+        hard_voting.update(case_id, action_name)
+        soft_voting.update(case_id, action_name)
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    msg = f"Total training time for process miners: {elapsed_time:.4f} seconds"
     logger.info(msg)
-    evaluate_rnn(model, nn_test_set_transformed, dataset_type="Test")
+
+    # Train Alergia
+    start_time = time.time()
+    algorithm = run_Alergia(alergia_train_set_transformed, automaton_type="smm", eps=0.5, print_info=True)
+    smm = Alergia(algorithm=algorithm)
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    msg = f"Training time for Alergia: {elapsed_time:.4f} seconds"
+    logger.info(msg)
+
+    # ============================================================
+    # Evaluation
+    # ============================================================
+
+    strategies = {
+        "fpt": (fpt, test_set_transformed),
+        "bag": (bag, test_set_transformed),
+        "ngram_1": (ngram_1, test_set_transformed),
+        "ngram_2": (ngram_2, test_set_transformed),
+        "ngram_3": (ngram_3, test_set_transformed),
+        "ngram_4": (ngram_4, test_set_transformed),
+        "ngram_5": (ngram_5, test_set_transformed),
+        "ngram_6": (ngram_6, test_set_transformed),
+        "fallback fpt->ngram_4": (fallback, test_set_transformed),
+        "hard voting": (hard_voting, test_set_transformed),
+        "soft voting": (soft_voting, test_set_transformed),
+        "alergia": (smm, test_set_transformed),
+    }
+
+    # Store the statistics for each iteration and also print them out
+    iteration_data = {
+        "Model": [],
+        "Correct (%)": [],
+        "Wrong (%)": [],
+        "Empty (%)": [],
+        "Correct (Total)": [],
+        "Total Predictions": [],
+    }
+
+    for strategy_name, (strategy, test_data) in strategies.items():
+        strategy.evaluate(test_data, mode="incremental")
+        stats = strategy.stats
+
+        total = stats["total_predictions"]
+        correct_percentage = (stats["correct_predictions"] / total * 100) if total > 0 else 0
+        wrong_percentage = (stats["wrong_predictions"] / total * 100) if total > 0 else 0
+        empty_percentage = (stats["empty_predictions"] / total * 100) if total > 0 else 0
+
+        # Append data to the iteration data dictionary
+        iteration_data["Model"].append(strategy_name)
+        iteration_data["Correct (%)"].append(correct_percentage)
+        iteration_data["Wrong (%)"].append(wrong_percentage)
+        iteration_data["Empty (%)"].append(empty_percentage)
+        iteration_data["Correct (Total)"].append(stats["correct_predictions"])
+        iteration_data["Total Predictions"].append(total)
+
+        # Calculate and append accuracy to all_metrics for final statistics
+        accuracy = stats["correct_predictions"] / total if total > 0 else 0
+        all_metrics[strategy_name].append(accuracy)
+
+    # Create a DataFrame for the iteration and log it
+    iteration_df = pd.DataFrame(iteration_data)
+    msg = f"\nIteration {iteration + 1} stats:\n{iteration_df}"
+    logger.info(msg)
+
+    # LSTM Evaluation
+    if NN_training:
+        # For RNNs: Append START action
+        nn_train_set_transformed = add_start_to_sequences(train_set_transformed, START)
+        nn_val_set_transformed = add_start_to_sequences(val_set_transformed, START)
+        nn_test_set_transformed = add_start_to_sequences(test_set_transformed, START)
+
+        nn_train_set_transformed = nn_processor.preprocess_data(nn_train_set_transformed)
+        nn_val_set_transformed = nn_processor.preprocess_data(nn_val_set_transformed)
+        nn_test_set_transformed = nn_processor.preprocess_data(nn_test_set_transformed)
+
+        vocab_size = 50  # Assume an upper bound on the number of activities, or adjust dynamically
+
+        # Initialize the model, criterion, and optimizer
+        embedding_dim = 50
+        hidden_dim = 128
+        output_dim = vocab_size  # Output used to predict the next activity
+
+        model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim)
+        criterion = nn.CrossEntropyLoss()
+        optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+        # Train the LSTM on the train set with batch size and sequence-to-sequence targets
+        model = train_rnn(
+            model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=20
+        )
+
+        lstm_accuracy = evaluate_rnn(model, nn_test_set_transformed, dataset_type="Test")
+        all_metrics["LSTM"].append(lstm_accuracy)
+
+# ============================================================
+# Calculate and Show Final Results
+# ============================================================
+
+results = {
+    "Model": [],
+    "Mean Accuracy (%)": [],
+    "Std Dev Accuracy (%)": [],
+}
+
+for model_name, accuracies in all_metrics.items():
+    mean_acc = np.mean(accuracies) * 100
+    std_acc = np.std(accuracies) * 100
+
+    results["Model"].append(model_name)
+    results["Mean Accuracy (%)"].append(mean_acc)
+    results["Std Dev Accuracy (%)"].append(std_acc)
+
+# Create a DataFrame and print it
+df = pd.DataFrame(results)
+msg = "\n" + str(df)
+logger.info(msg)

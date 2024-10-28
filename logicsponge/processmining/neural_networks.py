@@ -226,7 +226,7 @@ def evaluate_rnn(model, sequences, dataset_type="Validation"):
 
     accuracy = correct_predictions / total_predictions if total_predictions > 0 else 0
 
-    msg = f"{dataset_type} accuracy: {accuracy * 100:.2f}%"
+    msg = f"{dataset_type} accuracy: {accuracy * 100:.4f}%"
     logger.info(msg)
 
     return accuracy

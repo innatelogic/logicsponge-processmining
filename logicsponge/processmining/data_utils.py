@@ -15,25 +15,16 @@ from logicsponge.processmining.globals import ActionName, CaseId
 
 logger = logging.getLogger(__name__)
 
-random.seed(123)
-
 
 # ============================================================
 # Data Transformation
 # ============================================================
 
 
-def shuffle_sequences(sequences: list[list[ActionName]], random_index=True) -> list[tuple[CaseId, ActionName]]:  # noqa: FBT002
+def interleave_sequences(sequences: list[list[ActionName]], random_index=True) -> list[tuple[CaseId, ActionName]]:  # noqa: FBT002
     """
     Takes a list of sequences (list of lists) and returns a shuffled version
     while preserving the order within each sequence.
-
-    Parameters:
-    sequences (list of lists): The sequences to be processed.
-    random_index (bool): Whether a sequence index is chosen randomly.
-
-    Returns:
-    list of tuples: A list containing tuples of (sequence_index, value).
     """
     # Create a copy of sequences to avoid modifying the original list
     sequences_copy = [seq.copy() for seq in sequences]
@@ -94,62 +85,21 @@ def transform_to_seqs(data: list[tuple[CaseId, ActionName]]) -> list[list[Action
     return list(grouped_data.values())
 
 
-def split_data(
-    dataset: list[tuple[CaseId, ActionName]], test_size: float = 0.2
-) -> tuple[list[tuple[CaseId, ActionName]], list[tuple[CaseId, ActionName]]]:
-    """
-    Splits the dataset into training and test sets, keeping actions grouped by case_id.
-    """
-    # Create a DataFrame from the dataset
-    df = pd.DataFrame(dataset, columns=["case_id", "action_name"])  # type: ignore
-
-    # Group the data by 'case_id'
-    grouped = df.groupby("case_id")
-
-    # Collect each case's actions as a list of tuples (case_id, action)
-    grouped_dataset = [(case_id, list(group["action_name"])) for case_id, group in grouped]
-
-    # Shuffle the case groups while keeping actions together within each case
-    random.shuffle(grouped_dataset)
-
-    # Flatten the shuffled list back into the original format (case_id, action_name)
-    shuffled_dataset = [(case_id, action) for case_id, actions in grouped_dataset for action in actions]
-
-    # Create a new DataFrame if needed
-    shuffled_df = pd.DataFrame(shuffled_dataset, columns=["case_id", "action_name"])  # type: ignore
-
-    # Get the unique case_ids
-    unique_case_ids = shuffled_df["case_id"].unique()
-
-    # Determine the number of case_ids for the training set (1 - test_size)
-    train_size = int((1 - test_size) * len(unique_case_ids))
-
-    # Split the case_ids into training and test sets
-    train_case_ids = unique_case_ids[:train_size]
-    test_case_ids = unique_case_ids[train_size:]
-
-    # Split the original dataset based on these case_ids
-    train_set_df = shuffled_df[shuffled_df["case_id"].isin(train_case_ids)]  # type: ignore
-    test_set_df = shuffled_df[shuffled_df["case_id"].isin(test_case_ids)]  # type: ignore
-
-    # Convert the training and test sets back to list of tuples (case_id, action_name)
-    train_set = cast(
-        list[tuple[CaseId, ActionName]],
-        [(row.case_id, row.action_name) for row in train_set_df.itertuples(index=False)],  # type: ignore
-    )
-    test_set = cast(
-        list[tuple[CaseId, ActionName]],
-        [(row.case_id, row.action_name) for row in test_set_df.itertuples(index=False)],  # type: ignore
-    )
-
-    return train_set, test_set
-
-
 def split_sequence_data(
-    dataset: list[list[ActionName]], test_size: float = 0.2
+    dataset: list[list[ActionName]],
+    test_size: float = 0.2,
+    random_shuffle: bool = False,
+    seed: int | None = None,  # noqa: FBT001, FBT002
 ) -> tuple[list[list[ActionName]], list[list[ActionName]]]:
     dataset_copy = dataset.copy()
-    random.shuffle(dataset_copy)
+
+    if random_shuffle:
+        if seed is not None:
+            random.seed(seed)
+        else:
+            random.seed()
+
+        random.shuffle(dataset_copy)
 
     # Calculate the split index based on the test_size
     split_index = int(len(dataset_copy) * (1 - test_size))
