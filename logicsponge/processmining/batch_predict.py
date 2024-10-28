@@ -4,7 +4,6 @@ import time
 
 import matplotlib as mpl
 import pandas as pd
-from aalpy.learning_algs import run_Alergia
 from torch import nn, optim
 
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
@@ -13,11 +12,12 @@ from logicsponge.processmining.data_utils import (
     add_start_to_sequences,
     add_stop_to_sequences,
     data_statistics,
-    split_data,
+    shuffle_sequences,
+    split_sequence_data,
     transform_to_seqs,
 )
 from logicsponge.processmining.globals import START, STOP
-from logicsponge.processmining.models import Alergia, BasicMiner, Fallback, HardVoting, Relativize, SoftVoting
+from logicsponge.processmining.models import BasicMiner, Fallback, HardVoting, Relativize, SoftVoting
 from logicsponge.processmining.neural_networks import LSTMModel, PreprocessData, evaluate_rnn, train_rnn
 from logicsponge.processmining.test_data import dataset
 
@@ -36,22 +36,48 @@ logger = logging.getLogger(__name__)
 random.seed(123)
 
 
-NN_training = False
+NN_training = True
 
 # ============================================================
 # Data preparation
 # ============================================================
 
+# nn_processor = PreprocessData()
+#
+# # Split dataset into train, validation (for RNNs), and test set
+# train_set, remainder = split_data(dataset, 0.3)
+# val_set, test_set = split_data(remainder, 0.5)
+#
+# # Transform into sequences
+# train_set_transformed = transform_to_seqs(train_set)
+# val_set_transformed = transform_to_seqs(val_set)
+# test_set_transformed = transform_to_seqs(test_set)
+#
+# # Append STOP action
+# train_set_transformed = add_stop_to_sequences(train_set_transformed, STOP)
+# val_set_transformed = add_stop_to_sequences(val_set_transformed, STOP)
+# test_set_transformed = add_stop_to_sequences(test_set_transformed, STOP)
+#
+# # For Alergia: Transform action into pair ("in", action)
+# alergia_train_set_transformed = add_input_symbols(train_set_transformed, "in")
+#
+# data_statistics(test_set_transformed)
+
+
+# ============================================================
+# Alternative data preparation
+# ============================================================
+
 nn_processor = PreprocessData()
 
-# Split dataset into train, validation (for RNNs), and test set
-train_set, remainder = split_data(dataset, 0.3)
-val_set, test_set = split_data(remainder, 0.5)
+data = transform_to_seqs(dataset)
+data_statistics(data)
 
-# Transform into sequences
-train_set_transformed = transform_to_seqs(train_set)
-val_set_transformed = transform_to_seqs(val_set)
-test_set_transformed = transform_to_seqs(test_set)
+train_set_transformed, remainder = split_sequence_data(data, 0.3)
+val_set_transformed, test_set_transformed = split_sequence_data(remainder, 0.5)
+
+# train_set for process miners
+train_set = shuffle_sequences(train_set_transformed, False)
 
 # Append STOP action
 train_set_transformed = add_stop_to_sequences(train_set_transformed, STOP)
@@ -60,9 +86,6 @@ test_set_transformed = add_stop_to_sequences(test_set_transformed, STOP)
 
 # For Alergia: Transform action into pair ("in", action)
 alergia_train_set_transformed = add_input_symbols(train_set_transformed, "in")
-
-
-data_statistics(test_set_transformed)
 
 
 # ============================================================
@@ -96,7 +119,7 @@ fallback = Fallback(
 
 hard_voting = HardVoting(
     models=[
-        # BasicMiner(algorithm=Bag()),
+        BasicMiner(algorithm=Bag()),
         BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
         BasicMiner(algorithm=NGram(window_length=2)),
         BasicMiner(algorithm=NGram(window_length=3)),
@@ -118,7 +141,7 @@ soft_voting = SoftVoting(
 
 relativize = Relativize(
     models=[
-        BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
+        BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=5)),
         BasicMiner(algorithm=NGram(window_length=3)),
     ],
     config=config,
@@ -143,8 +166,8 @@ for case_id, action_name in train_set:
     soft_voting.update(case_id, action_name)
     relativize.update(case_id, action_name)
 
-algorithm = run_Alergia(alergia_train_set_transformed, automaton_type="smm", eps=0.5, print_info=True)
-smm = Alergia(algorithm=algorithm)
+# algorithm = run_Alergia(alergia_train_set_transformed, automaton_type="smm", eps=0.5, print_info=True)
+# smm = Alergia(algorithm=algorithm)
 
 strategies = {
     "fpt": (fpt, test_set_transformed),
@@ -157,7 +180,7 @@ strategies = {
     "relativize fpt->ngram_3": (relativize, test_set_transformed),
     "hard voting": (hard_voting, test_set_transformed),
     "soft voting": (soft_voting, test_set_transformed),
-    "alergia": (smm, test_set_transformed),
+    # "alergia": (smm, test_set_transformed),
 }
 
 

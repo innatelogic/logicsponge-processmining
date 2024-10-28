@@ -78,16 +78,9 @@ class BaseStructure(PDFA, ABC):
 
         return current_state
 
-    def update_state_probs(self, state_id: StateId) -> None:
-        """
-        Updates the probability distribution for actions originating from a given state.
-        The probabilities are based on the ratio of visits to successor states relative
-        to the total visits to the current state. They are normalized if
-        the sum of action probabilities exceeds 1, and the STOP probability is set
-        to the remainder to ensure all probabilities sum to 1.
-        """
+    def get_probabilities(self, state_id: StateId) -> ProbDistr:
         total_visits = self.state_info[state_id]["total_visits"]
-        probs = {STOP: 0.0}  # Initialize the probabilities dictionary with STOP action (initial value of 0.0)
+        probs = {STOP: 0.0}  # Initialize the probabilities dictionary with STOP action
 
         # Update the probability for each action based on visits to successors
         for action in self.actions:
@@ -110,8 +103,7 @@ class BaseStructure(PDFA, ABC):
         # Compute the "STOP" probability as the remainder to ensure all probabilities sum to 1
         probs[STOP] = max(0.0, 1.0 - action_sum)
 
-        # Save the updated probability dictionary
-        self.state_info[state_id]["probs"] = probs
+        return probs
 
     def create_state(self, state_id: StateId | None = None) -> State:
         """
@@ -129,7 +121,6 @@ class BaseStructure(PDFA, ABC):
         self.state_info[state_id]["active_visits"] = 0
         self.state_info[state_id]["level"] = 0
         self.state_info[state_id]["access_string"] = {}
-        self.state_info[state_id]["probs"] = {STOP: 1.0, **{action: 0.0 for action in self.actions}}
 
         self.transitions[state_id] = {}
 
@@ -155,7 +146,7 @@ class BaseStructure(PDFA, ABC):
         if state is None or self.state_info.get(state, {}).get("total_visits", 0) < self.min_total_visits:
             return {}
 
-        return self.state_info[state]["probs"]
+        return self.get_probabilities(state)
 
     def case_probs(self, case_id: CaseId) -> ProbDistr:
         """
@@ -213,9 +204,6 @@ class FrequencyPrefixTree(BaseStructure):
         self.state_info[current_state]["action_frequency"][action] += 1
         self.state_info[current_state]["active_visits"] -= 1
         self.state_info[next_state]["active_visits"] += 1
-
-        self.update_state_probs(current_state)
-        self.update_state_probs(next_state)
 
         self.last_transition = (current_state, action, next_state)
 
@@ -305,9 +293,6 @@ class NGram(BaseStructure):
         self.state_info[current_state]["active_visits"] -= 1
         self.state_info[next_state]["active_visits"] += 1
 
-        self.update_state_probs(current_state)
-        self.update_state_probs(next_state)
-
         self.last_transition = (current_state, action, next_state)
 
     def next_state(self, state: StateId | None, action: ActionName) -> StateId | None:
@@ -381,8 +366,5 @@ class Bag(BaseStructure):
         self.state_info[current_state]["action_frequency"][action] += 1
         self.state_info[current_state]["active_visits"] -= 1
         self.state_info[next_state]["active_visits"] += 1
-
-        self.update_state_probs(current_state)
-        self.update_state_probs(next_state)
 
         self.last_transition = (current_state, action, next_state)

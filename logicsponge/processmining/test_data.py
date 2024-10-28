@@ -20,22 +20,60 @@ DATA = "file"
 # ============================================================
 
 data_collection = {
-    "incidents": {
+    "BPI_Challenge_2012": {
+        "url": "https://data.4tu.nl/file/533f66a4-8911-4ac7-8612-1235d65d1f37/3276db7f-8bee-4f2b-88ee-92dbffb5a893",
+        "doi": "10.4121/uuid:3926db30-f712-4394-aebc-75976070e91f",
+        "filetype": "xes.gz",
+        "target_filename": "BPI_Challenge_2012.csv",
+        "case_keys": ["case:concept:name"],
+        "action_keys": ["concept:name"],
+        "delimiter": ",",
+    },
+    "BPI_Challenge_2013": {
         "url": "https://data.4tu.nl/file/0fc5c579-e544-4fab-9143-fab1f5192432/aa51ffbb-25fd-4b5a-b0b8-9aba659b7e8c",
         "doi": "10.4121/uuid:500573e6-accc-4b0c-9576-aa5468b10cee",
         "filetype": "xes.gz",
-        "target_filename": "incidents.csv",
+        "target_filename": "BPI_Challenge_2013.csv",
         "target_foldername": "data",
         "case_keys": ["case:concept:name"],
         "action_keys": ["lifecycle:transition"],
-        # "action_keys": ["concept:name", "lifecycle:transition"],
         "delimiter": ",",
     },
-    "purchase": {
+    "BPI_Challenge_2014": {
+        "url": "https://data.4tu.nl/file/657fb1d6-b4c2-4adc-ba48-ed25bf313025/bd6cfa31-44f8-4542-9bad-f1f70c894728",
+        "doi": "10.4121/uuid:86977bac-f874-49cf-8337-80f26bf5d2ef",
+        "filetype": "csv",
+        "target_filename": "BPI_Challenge_2014.csv",
+        "target_foldername": "data",
+        "case_keys": ["Incident ID"],
+        "action_keys": ["IncidentActivity_Type"],
+        "delimiter": ";",
+    },
+    "BPI_Challenge_2017": {
+        "url": "https://data.4tu.nl/file/34c3f44b-3101-4ea9-8281-e38905c68b8d/f3aec4f7-d52c-4217-82f4-57d719a8298c",
+        "doi": "10.4121/uuid:5f3067df-f10b-45da-b98b-86ae4c7a310b",
+        "filetype": "xes.gz",
+        "target_filename": "BPI_Challenge_2017.csv",
+        "target_foldername": "data",
+        "case_keys": ["case:concept:name"],
+        "action_keys": ["concept:name"],
+        "delimiter": ",",
+    },
+    "BPI_Challenge_2018": {
+        "url": "https://data.4tu.nl/file/443451fd-d38a-4464-88b4-0fc641552632/cd4fd2b8-6c95-47ae-aad9-dc1a085db364",
+        "doi": "10.4121/uuid:3301445f-95e8-4ff0-98a4-901f1f204972",
+        "filetype": "xes.gz",
+        "target_filename": "BPI_Challenge_2018.csv",
+        "target_foldername": "data",
+        "case_keys": ["case:concept:name"],
+        "action_keys": ["concept:name"],
+        "delimiter": ",",
+    },
+    "BPI_Challenge_2019": {
         "url": "https://data.4tu.nl/file/35ed7122-966a-484e-a0e1-749b64e3366d/864493d1-3a58-47f6-ad6f-27f95f995828",
         "doi": "10.4121/uuid:d06aff4b-79f0-45e6-8ec8-e19730c248f1",
         "filetype": "xes",
-        "target_filename": "purchase.csv",
+        "target_filename": "BPI_Challenge_2019.csv",
         "case_keys": ["case:Purchasing Document", "case:Item"],
         "action_keys": ["concept:name"],
         "delimiter": ",",
@@ -47,7 +85,7 @@ data_collection = {
 # ============================================================
 
 if DATA == "file":
-    data_name = "incidents"
+    data_name = "BPI_Challenge_2013"
     data = data_collection[data_name]
     file_path = os.path.join(FOLDERNAME, data["target_filename"])
     data["file_path"] = file_path
@@ -93,23 +131,12 @@ if DATA == "synthetic":
                 # Store the modified sequence
                 sequences.append([*incremented_numbers, STOP])
 
-    dataset = shuffle_sequences(sequences, shuffle=False)
+    dataset = shuffle_sequences(sequences, random_index=False)
 
 
 # ============================================================
 # PDFA simulation
 # ============================================================
-
-
-def translate_format(dataset: list[list[ActionName]]) -> list[tuple[CaseId, ActionName]]:
-    translated = []
-    # Enumerate over the dataset, starting from 1 for the sequence number
-    for seq_number, action_list in enumerate(dataset, start=1):
-        # For each action in the action_list, append a tuple (seq_number, action) to the result
-        translated.extend((seq_number, action) for action in action_list)
-
-    return translated
-
 
 if DATA == "PDFA":
     pdfa = PDFA()
@@ -130,7 +157,7 @@ if DATA == "PDFA":
     pdfa.set_probs(1, {STOP: 0.1, "a": 0.1, "b": 0.8})
     pdfa.set_probs(2, {STOP: 0.1, "a": 0.8, "b": 0.1})
 
-    dataset = translate_format(pdfa.simulate(1000))
+    dataset = shuffle_sequences(pdfa.simulate(1000))
 
 
 # pdfa.create_states(2)

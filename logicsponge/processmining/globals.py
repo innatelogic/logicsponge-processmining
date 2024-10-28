@@ -102,8 +102,11 @@ def probs_prediction(probs: ProbDistr, config: dict[str, Any] | None = None) -> 
     if not probs_copy:
         return {}
 
-    # Convert dictionary to a list of items (actions and probabilities)
-    actions, probabilities = zip(*probs_copy.items(), strict=True)
+    # Convert dictionary to a sorted list of items (actions and probabilities) for consistency
+    sorted_probs = sorted(probs_copy.items(), key=lambda x: (-x[1], x[0]))
+
+    # Extract actions and probabilities in a consistent way
+    actions, probabilities = zip(*sorted_probs, strict=True)
 
     # Convert the probabilities to a numpy array
     probabilities_array = np.array(probabilities)
@@ -127,4 +130,9 @@ def probs_prediction(probs: ProbDistr, config: dict[str, Any] | None = None) -> 
     highest_probability = float(probabilities_array[actions.index(predicted_action)])
 
     # Return the predicted action, top-k actions, and the probability of the predicted action
-    return {"action": predicted_action, "top_k_actions": top_k_actions, "probability": highest_probability}
+    return {
+        "action": predicted_action,
+        "top_k_actions": top_k_actions,
+        "probability": highest_probability,
+        "probs": probs_copy,
+    }

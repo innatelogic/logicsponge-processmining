@@ -3,6 +3,7 @@ import logging
 import os
 import random
 import shutil
+from collections import Counter
 from typing import cast
 
 import pandas as pd
@@ -22,34 +23,37 @@ random.seed(123)
 # ============================================================
 
 
-def shuffle_sequences(sequences, shuffle=True):  # noqa: FBT002
+def shuffle_sequences(sequences: list[list[ActionName]], random_index=True) -> list[tuple[CaseId, ActionName]]:  # noqa: FBT002
     """
     Takes a list of sequences (list of lists) and returns a shuffled version
     while preserving the order within each sequence.
 
     Parameters:
     sequences (list of lists): The sequences to be processed.
-    shuffle (bool): Whether to shuffle the sequence selection or not.
+    random_index (bool): Whether a sequence index is chosen randomly.
 
     Returns:
     list of tuples: A list containing tuples of (sequence_index, value).
     """
+    # Create a copy of sequences to avoid modifying the original list
+    sequences_copy = [seq.copy() for seq in sequences]
+
     # Create a list of indices to track the sequences
-    indices = list(range(len(sequences)))
+    indices = list(range(len(sequences_copy)))
 
     # Resulting shuffled dataset
     shuffled_dataset = []
 
     # While there are still sequences with elements left
     while indices:
-        chosen_index = random.choice(indices) if shuffle else indices[0]  # noqa: S311
+        chosen_index = random.choice(indices) if random_index else indices[0]  # noqa: S311
 
         # Pop the first element from the chosen sequence
-        value = sequences[chosen_index].pop(0)
+        value = sequences_copy[chosen_index].pop(0)
         shuffled_dataset.append((str(chosen_index), str(value)))
 
         # If the chosen sequence is now empty, remove its index from consideration
-        if not sequences[chosen_index]:
+        if not sequences_copy[chosen_index]:
             indices.remove(chosen_index)
 
     return shuffled_dataset
@@ -141,15 +145,47 @@ def split_data(
     return train_set, test_set
 
 
+def split_sequence_data(
+    dataset: list[list[ActionName]], test_size: float = 0.2
+) -> tuple[list[list[ActionName]], list[list[ActionName]]]:
+    dataset_copy = dataset.copy()
+    random.shuffle(dataset_copy)
+
+    # Calculate the split index based on the test_size
+    split_index = int(len(dataset_copy) * (1 - test_size))
+
+    # Split the dataset into training and test sets
+    train_set = dataset_copy[:split_index]
+    test_set = dataset_copy[split_index:]
+
+    return train_set, test_set
+
+
 # ============================================================
 # Statistics
 # ============================================================
 
 
 def data_statistics(data: list[list[ActionName]]) -> None:
+    # Calculate total length of sequences and average length
     total_length = sum(len(lst) for lst in data)
     average_length = total_length / len(data) if data else 0
-    msg = f"Total number of actions in test set: {total_length}\nAverage length of test sequences: {average_length}"
+
+    # Flatten list of sequences and count the occurrences of each action
+    flattened_data = [action for lst in data for action in lst]
+    action_counter = Counter(flattened_data)
+
+    # Extract unique actions and total number of occurrences
+    unique_actions = list(action_counter.keys())
+    action_occurrences = dict(action_counter)
+
+    msg = (
+        f"Number of cases: {len(data)}\n"
+        f"Average length of case: {average_length}\n"
+        f"Number of actions: {len(unique_actions)}\n"
+        f"Number of events: {total_length}\n"
+        f"Action occurrences: {action_occurrences}\n"
+    )
     logger.info(msg)
 
 
