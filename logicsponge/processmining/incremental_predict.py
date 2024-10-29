@@ -34,18 +34,20 @@ class ListStreamer(ls.SourceTerm):
     For streaming from list.
     """
 
-    def __init__(self, *args, list_name: list, **kwargs):
+    def __init__(self, *args, data_list: list, **kwargs):
         super().__init__(*args, **kwargs)
-        self.list_name = list_name
+        self.data_list = data_list
+        self.remaining = len(data_list)
 
     def run(self):
-        for case_id, action in self.list_name:
-            out = DataItem({"case_id": case_id, "action": action})
-            self.output(out)
-            # time.sleep(0.001)
+        if self.remaining > 0:
+            for case_id, action in self.data_list:
+                out = DataItem({"case_id": case_id, "action": action})
+                self.output(out)
+                self.remaining -= 1
 
-        logging.info("Finished streaming.")
-        time.sleep(600)
+            logging.info("Finished streaming.")
+            time.sleep(1000)
 
 
 class AddStartSymbol(ls.FunctionTerm):
@@ -108,18 +110,25 @@ class StreamingActionPredictor(ls.FunctionTerm):
         ds_view.next()
         item = ds_view[-1]
         case_id = item["case_id"]
-        if case_id not in self.case_ids:
+        if case_id not in self.case_ids:  # no prediction for __start__ symbol
             self.strategy.update(item["case_id"], item["action"])
             self.case_ids.add(case_id)
         else:
+            start_time = time.time()
+
             probs = self.strategy.case_probs(item["case_id"])
             prediction = probs_prediction(probs, self.strategy.config)
             self.strategy.update(item["case_id"], item["action"])
+
+            end_time = time.time()
+            latency = (end_time - start_time) * 1000  # latency in milliseconds (ms)
+
             out = DataItem(
                 {
                     "case_id": item["case_id"],
                     "prediction": prediction,  # containing predicted action
                     "action": item["action"],  # actual action
+                    "latency": latency,
                 }
             )
             self.output(out)
@@ -132,8 +141,13 @@ class Evaluation(ls.FunctionTerm):
         self.total_predictions = 0
         self.missing_predictions = 0
         self.top_actions = top_actions
+        self.latency_sum = 0
+        self.latency_max = 0
 
     def f(self, item: DataItem) -> DataItem:
+        self.latency_sum += item["latency"]
+        self.latency_max = max(item["latency"], self.latency_max)
+
         if not item["prediction"]:
             self.missing_predictions += 1
         elif self.top_actions:
@@ -157,6 +171,8 @@ class Evaluation(ls.FunctionTerm):
                 "total_predictions": self.total_predictions,
                 "missing_predictions": self.missing_predictions,
                 "accuracy": accuracy,
+                "latency_mean": self.latency_sum / self.total_predictions,
+                "latency_max": self.latency_max,
             }
         )
 
@@ -170,25 +186,41 @@ config = {
 }
 
 fpt = StreamingActionPredictor(
-    strategy=BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=2), config=config),
+    strategy=BasicMiner(algorithm=FrequencyPrefixTree(), config=config),
 )
 
 bag = StreamingActionPredictor(
     strategy=BasicMiner(algorithm=Bag(), config=config),
 )
 
+ngram_1 = StreamingActionPredictor(
+    strategy=BasicMiner(algorithm=NGram(window_length=0), config=config),
+)
+
 ngram_2 = StreamingActionPredictor(
+    strategy=BasicMiner(algorithm=NGram(window_length=1), config=config),
+)
+
+ngram_3 = StreamingActionPredictor(
     strategy=BasicMiner(algorithm=NGram(window_length=2), config=config),
 )
 
 ngram_4 = StreamingActionPredictor(
+    strategy=BasicMiner(algorithm=NGram(window_length=3), config=config),
+)
+
+ngram_5 = StreamingActionPredictor(
     strategy=BasicMiner(algorithm=NGram(window_length=4), config=config),
+)
+
+ngram_6 = StreamingActionPredictor(
+    strategy=BasicMiner(algorithm=NGram(window_length=5), config=config),
 )
 
 fallback = StreamingActionPredictor(
     strategy=Fallback(
         models=[
-            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
+            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=1)),
             BasicMiner(algorithm=NGram(window_length=3)),
         ],
         config=config,
@@ -198,7 +230,8 @@ fallback = StreamingActionPredictor(
 hard_voting = StreamingActionPredictor(
     strategy=HardVoting(
         models=[
-            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
+            BasicMiner(algorithm=Bag()),
+            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
             BasicMiner(algorithm=NGram(window_length=2)),
             BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
@@ -210,7 +243,8 @@ hard_voting = StreamingActionPredictor(
 soft_voting = StreamingActionPredictor(
     strategy=SoftVoting(
         models=[
-            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
+            BasicMiner(algorithm=Bag()),
+            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
             BasicMiner(algorithm=NGram(window_length=2)),
             BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
@@ -223,7 +257,8 @@ soft_voting = StreamingActionPredictor(
 adaptive_voting = StreamingActionPredictor(
     strategy=AdaptiveVoting(
         models=[
-            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=20)),
+            BasicMiner(algorithm=Bag()),
+            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
             BasicMiner(algorithm=NGram(window_length=2)),
             BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
@@ -256,45 +291,60 @@ lstm = StreamingActionPredictor(
 # DataSponge
 # ====================================================
 
-acc_list = [
-    "fpt.accuracy",
-    "bag.accuracy",
-    "ngram_2.accuracy",
-    "ngram_4.accuracy",
-    "fallback.accuracy",
-    "hard_voting.accuracy",
-    "soft_voting.accuracy",
-    "adaptive_voting.accuracy",
-    # "lstm.accuracy",
+# Model names
+models = [
+    "fpt",
+    "bag",
+    "ngram_1",
+    "ngram_2",
+    "ngram_3",
+    "ngram_4",
+    "ngram_5",
+    "ngram_6",
+    "fallback",
+    "hard_voting",
+    "soft_voting",
+    "adaptive_voting",
+    "lstm",
 ]
 
+acc_list = [f"{model}.accuracy" for model in models]
+latency_mean_list = [f"{model}.latency_mean" for model in models]
+latency_max_list = [f"{model}.latency_max" for model in models]
+
 # streamer = file.CSVStreamer(file_path=data["file_path"], delay=0, poll_delay=2)
-streamer = ListStreamer(list_name=dataset, delay=0.0)
+streamer = ListStreamer(data_list=dataset, delay=0.0)
 
 sponge = (
     streamer
     # Only for CSV files:
     # * DataPreparation(case_keys=data["case_keys"], action_keys=data["action_keys"])
     * ls.KeyFilter(keys=["case_id", "action"])
-    # * RemoveStuttering()
     * AddStartSymbol()
     # * ls.Print()
     * (
         (fpt * Evaluation("fpt"))
         | (bag * Evaluation("bag"))
+        | (ngram_1 * Evaluation("ngram_1"))
         | (ngram_2 * Evaluation("ngram_2"))
+        | (ngram_3 * Evaluation("ngram_3"))
         | (ngram_4 * Evaluation("ngram_4"))
+        | (ngram_5 * Evaluation("ngram_5"))
+        | (ngram_6 * Evaluation("ngram_6"))
         | (fallback * Evaluation("fallback"))
         | (hard_voting * Evaluation("hard_voting"))
         | (soft_voting * Evaluation("soft_voting"))
         | (adaptive_voting * Evaluation("adaptive_voting"))
-        # | (lstm * Evaluation("lstm"))
+        | (lstm * Evaluation("lstm"))
     )
     * ls.ToSingleStream(flatten=True)
-    * ls.KeyFilter(keys=acc_list)
+    # * ls.Print()
+    # * ls.KeyFilter(keys=acc_list)
     * ls.AddIndex(key="index")
     # * ls.Print()
-    * (dashboard.Plot("Accuracy", x="index", y=acc_list))
+    * (dashboard.Plot("Accuracy (%)", x="index", y=acc_list))
+    * (dashboard.Plot("Latency Mean (ms)", x="index", y=latency_mean_list))
+    * (dashboard.Plot("Latency Max (ms)", x="index", y=latency_max_list))
 )
 
 
