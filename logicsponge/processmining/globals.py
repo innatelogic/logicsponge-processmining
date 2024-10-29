@@ -25,8 +25,8 @@ ProbDistr = dict[ActionName, float]
 # Constants
 # ============================================================
 
-START: ActionName = "start"  # start action
-STOP: ActionName = "stop"  # stop action
+START: ActionName = "__start__"  # start action
+STOP: ActionName = "__stop__"  # stop action
 
 DISCOUNT = 0.9
 

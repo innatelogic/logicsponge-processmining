@@ -54,7 +54,7 @@ n_iterations = 5
 
 # Store metrics across iterations
 all_metrics = {
-    name: []
+    name: {"accuracies": [], "num_states": []}
     for name in [
         "fpt",
         "bag",
@@ -189,6 +189,7 @@ for iteration in range(n_iterations):
     # Evaluation
     # ============================================================
 
+    # All strategies (without LSTM)
     strategies = {
         "fpt": (fpt, test_set_transformed),
         "bag": (bag, test_set_transformed),
@@ -212,6 +213,7 @@ for iteration in range(n_iterations):
         "Empty (%)": [],
         "Correct (Total)": [],
         "Total Predictions": [],
+        "Number of States": [],
     }
 
     for strategy_name, (strategy, test_data) in strategies.items():
@@ -223,6 +225,8 @@ for iteration in range(n_iterations):
         wrong_percentage = (stats["wrong_predictions"] / total * 100) if total > 0 else 0
         empty_percentage = (stats["empty_predictions"] / total * 100) if total > 0 else 0
 
+        num_states = len(strategy.algorithm.states) if isinstance(strategy, BasicMiner) else None
+
         # Append data to the iteration data dictionary
         iteration_data["Model"].append(strategy_name)
         iteration_data["Correct (%)"].append(correct_percentage)
@@ -230,10 +234,13 @@ for iteration in range(n_iterations):
         iteration_data["Empty (%)"].append(empty_percentage)
         iteration_data["Correct (Total)"].append(stats["correct_predictions"])
         iteration_data["Total Predictions"].append(total)
+        iteration_data["Number of States"].append(num_states)
 
         # Calculate and append accuracy to all_metrics for final statistics
         accuracy = stats["correct_predictions"] / total if total > 0 else 0
-        all_metrics[strategy_name].append(accuracy)
+
+        all_metrics[strategy_name]["accuracies"].append(accuracy)
+        all_metrics[strategy_name]["num_states"].append(num_states)
 
     # Create a DataFrame for the iteration and log it
     iteration_df = pd.DataFrame(iteration_data)
@@ -268,7 +275,7 @@ for iteration in range(n_iterations):
         )
 
         lstm_accuracy = evaluate_rnn(model, nn_test_set_transformed, dataset_type="Test")
-        all_metrics["LSTM"].append(lstm_accuracy)
+        all_metrics["LSTM"]["accuracies"].append(lstm_accuracy)
 
 # ============================================================
 # Calculate and Show Final Results
@@ -278,15 +285,28 @@ results = {
     "Model": [],
     "Mean Accuracy (%)": [],
     "Std Dev Accuracy (%)": [],
+    "Mean Number of States": [],
 }
 
-for model_name, accuracies in all_metrics.items():
-    mean_acc = np.mean(accuracies) * 100
-    std_acc = np.std(accuracies) * 100
-
+for model_name, stats in all_metrics.items():
     results["Model"].append(model_name)
+
+    if len(stats["accuracies"]) > 0:
+        mean_acc = np.mean(stats["accuracies"]) * 100
+        std_acc = np.std(stats["accuracies"]) * 100
+    else:
+        mean_acc = None
+        std_acc = None
+
     results["Mean Accuracy (%)"].append(mean_acc)
     results["Std Dev Accuracy (%)"].append(std_acc)
+
+    if len(stats["num_states"]) > 0 and None not in stats["num_states"]:
+        mean_num_states = np.mean(stats["num_states"])
+    else:
+        mean_num_states = None
+
+    results["Mean Number of States"].append(mean_num_states)
 
 # Create a DataFrame and print it
 df = pd.DataFrame(results)

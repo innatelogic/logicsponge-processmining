@@ -38,6 +38,10 @@ class BaseStructure(PDFA, ABC):
 
         self.initial_state = 0
 
+    @property
+    def states(self) -> list[StateId]:
+        return list(self.state_info.keys())
+
     def initialize_case(self, case_id: CaseId):
         self.case_info[case_id] = {}
         self.case_info[case_id]["state"] = self.initial_state
