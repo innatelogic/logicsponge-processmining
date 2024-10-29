@@ -88,8 +88,8 @@ def transform_to_seqs(data: list[tuple[CaseId, ActionName]]) -> list[list[Action
 def split_sequence_data(
     dataset: list[list[ActionName]],
     test_size: float = 0.2,
-    random_shuffle: bool = False,
-    seed: int | None = None,  # noqa: FBT001, FBT002
+    random_shuffle: bool = False,  # noqa: FBT001, FBT002
+    seed: int | None = None,
 ) -> tuple[list[list[ActionName]], list[list[ActionName]]]:
     dataset_copy = dataset.copy()
 
