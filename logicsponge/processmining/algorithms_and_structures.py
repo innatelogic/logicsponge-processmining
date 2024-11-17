@@ -372,3 +372,70 @@ class Bag(BaseStructure):
         self.state_info[next_state]["active_visits"] += 1
 
         self.last_transition = (current_state, action, next_state)
+
+
+# ============================================================
+# Parikh Miner
+# ============================================================
+
+
+class Parikh(BaseStructure):
+    def __init__(self, *args, upper_bound: int | None = None, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        initial_vector: dict[ActionName, int] = {}
+        self.state_info[self.initial_state]["parikh_vector"] = {}
+        self.parikh_vectors: dict[str, StateId] = {self.parikh_hash(initial_vector): self.initial_state}
+        self.upper_bound = upper_bound
+
+    @staticmethod
+    def parikh_hash(d: dict) -> str:
+        return str(sorted(d.items()))
+
+    def update(self, case_id: CaseId, action: ActionName) -> None:
+        """
+        Updates DFA tree structure of the process miner object by adding a new action to case
+        """
+        self.add_action(action)
+
+        if case_id not in self.case_info:
+            self.initialize_case(case_id)
+
+        current_state = self.case_info[case_id]["state"]
+
+        if current_state not in self.transitions:
+            self.transitions[current_state] = {}
+
+        if action in self.transitions[current_state]:
+            next_state = self.transitions[current_state][action]
+        else:
+            self.state_info[current_state]["action_frequency"][action] = 0
+
+            current_vector = self.state_info[current_state]["parikh_vector"]
+            next_vector = current_vector.copy()
+            if action in next_vector:
+                if self.upper_bound is not None:
+                    next_vector[action] = min(next_vector[action] + 1, self.upper_bound)
+                else:
+                    next_vector[action] += 1
+            elif self.upper_bound is not None:
+                next_vector[action] = min(1, self.upper_bound)
+            else:
+                next_vector[action] = 1
+
+            hashed_next_vector = self.parikh_hash(next_vector)
+            if hashed_next_vector in self.parikh_vectors:
+                next_state = self.parikh_vectors[hashed_next_vector]
+            else:
+                next_state = self.create_state().state_id
+                self.state_info[next_state]["parikh_vector"] = next_vector
+                self.parikh_vectors[hashed_next_vector] = next_state
+
+            self.transitions[current_state][action] = next_state
+
+        self.case_info[case_id]["state"] = next_state
+        self.state_info[next_state]["total_visits"] += 1
+        self.state_info[current_state]["action_frequency"][action] += 1
+        self.state_info[current_state]["active_visits"] -= 1
+        self.state_info[next_state]["active_visits"] += 1
+
+        self.last_transition = (current_state, action, next_state)

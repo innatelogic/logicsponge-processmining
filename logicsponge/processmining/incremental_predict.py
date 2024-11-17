@@ -268,7 +268,7 @@ adaptive_voting = StreamingActionPredictor(
 )
 
 
-vocab_size = 50  # Assume an upper bound on the number of activities, or adjust dynamically
+vocab_size = 50  # An upper bound on the number of activities
 embedding_dim = 50
 hidden_dim = 128
 output_dim = vocab_size  # Predict the next activity
@@ -294,23 +294,24 @@ lstm = StreamingActionPredictor(
 # Model names
 models = [
     "fpt",
-    "bag",
-    "ngram_1",
-    "ngram_2",
-    "ngram_3",
-    "ngram_4",
-    "ngram_5",
-    "ngram_6",
-    "fallback",
-    "hard_voting",
-    "soft_voting",
-    "adaptive_voting",
+    # "bag",
+    # "ngram_1",
+    # "ngram_2",
+    # "ngram_3",
+    # "ngram_4",
+    # "ngram_5",
+    # "ngram_6",
+    # "fallback",
+    # "hard_voting",
+    # "soft_voting",
+    # "adaptive_voting",
     "lstm",
 ]
 
-acc_list = [f"{model}.accuracy" for model in models]
+accuracy_list = [f"{model}.accuracy" for model in models]
 latency_mean_list = [f"{model}.latency_mean" for model in models]
 latency_max_list = [f"{model}.latency_max" for model in models]
+all_attributes = ["index", *accuracy_list, *latency_mean_list]
 
 # streamer = file.CSVStreamer(file_path=data["file_path"], delay=0, poll_delay=2)
 streamer = ListStreamer(data_list=dataset, delay=0.0)
@@ -321,30 +322,28 @@ sponge = (
     # * DataPreparation(case_keys=data["case_keys"], action_keys=data["action_keys"])
     * ls.KeyFilter(keys=["case_id", "action"])
     * AddStartSymbol()
-    # * ls.Print()
     * (
         (fpt * Evaluation("fpt"))
-        | (bag * Evaluation("bag"))
-        | (ngram_1 * Evaluation("ngram_1"))
-        | (ngram_2 * Evaluation("ngram_2"))
-        | (ngram_3 * Evaluation("ngram_3"))
-        | (ngram_4 * Evaluation("ngram_4"))
-        | (ngram_5 * Evaluation("ngram_5"))
-        | (ngram_6 * Evaluation("ngram_6"))
-        | (fallback * Evaluation("fallback"))
-        | (hard_voting * Evaluation("hard_voting"))
-        | (soft_voting * Evaluation("soft_voting"))
-        | (adaptive_voting * Evaluation("adaptive_voting"))
+        # | (bag * Evaluation("bag"))
+        # | (ngram_1 * Evaluation("ngram_1"))
+        # | (ngram_2 * Evaluation("ngram_2"))
+        # | (ngram_3 * Evaluation("ngram_3"))
+        # | (ngram_4 * Evaluation("ngram_4"))
+        # | (ngram_5 * Evaluation("ngram_5"))
+        # | (ngram_6 * Evaluation("ngram_6"))
+        # | (fallback * Evaluation("fallback"))
+        # | (hard_voting * Evaluation("hard_voting"))
+        # | (soft_voting * Evaluation("soft_voting"))
+        # | (adaptive_voting * Evaluation("adaptive_voting"))
         | (lstm * Evaluation("lstm"))
     )
     * ls.ToSingleStream(flatten=True)
-    # * ls.Print()
-    # * ls.KeyFilter(keys=acc_list)
     * ls.AddIndex(key="index")
-    # * ls.Print()
-    * (dashboard.Plot("Accuracy (%)", x="index", y=acc_list))
+    * ls.KeyFilter(keys=all_attributes)
+    * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 100 == 0 or item["index"] >= len(dataset) - 10)
+    * ls.Print()
+    * (dashboard.Plot("Accuracy (%)", x="index", y=accuracy_list))
     * (dashboard.Plot("Latency Mean (ms)", x="index", y=latency_mean_list))
-    * (dashboard.Plot("Latency Max (ms)", x="index", y=latency_max_list))
 )
 
 

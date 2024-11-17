@@ -10,9 +10,9 @@ FOLDERNAME = "data"
 file_handler = FileHandler(folder=FOLDERNAME)
 
 
-DATA = "file"
+# DATA = "file"
 # DATA = "synthetic"
-# DATA = "PDFA"
+DATA = "PDFA"
 
 
 # ============================================================
@@ -78,6 +78,15 @@ data_collection = {
         "action_keys": ["concept:name"],
         "delimiter": ",",
     },
+    "Sepsis_Cases": {
+        "url": "https://data.4tu.nl/file/33632f3c-5c48-40cf-8d8f-2db57f5a6ce7/643dccf2-985a-459e-835c-a82bce1c0339",
+        "doi": "10.4121/uuid:915d2bfb-7e84-49ad-a286-dc35f063a460",
+        "filetype": "xes.gz",
+        "target_filename": "Sepsis_Cases.csv",
+        "case_keys": ["case:concept:name"],
+        "action_keys": ["concept:name"],
+        "delimiter": ",",
+    },
 }
 
 # ============================================================
@@ -85,7 +94,7 @@ data_collection = {
 # ============================================================
 
 if DATA == "file":
-    data_name = "BPI_Challenge_2012"
+    data_name = "Sepsis_Cases"
     data = data_collection[data_name]
     file_path = os.path.join(FOLDERNAME, data["target_filename"])
     data["file_path"] = file_path
@@ -113,7 +122,7 @@ if DATA == "synthetic":
 
     # Open the file and process it line by line
     with open(
-        "/Users/bollig/innatelogic/git/circuits/innatelogic/circuits/process_mining/data/5.pautomac.train"
+        "/Users/bollig/innatelogic/git/circuits/innatelogic/circuits/process_mining/data/10.pautomac.train"
     ) as file:
         # Skip the first line (a header)
         next(file)
@@ -138,6 +147,23 @@ if DATA == "synthetic":
 # PDFA simulation
 # ============================================================
 
+
+# if DATA == "PDFA":
+#     pdfa = PDFA()
+#
+#     pdfa.add_actions(["a", "b"])
+#
+#     pdfa.create_states(1)
+#     pdfa.set_initial_state(0)
+#
+#     pdfa.transitions[0]["a"] = 0
+#     pdfa.transitions[0]["b"] = 0
+#
+#     pdfa.set_probs(0, {STOP: 0.01, "a": 0.495, "b": 0.495})
+#
+#     dataset = interleave_sequences(pdfa.simulate(30))
+
+
 if DATA == "PDFA":
     pdfa = PDFA()
 
@@ -154,17 +180,7 @@ if DATA == "PDFA":
     pdfa.transitions[2]["b"] = 2
 
     pdfa.set_probs(0, {STOP: 0.0, "a": 0.5, "b": 0.5})
-    pdfa.set_probs(1, {STOP: 0.1, "a": 0.1, "b": 0.8})
-    pdfa.set_probs(2, {STOP: 0.1, "a": 0.8, "b": 0.1})
+    pdfa.set_probs(1, {STOP: 0.2, "a": 0.6, "b": 0.2})
+    pdfa.set_probs(2, {STOP: 0.2, "a": 0.2, "b": 0.6})
 
     dataset = interleave_sequences(pdfa.simulate(1000))
-
-
-# pdfa.create_states(2)
-# pdfa.set_initial_state(0)
-#
-# pdfa.transitions[0]["a"] = 1
-# pdfa.transitions[1]["b"] = 0
-#
-# pdfa.set_probs(0, [0.1, 0.9, 0.0])
-# pdfa.set_probs(1, [0.1, 0.0, 0.9])

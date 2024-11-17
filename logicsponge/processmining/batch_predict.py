@@ -7,7 +7,7 @@ import pandas as pd
 from aalpy.learning_algs import run_Alergia
 from torch import nn, optim
 
-from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
+from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram, Parikh
 from logicsponge.processmining.data_utils import (
     add_input_symbols,
     add_start_to_sequences,
@@ -50,7 +50,8 @@ data_statistics(data)
 # Define the number of iterations
 # ============================================================
 
-n_iterations = 5
+# n_iterations = 5
+n_iterations = 1
 
 # Store metrics across iterations
 all_metrics = {
@@ -58,6 +59,7 @@ all_metrics = {
     for name in [
         "fpt",
         "bag",
+        "parikh",
         "ngram_1",
         "ngram_2",
         "ngram_3",
@@ -103,9 +105,11 @@ for iteration in range(n_iterations):
         "include_stop": True,
     }
 
-    fpt = BasicMiner(algorithm=FrequencyPrefixTree(), config=config)
+    fpt = BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=1), config=config)
 
     bag = BasicMiner(algorithm=Bag(), config=config)
+
+    parikh = BasicMiner(algorithm=Parikh(upper_bound=2), config=config)
 
     ngram_1 = BasicMiner(algorithm=NGram(window_length=0), config=config)
 
@@ -162,6 +166,7 @@ for iteration in range(n_iterations):
     for case_id, action_name in train_set:
         fpt.update(case_id, action_name)
         bag.update(case_id, action_name)
+        parikh.update(case_id, action_name)
         ngram_1.update(case_id, action_name)
         ngram_2.update(case_id, action_name)
         ngram_3.update(case_id, action_name)
@@ -193,6 +198,7 @@ for iteration in range(n_iterations):
     strategies = {
         "fpt": (fpt, test_set_transformed),
         "bag": (bag, test_set_transformed),
+        "parikh": (parikh, test_set_transformed),
         "ngram_1": (ngram_1, test_set_transformed),
         "ngram_2": (ngram_2, test_set_transformed),
         "ngram_3": (ngram_3, test_set_transformed),
