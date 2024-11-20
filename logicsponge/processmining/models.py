@@ -626,7 +626,10 @@ class NeuralNetworkMiner(StreamingMiner):
         self.sequences[case_id].append(action_idx)
 
         # Continue with the training step using the updated sequence
+        start_time = time.time()
         batch = self.select_batch(case_id)
+        end_time = time.time()
+        print(f"select batch, time needed: {(end_time - start_time) * 1000}")
 
         # Ensure each sequence in the batch has at least two tokens
         if not batch:
@@ -635,8 +638,11 @@ class NeuralNetworkMiner(StreamingMiner):
             return None
 
         # Convert the batch of sequences into tensors, padding them to the same length
+        start_time = time.time()
         batch_sequences = [torch.tensor(seq, dtype=torch.long) for seq in batch]
         x_batch = pad_sequence(batch_sequences, batch_first=True, padding_value=0)
+        end_time = time.time()
+        print(f"convert batch, time needed: {(end_time - start_time) * 1000}")
 
         # Input is all but the last token in each sequence, target is shifted by one position
         x_input = x_batch[:, :-1]  # Input sequence
@@ -661,7 +667,10 @@ class NeuralNetworkMiner(StreamingMiner):
         y_target = y_target[mask]
 
         # Compute loss
+        start_time = time.time()
         loss = self.criterion(outputs, y_target)
+        end_time = time.time()
+        print(f"compute loss, time needed: {(end_time - start_time) * 1000}")
 
         # Backward pass and gradient clipping
         start_time = time.time()
