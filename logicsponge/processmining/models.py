@@ -678,7 +678,7 @@ class NeuralNetworkMiner(StreamingMiner):
         # Backward pass and gradient clipping
         start_time = time.time()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+        # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
         end_time = time.time()
         print(f"backward pass, time needed: {(end_time - start_time) * 1000}")
 
