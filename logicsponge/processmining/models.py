@@ -628,6 +628,8 @@ class NeuralNetworkMiner(StreamingMiner):
         # Continue with the training step using the updated sequence
         batch = self.select_batch(case_id)
 
+        print(f"Batch: {batch}")
+
         # Ensure each sequence in the batch has at least two tokens
         if not batch:
             msg = "Skipping training step because no valid sequences were found."
