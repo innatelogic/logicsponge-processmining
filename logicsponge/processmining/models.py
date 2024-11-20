@@ -656,6 +656,7 @@ class NeuralNetworkMiner(StreamingMiner):
         end_time = time.time()
         print(f"forward pass, time needed: {(end_time - start_time) * 1000}")
 
+        start_time = time.time()
         # Reshape outputs to [batch_size * sequence_length, vocab_size] for loss calculation
         outputs = outputs.view(-1, outputs.shape[-1])
 
@@ -665,6 +666,8 @@ class NeuralNetworkMiner(StreamingMiner):
         # Apply the mask
         outputs = outputs[mask]
         y_target = y_target[mask]
+        end_time = time.time()
+        print(f"reshape & mask, time needed: {(end_time - start_time) * 1000}")
 
         # Compute loss
         start_time = time.time()
@@ -679,10 +682,12 @@ class NeuralNetworkMiner(StreamingMiner):
         end_time = time.time()
         print(f"backward pass, time needed: {(end_time - start_time) * 1000}")
 
+        start_time = time.time()
         self.optimizer.step()
+        end_time = time.time()
+        print(f"optimizer step, time needed: {(end_time - start_time) * 1000}")
 
         update_end_time = time.time()
-
         print(f"end update, time needed: {(update_end_time - update_start_time) * 1000}")
         print("==========")
 
