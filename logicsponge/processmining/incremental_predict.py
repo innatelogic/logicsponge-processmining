@@ -274,7 +274,8 @@ hidden_dim = 128
 output_dim = vocab_size  # Predict the next activity
 model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim)
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+# optimizer = optim.Adam(model.parameters(), lr=0.001)
+optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 
 lstm = StreamingActionPredictor(
     strategy=NeuralNetworkMiner(
