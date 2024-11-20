@@ -1,6 +1,7 @@
 import copy
 import logging
 import random
+import time
 from abc import ABC, abstractmethod
 from collections import Counter, OrderedDict
 from typing import Any
@@ -606,6 +607,10 @@ class NeuralNetworkMiner(StreamingMiner):
         Add an action to the sequence corresponding to the case_id.
         Dynamically update the activity_to_idx mapping if a new action is encountered.
         """
+
+        print("begin update")
+        update_start_time = time.time()
+
         # Dynamically update activity_to_idx if the action is new
         if action not in self.action_index:
             current_idx = len(self.action_index) + 1  # Get the next available index
@@ -661,6 +666,11 @@ class NeuralNetworkMiner(StreamingMiner):
 
         self.optimizer.step()
 
+        update_end_time = time.time()
+
+        print(f"end update, time needed: {(update_end_time - update_start_time) * 1000}")
+        print("==========")
+
         return loss.item()
 
     def select_batch(self, case_id):
@@ -668,6 +678,10 @@ class NeuralNetworkMiner(StreamingMiner):
         Select a batch of sequences, using a round-robin approach.
         Only select sequences that have at least two tokens (input + target).
         """
+
+        print("begin select_batch")
+
+        batch_start_time = time.time()
 
         valid_case_ids = [cid for cid, sequence in self.sequences.items() if len(sequence) > 1]
 
@@ -702,6 +716,10 @@ class NeuralNetworkMiner(StreamingMiner):
                 break
 
         # batch = [self.get_sequence(cid) for cid in batch_case_ids]
+
+        batch_end_time = time.time()
+
+        print(f"end select_batch, time needed: {(batch_end_time - batch_start_time) * 1000}")
 
         # Fetch the actual sequences based on the selected case_ids
         return [self.get_sequence(cid) for cid in batch_case_ids]
