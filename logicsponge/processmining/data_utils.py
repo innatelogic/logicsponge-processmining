@@ -27,7 +27,7 @@ def interleave_sequences(sequences: list[list[ActionName]], random_index=True) -
     while preserving the order within each sequence.
     """
     # Create a copy of sequences to avoid modifying the original list
-    sequences_copy = [seq.copy() for seq in sequences]
+    sequences_copy = [seq.copy() for seq in sequences if seq]
 
     # Create a list of indices to track the sequences
     indices = list(range(len(sequences_copy)))

@@ -4,7 +4,7 @@ import time
 from torch import nn, optim
 
 import logicsponge.core as ls
-from logicsponge.core import DataItem, dashboard
+from logicsponge.core import DataItem  # , dashboard
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
 from logicsponge.processmining.data_utils import handle_keys
 from logicsponge.processmining.globals import probs_prediction
@@ -342,12 +342,12 @@ sponge = (
     * ls.KeyFilter(keys=all_attributes)
     * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 100 == 0 or item["index"] >= len(dataset) - 10)
     * ls.Print()
-    * (dashboard.Plot("Accuracy (%)", x="index", y=accuracy_list))
-    * (dashboard.Plot("Latency Mean (ms)", x="index", y=latency_mean_list))
+    # * (dashboard.Plot("Accuracy (%)", x="index", y=accuracy_list))
+    # * (dashboard.Plot("Latency Mean (ms)", x="index", y=latency_mean_list))
 )
 
 
 sponge.start()
 
-dashboard.show_stats(sponge)
-dashboard.run()
+# dashboard.show_stats(sponge)
+# dashboard.run()

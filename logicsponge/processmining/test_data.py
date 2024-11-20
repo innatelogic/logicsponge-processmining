@@ -10,9 +10,10 @@ FOLDERNAME = "data"
 file_handler = FileHandler(folder=FOLDERNAME)
 
 
-# DATA = "file"
+DATA = "file"
 # DATA = "synthetic"
-DATA = "PDFA"
+# DATA = "explicit"
+# DATA = "PDFA"
 
 
 # ============================================================
@@ -142,10 +143,99 @@ if DATA == "synthetic":
 
     dataset = interleave_sequences(sequences, random_index=False)
 
+# ============================================================
+# Synthetic data sets
+# ============================================================
+
+if DATA == "synthetic":
+    sequences = []
+
+    # Open the file and process it line by line
+    with open(
+        "/Users/bollig/innatelogic/git/circuits/innatelogic/circuits/process_mining/data/10.pautomac.train"
+    ) as file:
+        # Skip the first line (a header)
+        next(file)
+
+        # Process each line to extract the sequences
+        for line in file:
+            # Split the line into individual string numbers and convert them to integers
+            numbers = list(map(int, line.split()))
+
+            # Ignore the first element of each line
+            if len(numbers) > 1:
+                # As 0 is padding symbol in LSTMs, add 1 to each number in the sequence after ignoring the first element
+                incremented_numbers = [num + 1 for num in numbers[1:]]
+
+                # Store the modified sequence
+                sequences.append([*incremented_numbers, STOP])
+
+    dataset = interleave_sequences(sequences, random_index=False)
+
+
+# ============================================================
+# Explicit dataset
+# ============================================================
+
+
+# if DATA == "explicit":
+#     dataset = [
+#         ["b"],
+#         ["b"],
+#         ["b"],
+#         ["b"],
+#         ["b"],
+#         ["b"],
+#         ["b"],
+#         ["b"],
+#         ["b"],
+#         ["a", "a", "a"],
+#         ["a", "a", "a"],
+#         ["a", "a", "a"],
+#         ["b", "a"],
+#         ["b", "b"],
+#         ["b", "b"],
+#         ["b", "b"],
+#         ["b", "b"],
+#         ["b", "b"],
+#         ["b", "b", "b"],
+#         ["a", "a", "a", "a"],
+#         ["a"],
+#         ["a"],
+#         ["a"],
+#         ["a"],
+#         ["a"],
+#         ["a", "a", "b"],
+#         ["a", "a"],
+#         ["a", "a"],
+#         ["a", "a"],
+#         ["b", "b", "a"],
+#     ]
+
+    # dataset = interleave_sequences(dataset)
+
 
 # ============================================================
 # PDFA simulation
 # ============================================================
+
+
+if DATA == "PDFA":
+    pdfa = PDFA()
+
+    pdfa.add_actions(["init", "a", "b"])
+
+    pdfa.create_states(2)
+    pdfa.set_initial_state(0)
+
+    pdfa.transitions[0]["init"] = 1
+    pdfa.transitions[1]["a"] = 1
+    pdfa.transitions[1]["b"] = 1
+
+    pdfa.set_probs(0, {STOP: 0.0, "init": 1.0, "a": 0.0, "b": 0.0})
+    pdfa.set_probs(1, {STOP: 0.01, "init": 0.0, "a": 0.495, "b": 0.495})
+
+    dataset = interleave_sequences(pdfa.simulate(100000))
 
 
 # if DATA == "PDFA":
@@ -153,34 +243,41 @@ if DATA == "synthetic":
 #
 #     pdfa.add_actions(["a", "b"])
 #
-#     pdfa.create_states(1)
+#     pdfa.create_states(3)
 #     pdfa.set_initial_state(0)
 #
-#     pdfa.transitions[0]["a"] = 0
-#     pdfa.transitions[0]["b"] = 0
+#     pdfa.transitions[0]["a"] = 1
+#     pdfa.transitions[0]["b"] = 2
+#     pdfa.transitions[1]["a"] = 1
+#     pdfa.transitions[1]["b"] = 1
+#     pdfa.transitions[2]["a"] = 2
+#     pdfa.transitions[2]["b"] = 2
 #
-#     pdfa.set_probs(0, {STOP: 0.01, "a": 0.495, "b": 0.495})
+#     pdfa.set_probs(0, {STOP: 0.0, "a": 0.5, "b": 0.5})
+#     pdfa.set_probs(1, {STOP: 0.4, "a": 0.5, "b": 0.1})
+#     pdfa.set_probs(2, {STOP: 0.4, "a": 0.1, "b": 0.5})
 #
-#     dataset = interleave_sequences(pdfa.simulate(30))
+#     dataset = interleave_sequences(pdfa.simulate(100000))
 
 
-if DATA == "PDFA":
-    pdfa = PDFA()
-
-    pdfa.add_actions(["a", "b"])
-
-    pdfa.create_states(3)
-    pdfa.set_initial_state(0)
-
-    pdfa.transitions[0]["a"] = 1
-    pdfa.transitions[0]["b"] = 2
-    pdfa.transitions[1]["a"] = 1
-    pdfa.transitions[1]["b"] = 1
-    pdfa.transitions[2]["a"] = 2
-    pdfa.transitions[2]["b"] = 2
-
-    pdfa.set_probs(0, {STOP: 0.0, "a": 0.5, "b": 0.5})
-    pdfa.set_probs(1, {STOP: 0.2, "a": 0.6, "b": 0.2})
-    pdfa.set_probs(2, {STOP: 0.2, "a": 0.2, "b": 0.6})
-
-    dataset = interleave_sequences(pdfa.simulate(1000))
+# dataset = interleave_sequences(pdfa.simulate(25))
+#
+# from collections import Counter
+#
+# while True:
+#     data = pdfa.simulate(30)
+#
+#     # Example list of lists
+#
+#     # Convert each sublist to a tuple and count the occurrences
+#
+#     if all(len(sublist) <= 4 for sublist in data):
+#         break
+#
+#
+# count = Counter(tuple(sublist) for sublist in data)
+#
+# # Print the result
+# for sublist, freq in count.items():
+#     print(f"Sublist {sublist} occurs {freq} times")
+#
