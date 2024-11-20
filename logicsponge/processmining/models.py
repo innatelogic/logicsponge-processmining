@@ -628,8 +628,6 @@ class NeuralNetworkMiner(StreamingMiner):
         # Continue with the training step using the updated sequence
         batch = self.select_batch(case_id)
 
-        print(f"Batch: {batch}")
-
         # Ensure each sequence in the batch has at least two tokens
         if not batch:
             msg = "Skipping training step because no valid sequences were found."
@@ -647,7 +645,10 @@ class NeuralNetworkMiner(StreamingMiner):
         self.optimizer.zero_grad()
 
         # Forward pass through the model
+        start_time = time.time()
         outputs = self.model(x_input)
+        end_time = time.time()
+        print(f"forward pass, time needed: {(end_time - start_time) * 1000}")
 
         # Reshape outputs to [batch_size * sequence_length, vocab_size] for loss calculation
         outputs = outputs.view(-1, outputs.shape[-1])
@@ -663,8 +664,11 @@ class NeuralNetworkMiner(StreamingMiner):
         loss = self.criterion(outputs, y_target)
 
         # Backward pass and gradient clipping
+        start_time = time.time()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+        end_time = time.time()
+        print(f"backward pass, time needed: {(end_time - start_time) * 1000}")
 
         self.optimizer.step()
 
@@ -680,10 +684,6 @@ class NeuralNetworkMiner(StreamingMiner):
         Select a batch of sequences, using a round-robin approach.
         Only select sequences that have at least two tokens (input + target).
         """
-
-        print("begin select_batch")
-
-        batch_start_time = time.time()
 
         valid_case_ids = [cid for cid, sequence in self.sequences.items() if len(sequence) > 1]
 
@@ -718,10 +718,6 @@ class NeuralNetworkMiner(StreamingMiner):
                 break
 
         # batch = [self.get_sequence(cid) for cid in batch_case_ids]
-
-        batch_end_time = time.time()
-
-        print(f"end select_batch, time needed: {(batch_end_time - batch_start_time) * 1000}")
 
         # Fetch the actual sequences based on the selected case_ids
         return [self.get_sequence(cid) for cid in batch_case_ids]
