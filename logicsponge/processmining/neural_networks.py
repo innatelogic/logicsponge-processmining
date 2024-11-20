@@ -9,6 +9,14 @@ from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
+
+if torch.cuda.is_available():
+    msg = f"Using GPU: {torch.cuda.get_device_name(0)}"
+    logger.info(msg)
+else:
+    msg = "Using CPU"
+    logger.info(msg)
+
 # ============================================================
 # Models (RNN and LSTM)
 # ============================================================
