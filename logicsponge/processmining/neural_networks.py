@@ -9,33 +9,32 @@ from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
-
-if torch.cuda.is_available():
-    msg = f"Using GPU: {torch.cuda.get_device_name(0)}"
-    logger.warning(msg)
-else:
-    msg = "Using CPU"
-    logger.warning(msg)
-
 # ============================================================
 # Models (RNN and LSTM)
 # ============================================================
 
 
 class RNNModel(nn.Module):
-    def __init__(self, vocab_size, embedding_dim, hidden_dim, output_dim):
+    embedding: nn.Embedding
+    rnn1: nn.RNN
+    rnn2: nn.RNN
+    fc: nn.Linear
+
+    def __init__(
+        self, vocab_size: int, embedding_dim: int, hidden_dim: int, output_dim: int, device: torch.device | None = None
+    ):
         super().__init__()
         # Use padding_idx=0 to handle padding, same as in LSTMModel
-        self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
+        self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0, device=device)
 
         # Two RNN layers, similar to the LSTMModel
-        self.rnn1 = nn.RNN(embedding_dim, hidden_dim, batch_first=True)
-        self.rnn2 = nn.RNN(hidden_dim, hidden_dim, batch_first=True)
+        self.rnn1 = nn.RNN(embedding_dim, hidden_dim, batch_first=True, device=device)
+        self.rnn2 = nn.RNN(hidden_dim, hidden_dim, batch_first=True, device=device)
 
         # Fully connected layer to predict next activity
-        self.fc = nn.Linear(hidden_dim, output_dim)
+        self.fc = nn.Linear(hidden_dim, output_dim, device=device)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Convert activity indices to embeddings
         x = self.embedding(x)
 
@@ -47,22 +46,29 @@ class RNNModel(nn.Module):
 
 
 class LSTMModel(nn.Module):
-    def __init__(self, vocab_size, embedding_dim, hidden_dim, output_dim):
+    embedding: nn.Embedding
+    lstm1: nn.LSTM
+    lstm2: nn.LSTM
+    fc: nn.Linear
+
+    def __init__(
+        self, vocab_size: int, embedding_dim: int, hidden_dim: int, output_dim: int, device: torch.device | None = None
+    ):
         super().__init__()
         # Use padding_idx=0 to handle padding
-        self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
+        self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0, device=device)
 
         # Two LSTM layers
-        self.lstm1 = nn.LSTM(embedding_dim, hidden_dim, batch_first=True)
-        self.lstm2 = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
+        self.lstm1 = nn.LSTM(embedding_dim, hidden_dim, batch_first=True, device=device)
+        self.lstm2 = nn.LSTM(hidden_dim, hidden_dim, batch_first=True, device=device)
         # self.lstm3 = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
 
-        self.fc = nn.Linear(hidden_dim, output_dim)
+        self.fc = nn.Linear(hidden_dim, output_dim, device=device)
 
         # Apply custom weight initialization
         self.apply(self._init_weights)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.embedding(x)  # Convert activity indices to embeddings
 
         # Pass through LSTM layers
@@ -72,7 +78,7 @@ class LSTMModel(nn.Module):
 
         return self.fc(lstm_out)
 
-    def _init_weights(self, m):
+    def _init_weights(self, m: nn.Module) -> None:
         if isinstance(m, nn.Linear):
             nn.init.xavier_uniform_(m.weight)  # Xavier initialization for linear layers
             if m.bias is not None:
