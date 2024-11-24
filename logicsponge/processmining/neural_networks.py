@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class RNNModel(nn.Module):
+    device: torch.device | None
     embedding: nn.Embedding
     rnn1: nn.RNN
     rnn2: nn.RNN
@@ -24,6 +25,7 @@ class RNNModel(nn.Module):
         self, vocab_size: int, embedding_dim: int, hidden_dim: int, output_dim: int, device: torch.device | None = None
     ):
         super().__init__()
+        self.device = device
         # Use padding_idx=0 to handle padding, same as in LSTMModel
         self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0, device=device)
 
@@ -46,6 +48,7 @@ class RNNModel(nn.Module):
 
 
 class LSTMModel(nn.Module):
+    device: torch.device | None
     embedding: nn.Embedding
     lstm1: nn.LSTM
     lstm2: nn.LSTM
@@ -55,6 +58,7 @@ class LSTMModel(nn.Module):
         self, vocab_size: int, embedding_dim: int, hidden_dim: int, output_dim: int, device: torch.device | None = None
     ):
         super().__init__()
+        self.device = device
         # Use padding_idx=0 to handle padding
         self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0, device=device)
 
