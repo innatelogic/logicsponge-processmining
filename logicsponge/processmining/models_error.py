@@ -10,6 +10,7 @@ import pandas as pd
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
+# from torch.utils.tensorboard import SummaryWriter
 from logicsponge.processmining.data_utils import add_input_symbols_sequence
 from logicsponge.processmining.globals import (
     CONFIG,
@@ -606,7 +607,7 @@ class NeuralNetworkMiner(StreamingMiner):
         """
         return self.sequences.get(case_id, [])
 
-    def update(self, case_id: CaseId, action: ActionName) -> None | float:  # noqa: ARG002
+    def update(self, case_id: CaseId, action: ActionName) -> None | float:
         """
         Add an action to the sequence corresponding to the case_id.
         Dynamically update the activity_to_idx mapping if a new action is encountered.
@@ -614,32 +615,32 @@ class NeuralNetworkMiner(StreamingMiner):
         self.optimizer.zero_grad()
         # gc.collect()
 
-        # # Dynamically update activity_to_idx if the action is new
-        # if action not in self.action_index:
-        #     current_idx = len(self.action_index) + 1  # Get the next available index
-        #     self.action_index[action] = current_idx
-        #     self.index_action[current_idx] = action
+        # Dynamically update activity_to_idx if the action is new
+        if action not in self.action_index:
+            current_idx = len(self.action_index) + 1  # Get the next available index
+            self.action_index[action] = current_idx
+            self.index_action[current_idx] = action
 
-        # # Convert action to its corresponding index
-        # action_idx = self.action_index[action]
+        # Convert action to its corresponding index
+        action_idx = self.action_index[action]
 
-        # # Add the action index to the sequence for the given case_id
-        # if case_id not in self.sequences:
-        #     self.sequences[case_id] = []  # New case added
-        # self.sequences[case_id].append(action_idx)
+        # Add the action index to the sequence for the given case_id
+        if case_id not in self.sequences:
+            self.sequences[case_id] = []  # New case added
+        self.sequences[case_id].append(action_idx)
 
-        # # Continue with the training step using the updated sequence
-        # batch = self.select_batch(case_id)
-        # # print(f"select batch, time needed: {(end_time - start_time) * 1000}")
+        # Continue with the training step using the updated sequence
+        batch = self.select_batch(case_id)
+        # print(f"select batch, time needed: {(end_time - start_time) * 1000}")
 
-        # # Ensure each sequence in the batch has at least two tokens
-        # if len(batch) == 0:
-        #     msg = "Skipping training step because no valid sequences were found."
-        #     logger.info(msg)
-        #     return None
+        # Ensure each sequence in the batch has at least two tokens
+        if len(batch) == 0:
+            msg = "Skipping training step because no valid sequences were found."
+            logger.info(msg)
+            return None
 
         # # Convert the batch of sequences into tensors, padding them to the same length
-        batch = [[1] * 200, [2] * 200]
+        # batch = [[1,1,1] * 100, [2,2,2] * 100]
         batch_sequences = [torch.tensor(seq, dtype=torch.long, device=self.device) for seq in batch]
         x_batch = pad_sequence(batch_sequences, batch_first=True, padding_value=0).detach()
 
@@ -651,6 +652,11 @@ class NeuralNetworkMiner(StreamingMiner):
 
         # Forward pass through the model
         outputs = self.model(x_input)
+        # writer = SummaryWriter("torchlogs/")
+        # writer.add_graph(self.model, x_input)
+        # writer.close()
+        #
+        # make_dot(outputs.mean(), params=dict(self.model.named_parameters()))
 
         # Reshape outputs to [batch_size * sequence_length, vocab_size] for loss calculation
         outputs = outputs.view(-1, outputs.shape[-1])
@@ -671,20 +677,22 @@ class NeuralNetworkMiner(StreamingMiner):
         # print(f"backward pass, time needed: {(end_time - start_time) * 1000}")
 
         self.optimizer.step()
+        # print(self.optimizer.param_groups)
         # after = process.memory_info().rss
         # print(f"{(after-before) / (1024 * 1024):.2f}")
 
-        loss_float = loss.item()
+        # loss_float = loss.item()
+        # self.model.zero_grad(set_to_none=True)
 
         # release memory
-        del x_input
-        del x_batch
-        del batch_sequences
-        del outputs
-        del y_target
-        del loss
+        # del x_input
+        # del x_batch
+        # del batch_sequences
+        # del outputs
+        # del y_target
+        # del loss
 
-        return loss_float
+        return loss.item()
 
     def select_batch(self, case_id: CaseId) -> list[list[ActionName]]:
         """

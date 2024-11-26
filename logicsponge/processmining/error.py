@@ -53,8 +53,8 @@ class ListStreamer(ls.SourceTerm):
                 out = DataItem({"case_id": case_id, "action": action})
                 self.output(out)
                 self.remaining -= 1
-
             logging.info("Finished streaming.")
+        else:
             time.sleep(1000)
 
 

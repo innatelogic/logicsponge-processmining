@@ -60,9 +60,10 @@ class ListStreamer(ls.SourceTerm):
                 out = DataItem({"case_id": case_id, "action": action})
                 self.output(out)
                 self.remaining -= 1
-
             logging.info("Finished streaming.")
-            time.sleep(1000)
+        else:
+            # to avoid busy waiting: if done sleep
+            time.sleep(10)
 
 
 class AddStartSymbol(ls.FunctionTerm):
