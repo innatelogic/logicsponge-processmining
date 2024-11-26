@@ -1,6 +1,6 @@
-from aalpy.learning_algs import run_Alergia
+# from aalpy.learning_algs import run_Alergia
 
-from logicsponge.processmining.data_utils import add_input_symbols
+# from logicsponge.processmining.data_utils import add_input_symbols
 
 dataset = [
     ["b"],

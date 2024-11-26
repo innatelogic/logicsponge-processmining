@@ -9,6 +9,7 @@ from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
+
 # ============================================================
 # Models (RNN and LSTM)
 # ============================================================
@@ -77,7 +78,7 @@ class LSTMModel(nn.Module):
 
         # Pass through LSTM layers
         lstm_out, _ = self.lstm1(x)
-        lstm_out, _ = self.lstm2(lstm_out)
+        # lstm_out, _ = self.lstm2(lstm_out)
         # lstm_out, _ = self.lstm3(lstm_out)
 
         return self.fc(lstm_out)
