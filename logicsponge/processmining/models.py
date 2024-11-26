@@ -576,9 +576,12 @@ class Alergia(BasicMiner):
 
 
 class NeuralNetworkMiner(StreamingMiner):
+    device: torch.device | None
+
     def __init__(self, *args, model: RNNModel | LSTMModel, batch_size: int, optimizer, criterion, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.model = model  # The neural network
+        self.device = model.device
+        self.model = model.to(device=self.device)  # The neural network, make sure its at the device
         self.optimizer = optimizer
         self.criterion = criterion
 
@@ -640,7 +643,7 @@ class NeuralNetworkMiner(StreamingMiner):
 
         # Convert the batch of sequences into tensors, padding them to the same length
         # start_time = time.time()
-        batch_sequences = [torch.tensor(seq, dtype=torch.long) for seq in batch]
+        batch_sequences = [torch.tensor(seq, dtype=torch.long, device=self.device) for seq in batch]
         x_batch = pad_sequence(batch_sequences, batch_first=True, padding_value=0)
         # end_time = time.time()
         # print(f"convert batch, time needed: {(end_time - start_time) * 1000}")
@@ -776,7 +779,9 @@ class NeuralNetworkMiner(StreamingMiner):
         Predict the next action for a given sequence of action indices.
         """
         # Convert to a tensor and add a batch dimension
-        input_sequence = torch.tensor(index_sequence, dtype=torch.long).unsqueeze(0)  # Shape [1, sequence_length]
+        input_sequence = torch.tensor(index_sequence, dtype=torch.long, device=self.device).unsqueeze(
+            0
+        )  # Shape [1, sequence_length]
 
         # Pass the sequence through the model to get the output
         self.model.eval()

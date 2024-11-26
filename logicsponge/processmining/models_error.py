@@ -679,6 +679,7 @@ class NeuralNetworkMiner(StreamingMiner):
         # release memory
         del x_input
         del x_batch
+        del batch_sequences
         del outputs
         del y_target
         del loss

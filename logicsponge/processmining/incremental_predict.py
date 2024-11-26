@@ -1,6 +1,7 @@
 import logging
 import time
 
+import torch
 from torch import nn, optim
 
 import logicsponge.core as ls
@@ -23,6 +24,20 @@ from logicsponge.processmining.neural_networks import LSTMModel
 from logicsponge.processmining.test_data import dataset
 
 logger = logging.getLogger(__name__)
+
+if torch.backends.mps.is_available():
+    device = torch.device("mps")
+    device = torch.device("cpu")
+    logger.info("Using cpu.")
+
+elif torch.cuda.is_available():
+    msg = f"Using cuda: {torch.cuda.get_device_name(0)}."
+    logger.info(msg)
+    device = torch.device("cuda")
+
+else:
+    device = torch.device("cpu")
+    logger.info("Using cpu.")
 
 # ============================================================
 # Function Terms
@@ -272,7 +287,7 @@ vocab_size = 50  # An upper bound on the number of activities
 embedding_dim = 50
 hidden_dim = 128
 output_dim = vocab_size  # Predict the next activity
-model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim)
+model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, device=device)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 # optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
