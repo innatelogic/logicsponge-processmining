@@ -641,6 +641,9 @@ class NeuralNetworkMiner(StreamingMiner):
             logger.info(msg)
             return None
 
+        # set model to training mode
+        self.model.train()
+
         # Convert the batch of sequences into tensors, padding them to the same length
         # start_time = time.time()
         batch_sequences = [torch.tensor(seq, dtype=torch.long, device=self.device) for seq in batch]
