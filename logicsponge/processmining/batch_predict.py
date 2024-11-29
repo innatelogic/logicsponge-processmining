@@ -69,7 +69,7 @@ all_metrics = {
         "fallback fpt->ngram_4",
         "hard voting",
         "soft voting",
-        "alergia",
+        # "alergia",
         "LSTM",
     ]
 }
@@ -182,13 +182,13 @@ for iteration in range(n_iterations):
     logger.info(msg)
 
     # Train Alergia
-    start_time = time.time()
-    algorithm = run_Alergia(alergia_train_set_transformed, automaton_type="smm", eps=0.5, print_info=True)
-    smm = Alergia(algorithm=algorithm)
-    end_time = time.time()
-    elapsed_time = end_time - start_time
-    msg = f"Training time for Alergia: {elapsed_time:.4f} seconds"
-    logger.info(msg)
+    # start_time = time.time()
+    # algorithm = run_Alergia(alergia_train_set_transformed, automaton_type="smm", eps=0.5, print_info=True)
+    # smm = Alergia(algorithm=algorithm)
+    # end_time = time.time()
+    # elapsed_time = end_time - start_time
+    # msg = f"Training time for Alergia: {elapsed_time:.4f} seconds"
+    # logger.info(msg)
 
     # ============================================================
     # Evaluation
@@ -208,7 +208,7 @@ for iteration in range(n_iterations):
         "fallback fpt->ngram_4": (fallback, test_set_transformed),
         "hard voting": (hard_voting, test_set_transformed),
         "soft voting": (soft_voting, test_set_transformed),
-        "alergia": (smm, test_set_transformed),
+        # "alergia": (smm, test_set_transformed),
     }
 
     # Store the statistics for each iteration and also print them out
