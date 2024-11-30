@@ -134,8 +134,8 @@ for iteration in range(n_iterations):
 
     fallback = Fallback(
         models=[
-            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=1)),
-            BasicMiner(algorithm=NGram(window_length=4)),
+            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
+            BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
@@ -145,9 +145,10 @@ for iteration in range(n_iterations):
             BasicMiner(algorithm=Bag()),
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
             BasicMiner(algorithm=NGram(window_length=2)),
-            BasicMiner(algorithm=NGram(window_length=3)),
+            # BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
             # BasicMiner(algorithm=NGram(window_length=5)),
+            BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
@@ -157,9 +158,10 @@ for iteration in range(n_iterations):
             BasicMiner(algorithm=Bag()),
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
             BasicMiner(algorithm=NGram(window_length=2)),
-            BasicMiner(algorithm=NGram(window_length=3)),
+            # BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
             # BasicMiner(algorithm=NGram(window_length=5)),
+            BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
@@ -218,7 +220,7 @@ for iteration in range(n_iterations):
         "ngram_6": (ngram_6, test_set_transformed),
         "ngram_7": (ngram_7, test_set_transformed),
         "ngram_8": (ngram_8, test_set_transformed),
-        "fallback fpt->ngram_6": (fallback, test_set_transformed),
+        "fallback fpt->ngram": (fallback, test_set_transformed),
         "hard voting": (hard_voting, test_set_transformed),
         "soft voting": (soft_voting, test_set_transformed),
         # "alergia": (smm, test_set_transformed),
