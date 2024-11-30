@@ -252,7 +252,6 @@ hard_voting = StreamingActionPredictor(
             BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
             BasicMiner(algorithm=NGram(window_length=5)),
-            BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
@@ -267,7 +266,6 @@ soft_voting = StreamingActionPredictor(
             BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
             BasicMiner(algorithm=NGram(window_length=5)),
-            BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
@@ -283,7 +281,6 @@ adaptive_voting = StreamingActionPredictor(
             BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
             BasicMiner(algorithm=NGram(window_length=5)),
-            BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )

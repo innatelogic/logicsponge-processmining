@@ -145,7 +145,6 @@ for iteration in range(n_iterations):
             BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
             BasicMiner(algorithm=NGram(window_length=5)),
-            BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
@@ -158,7 +157,6 @@ for iteration in range(n_iterations):
             BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
             BasicMiner(algorithm=NGram(window_length=5)),
-            BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
