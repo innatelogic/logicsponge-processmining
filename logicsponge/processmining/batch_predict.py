@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 # random.seed(123)
 
-NN_training = False
+NN_training = True
 
 # ============================================================
 # Data preparation
@@ -59,7 +59,6 @@ all_metrics = {
     for name in [
         "fpt",
         "bag",
-        # "parikh",
         "ngram_1",
         "ngram_2",
         "ngram_3",
@@ -71,8 +70,8 @@ all_metrics = {
         "fallback fpt->ngram_6",
         "hard voting",
         "soft voting",
-        # "alergia",
-        # "LSTM",
+        "alergia",
+        "LSTM",
     ]
 }
 
@@ -174,7 +173,6 @@ for iteration in range(n_iterations):
     for case_id, action_name in train_set:
         fpt.update(case_id, action_name)
         bag.update(case_id, action_name)
-        # parikh.update(case_id, action_name)
         ngram_1.update(case_id, action_name)
         ngram_2.update(case_id, action_name)
         ngram_3.update(case_id, action_name)
@@ -192,13 +190,13 @@ for iteration in range(n_iterations):
     logger.info(msg)
 
     # Train Alergia
-    # start_time = time.time()
-    # algorithm = run_Alergia(alergia_train_set_transformed, automaton_type="smm", eps=0.5, print_info=True)
-    # smm = Alergia(algorithm=algorithm)
-    # end_time = time.time()
-    # elapsed_time = end_time - start_time
-    # msg = f"Training time for Alergia: {elapsed_time:.4f} seconds"
-    # logger.info(msg)
+    start_time = time.time()
+    algorithm = run_Alergia(alergia_train_set_transformed, automaton_type="smm", eps=0.5, print_info=True)
+    smm = Alergia(algorithm=algorithm)
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    msg = f"Training time for Alergia: {elapsed_time:.4f} seconds"
+    logger.info(msg)
 
     # ============================================================
     # Evaluation
@@ -208,7 +206,6 @@ for iteration in range(n_iterations):
     strategies = {
         "fpt": (fpt, test_set_transformed),
         "bag": (bag, test_set_transformed),
-        # "parikh": (parikh, test_set_transformed),
         "ngram_1": (ngram_1, test_set_transformed),
         "ngram_2": (ngram_2, test_set_transformed),
         "ngram_3": (ngram_3, test_set_transformed),
@@ -220,7 +217,7 @@ for iteration in range(n_iterations):
         "fallback fpt->ngram_6": (fallback, test_set_transformed),
         "hard voting": (hard_voting, test_set_transformed),
         "soft voting": (soft_voting, test_set_transformed),
-        # "alergia": (smm, test_set_transformed),
+        "alergia": (smm, test_set_transformed),
     }
 
     # Store the statistics for each iteration and also print them out
