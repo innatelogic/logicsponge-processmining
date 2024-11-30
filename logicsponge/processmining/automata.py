@@ -1,5 +1,6 @@
 import random
 from collections import OrderedDict
+from typing import Any
 
 from logicsponge.processmining.globals import STOP, ActionName, ProbDistr, StateId
 
@@ -11,13 +12,18 @@ class State:
 
 
 class Automaton:
+    name: str
+    state_info: dict[StateId, Any]
+    transitions: dict[StateId, dict[ActionName, Any]]
+    initial_state: StateId | None
+    actions: OrderedDict[ActionName, bool]
+
     def __init__(self, name: str = "Automaton") -> None:
         self.name = name
         self.state_info = {}
         self.transitions = {}
         self.initial_state = None
-
-        self.actions = OrderedDict()  # set of actions excluding STOP
+        self.actions = OrderedDict()  # maps actions (excluding STOP) to dummy value True
 
     def add_action(self, action: ActionName) -> None:
         if action != STOP:
