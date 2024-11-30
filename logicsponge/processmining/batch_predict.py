@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 # random.seed(123)
 
-NN_training = True
+NN_training = False
 
 # ============================================================
 # Data preparation
