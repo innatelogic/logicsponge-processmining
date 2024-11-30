@@ -45,8 +45,7 @@ class Automaton:
             state_id = len(self.state_info)
         new_state = State(state_id=state_id)
 
-        self.state_info[state_id] = {}
-        self.state_info[state_id]["object"] = new_state
+        self.state_info[state_id] = {"object": new_state}
 
         self.transitions[state_id] = {}
 
@@ -69,7 +68,7 @@ class Automaton:
 
 
 class PDFA(Automaton):
-    def set_probs(self, state, probs):
+    def set_probs(self, state: StateId, probs: ProbDistr):
         if state not in self.state_info:
             self.state_info[state] = {}
 
@@ -83,30 +82,23 @@ class PDFA(Automaton):
             sequence = []
 
             while True:
-                # Get the probabilities for the current state as a dictionary
                 probs: ProbDistr = self.state_info[current_state]["probs"]
 
-                # If there are no probabilities, stop the simulation
                 if not probs:
                     break
 
                 # Extract actions and their corresponding probabilities, sorted for consistency
                 actions, probabilities = zip(*probs.items(), strict=True)
 
-                # Choose an action based on the probabilities
                 action_choice: ActionName = random.choices(actions, weights=probabilities, k=1)[0]  # noqa: S311
 
-                # If the chosen action is STOP, we stop (this is the stopping action)
                 if action_choice == STOP:
                     break
 
-                # Append the action to the sequence
                 sequence.append(action_choice)
 
-                # Transition to the next state based on the chosen action
                 current_state = self.transitions[current_state][action_choice]
 
-            # Add the generated sequence to the dataset
             dataset.append(sequence)
 
         return dataset
