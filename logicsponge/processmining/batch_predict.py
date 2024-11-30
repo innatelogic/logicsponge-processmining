@@ -5,6 +5,7 @@ import matplotlib as mpl
 import numpy as np
 import pandas as pd
 from aalpy.learning_algs import run_Alergia
+import torch
 from torch import nn, optim
 
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram, Parikh
@@ -34,9 +35,12 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# random.seed(123)
+torch.manual_seed(123)
+torch.cuda.manual_seed(123)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
 
-NN_training = True
+NN_training = False
 
 # ============================================================
 # Data preparation

@@ -39,6 +39,13 @@ else:
     device = torch.device("cpu")
     logger.info("Using cpu.")
 
+
+torch.manual_seed(123)
+torch.cuda.manual_seed(123)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+
+
 # ============================================================
 # Function Terms
 # ============================================================
