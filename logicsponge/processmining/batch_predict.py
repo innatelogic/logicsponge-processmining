@@ -135,7 +135,7 @@ for iteration in range(n_iterations):
     fallback = Fallback(
         models=[
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=1)),
-            BasicMiner(algorithm=NGram(window_length=5)),
+            BasicMiner(algorithm=NGram(window_length=4)),
         ],
         config=config,
     )
@@ -147,7 +147,7 @@ for iteration in range(n_iterations):
             BasicMiner(algorithm=NGram(window_length=2)),
             BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
-            BasicMiner(algorithm=NGram(window_length=5)),
+            # BasicMiner(algorithm=NGram(window_length=5)),
         ],
         config=config,
     )
@@ -159,7 +159,7 @@ for iteration in range(n_iterations):
             BasicMiner(algorithm=NGram(window_length=2)),
             BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
-            BasicMiner(algorithm=NGram(window_length=5)),
+            # BasicMiner(algorithm=NGram(window_length=5)),
         ],
         config=config,
     )
