@@ -68,7 +68,7 @@ all_metrics = {
         "ngram_6",
         "ngram_7",
         "ngram_8",
-        "fallback fpt->ngram_4",
+        "fallback fpt->ngram_6",
         "hard voting",
         "soft voting",
         # "alergia",
@@ -155,6 +155,8 @@ for iteration in range(n_iterations):
             BasicMiner(algorithm=NGram(window_length=2)),
             BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
+            #
+            BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
@@ -215,7 +217,7 @@ for iteration in range(n_iterations):
         "ngram_6": (ngram_6, test_set_transformed),
         "ngram_7": (ngram_7, test_set_transformed),
         "ngram_8": (ngram_8, test_set_transformed),
-        "fallback fpt->ngram_4": (fallback, test_set_transformed),
+        "fallback fpt->ngram_6": (fallback, test_set_transformed),
         "hard voting": (hard_voting, test_set_transformed),
         "soft voting": (soft_voting, test_set_transformed),
         # "alergia": (smm, test_set_transformed),
