@@ -132,7 +132,7 @@ for iteration in range(n_iterations):
     fallback = Fallback(
         models=[
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=1)),
-            BasicMiner(algorithm=NGram(window_length=3)),
+            BasicMiner(algorithm=NGram(window_length=5)),
         ],
         config=config,
     )
