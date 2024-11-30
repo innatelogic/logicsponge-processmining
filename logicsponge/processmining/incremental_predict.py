@@ -311,12 +311,12 @@ lstm = StreamingActionPredictor(
 # Model names
 models = [
     "fpt",
-    "bag",
-    "ngram_1",
-    "ngram_2",
-    "ngram_3",
-    "ngram_4",
-    "ngram_5",
+    # "bag",
+    # "ngram_1",
+    # "ngram_2",
+    # "ngram_3",
+    # "ngram_4",
+    # "ngram_5",
     "ngram_6",
     # "fallback",
     # "hard_voting",
@@ -341,12 +341,12 @@ sponge = (
     * AddStartSymbol()
     * (
         (fpt * Evaluation("fpt"))
-        | (bag * Evaluation("bag"))
-        | (ngram_1 * Evaluation("ngram_1"))
-        | (ngram_2 * Evaluation("ngram_2"))
-        | (ngram_3 * Evaluation("ngram_3"))
-        | (ngram_4 * Evaluation("ngram_4"))
-        | (ngram_5 * Evaluation("ngram_5"))
+        # | (bag * Evaluation("bag"))
+        # | (ngram_1 * Evaluation("ngram_1"))
+        # | (ngram_2 * Evaluation("ngram_2"))
+        # | (ngram_3 * Evaluation("ngram_3"))
+        # | (ngram_4 * Evaluation("ngram_4"))
+        # | (ngram_5 * Evaluation("ngram_5"))
         | (ngram_6 * Evaluation("ngram_6"))
         # | (fallback * Evaluation("fallback"))
         # | (hard_voting * Evaluation("hard_voting"))
