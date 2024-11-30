@@ -40,7 +40,7 @@ torch.cuda.manual_seed(123)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-NN_training = False
+NN_training = True
 
 # ============================================================
 # Data preparation
@@ -75,7 +75,7 @@ all_metrics = {
         "hard voting",
         "soft voting",
         # "alergia",
-        # "LSTM",
+        "LSTM",
     ]
 }
 
