@@ -67,6 +67,7 @@ all_metrics = {
         "ngram_5",
         "ngram_6",
         "ngram_7",
+        "ngram_8",
         "fallback fpt->ngram_4",
         "hard voting",
         "soft voting",
@@ -126,6 +127,8 @@ for iteration in range(n_iterations):
 
     ngram_7 = BasicMiner(algorithm=NGram(window_length=6), config=config)
 
+    ngram_8 = BasicMiner(algorithm=NGram(window_length=7), config=config)
+
     fallback = Fallback(
         models=[
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=1)),
@@ -177,6 +180,7 @@ for iteration in range(n_iterations):
         ngram_5.update(case_id, action_name)
         ngram_6.update(case_id, action_name)
         ngram_7.update(case_id, action_name)
+        ngram_8.update(case_id, action_name)
         fallback.update(case_id, action_name)
         hard_voting.update(case_id, action_name)
         soft_voting.update(case_id, action_name)
@@ -210,6 +214,7 @@ for iteration in range(n_iterations):
         "ngram_5": (ngram_5, test_set_transformed),
         "ngram_6": (ngram_6, test_set_transformed),
         "ngram_7": (ngram_7, test_set_transformed),
+        "ngram_8": (ngram_8, test_set_transformed),
         "fallback fpt->ngram_4": (fallback, test_set_transformed),
         "hard voting": (hard_voting, test_set_transformed),
         "soft voting": (soft_voting, test_set_transformed),
