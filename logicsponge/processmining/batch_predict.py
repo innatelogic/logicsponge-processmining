@@ -71,7 +71,7 @@ all_metrics = {
         "ngram_6",
         "ngram_7",
         "ngram_8",
-        "fallback fpt->ngram_6",
+        "fallback fpt->ngram",
         "hard voting",
         "soft voting",
         # "alergia",
