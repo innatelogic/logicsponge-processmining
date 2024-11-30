@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 # random.seed(123)
 
-NN_training = True
+NN_training = False
 
 # ============================================================
 # Data preparation
@@ -70,7 +70,7 @@ all_metrics = {
         "hard voting",
         "soft voting",
         # "alergia",
-        "LSTM",
+        # "LSTM",
     ]
 }
 
@@ -123,6 +123,8 @@ for iteration in range(n_iterations):
 
     ngram_6 = BasicMiner(algorithm=NGram(window_length=5), config=config)
 
+    ngram_7 = BasicMiner(algorithm=NGram(window_length=6), config=config)
+
     fallback = Fallback(
         models=[
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=1)),
@@ -173,6 +175,7 @@ for iteration in range(n_iterations):
         ngram_4.update(case_id, action_name)
         ngram_5.update(case_id, action_name)
         ngram_6.update(case_id, action_name)
+        ngram_7.update(case_id, action_name)
         fallback.update(case_id, action_name)
         hard_voting.update(case_id, action_name)
         soft_voting.update(case_id, action_name)
