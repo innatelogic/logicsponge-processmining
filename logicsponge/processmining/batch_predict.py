@@ -59,7 +59,7 @@ all_metrics = {
     for name in [
         "fpt",
         "bag",
-        "parikh",
+        # "parikh",
         "ngram_1",
         "ngram_2",
         "ngram_3",
@@ -144,6 +144,8 @@ for iteration in range(n_iterations):
             BasicMiner(algorithm=NGram(window_length=2)),
             BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
+            BasicMiner(algorithm=NGram(window_length=5)),
+            BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
@@ -155,7 +157,7 @@ for iteration in range(n_iterations):
             BasicMiner(algorithm=NGram(window_length=2)),
             BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
-            #
+            BasicMiner(algorithm=NGram(window_length=5)),
             BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
@@ -174,7 +176,7 @@ for iteration in range(n_iterations):
     for case_id, action_name in train_set:
         fpt.update(case_id, action_name)
         bag.update(case_id, action_name)
-        parikh.update(case_id, action_name)
+        # parikh.update(case_id, action_name)
         ngram_1.update(case_id, action_name)
         ngram_2.update(case_id, action_name)
         ngram_3.update(case_id, action_name)
@@ -208,7 +210,7 @@ for iteration in range(n_iterations):
     strategies = {
         "fpt": (fpt, test_set_transformed),
         "bag": (bag, test_set_transformed),
-        "parikh": (parikh, test_set_transformed),
+        # "parikh": (parikh, test_set_transformed),
         "ngram_1": (ngram_1, test_set_transformed),
         "ngram_2": (ngram_2, test_set_transformed),
         "ngram_3": (ngram_3, test_set_transformed),

@@ -237,7 +237,7 @@ fallback = StreamingActionPredictor(
     strategy=Fallback(
         models=[
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=1)),
-            BasicMiner(algorithm=NGram(window_length=3)),
+            BasicMiner(algorithm=NGram(window_length=5)),
         ],
         config=config,
     )
@@ -251,6 +251,8 @@ hard_voting = StreamingActionPredictor(
             BasicMiner(algorithm=NGram(window_length=2)),
             BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
+            BasicMiner(algorithm=NGram(window_length=5)),
+            BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
@@ -264,6 +266,8 @@ soft_voting = StreamingActionPredictor(
             BasicMiner(algorithm=NGram(window_length=2)),
             BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
+            BasicMiner(algorithm=NGram(window_length=5)),
+            BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
@@ -278,6 +282,8 @@ adaptive_voting = StreamingActionPredictor(
             BasicMiner(algorithm=NGram(window_length=2)),
             BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
+            BasicMiner(algorithm=NGram(window_length=5)),
+            BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
@@ -347,8 +353,8 @@ sponge = (
         # | (ngram_3 * Evaluation("ngram_3"))
         # | (ngram_4 * Evaluation("ngram_4"))
         # | (ngram_5 * Evaluation("ngram_5"))
-        | (ngram_6 * Evaluation("ngram_6"))
-        # | (fallback * Evaluation("fallback"))
+        # | (ngram_6 * Evaluation("ngram_6"))
+        | (fallback * Evaluation("fallback"))
         # | (hard_voting * Evaluation("hard_voting"))
         # | (soft_voting * Evaluation("soft_voting"))
         # | (adaptive_voting * Evaluation("adaptive_voting"))
