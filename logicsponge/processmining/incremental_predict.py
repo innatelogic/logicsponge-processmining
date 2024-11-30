@@ -233,6 +233,14 @@ ngram_6 = StreamingActionPredictor(
     strategy=BasicMiner(algorithm=NGram(window_length=5), config=config),
 )
 
+ngram_7 = StreamingActionPredictor(
+    strategy=BasicMiner(algorithm=NGram(window_length=6), config=config),
+)
+
+ngram_8 = StreamingActionPredictor(
+    strategy=BasicMiner(algorithm=NGram(window_length=7), config=config),
+)
+
 fallback = StreamingActionPredictor(
     strategy=Fallback(
         models=[
@@ -320,12 +328,14 @@ models = [
     # "ngram_3",
     # "ngram_4",
     # "ngram_5",
-    "ngram_6",
+    # "ngram_6",
+    # "ngram_7",
+    "ngram_8",
     # "fallback",
     # "hard_voting",
-    # "soft_voting",
+    "soft_voting",
     # "adaptive_voting",
-    # "lstm",
+    "lstm",
 ]
 
 accuracy_list = [f"{model}.accuracy" for model in models]
@@ -351,11 +361,13 @@ sponge = (
         # | (ngram_4 * Evaluation("ngram_4"))
         # | (ngram_5 * Evaluation("ngram_5"))
         # | (ngram_6 * Evaluation("ngram_6"))
-        | (fallback * Evaluation("fallback"))
+        # | (ngram_7 * Evaluation("ngram_7"))
+        | (ngram_8 * Evaluation("ngram_8"))
+        # | (fallback * Evaluation("fallback"))
         # | (hard_voting * Evaluation("hard_voting"))
-        # | (soft_voting * Evaluation("soft_voting"))
+        | (soft_voting * Evaluation("soft_voting"))
         # | (adaptive_voting * Evaluation("adaptive_voting"))
-        # | (lstm * Evaluation("lstm"))
+        | (lstm * Evaluation("lstm"))
     )
     * ls.ToSingleStream(flatten=True)
     * ls.AddIndex(key="index")
