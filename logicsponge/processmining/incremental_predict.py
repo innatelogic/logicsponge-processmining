@@ -251,7 +251,7 @@ ngram_8 = StreamingActionPredictor(
 fallback = StreamingActionPredictor(
     strategy=Fallback(
         models=[
-            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=1)),
+            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
             BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
