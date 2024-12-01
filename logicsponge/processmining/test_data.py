@@ -95,7 +95,7 @@ data_collection = {
 # ============================================================
 
 if DATA == "file":
-    data_name = "BPI_Challenge_2013"
+    data_name = "Sepsis_Cases"
     data = data_collection[data_name]
     file_path = os.path.join(FOLDERNAME, data["target_filename"])
     data["file_path"] = file_path
