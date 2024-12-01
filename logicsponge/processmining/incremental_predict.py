@@ -252,7 +252,7 @@ fallback = StreamingActionPredictor(
     strategy=Fallback(
         models=[
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=1)),
-            BasicMiner(algorithm=NGram(window_length=4)),
+            BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
@@ -264,9 +264,10 @@ hard_voting = StreamingActionPredictor(
             BasicMiner(algorithm=Bag()),
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
             BasicMiner(algorithm=NGram(window_length=2)),
-            BasicMiner(algorithm=NGram(window_length=3)),
+            # BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
             # BasicMiner(algorithm=NGram(window_length=5)),
+            BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
@@ -278,9 +279,10 @@ soft_voting = StreamingActionPredictor(
             BasicMiner(algorithm=Bag()),
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
             BasicMiner(algorithm=NGram(window_length=2)),
-            BasicMiner(algorithm=NGram(window_length=3)),
+            # BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
             # BasicMiner(algorithm=NGram(window_length=5)),
+            BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
@@ -293,9 +295,10 @@ adaptive_voting = StreamingActionPredictor(
             BasicMiner(algorithm=Bag()),
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
             BasicMiner(algorithm=NGram(window_length=2)),
-            BasicMiner(algorithm=NGram(window_length=3)),
+            # BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
             # BasicMiner(algorithm=NGram(window_length=5)),
+            BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
@@ -329,20 +332,20 @@ lstm = StreamingActionPredictor(
 # Model names
 models = [
     "fpt",
-    # "bag",
-    # "ngram_1",
-    # "ngram_2",
-    # "ngram_3",
-    # "ngram_4",
-    # "ngram_5",
-    # "ngram_6",
-    # "ngram_7",
-    # "ngram_8",
-    # "fallback",
-    # "hard_voting",
-    # "soft_voting",
-    # "adaptive_voting",
-    "lstm",
+    "bag",
+    "ngram_1",
+    "ngram_2",
+    "ngram_3",
+    "ngram_4",
+    "ngram_5",
+    "ngram_6",
+    "ngram_7",
+    "ngram_8",
+    "fallback",
+    "hard_voting",
+    "soft_voting",
+    "adaptive_voting",
+    # "lstm",
 ]
 
 accuracy_list = [f"{model}.accuracy" for model in models]
@@ -361,20 +364,20 @@ sponge = (
     * AddStartSymbol()
     * (
         (fpt * Evaluation("fpt"))
-        # | (bag * Evaluation("bag"))
+        | (bag * Evaluation("bag"))
         # | (ngram_1 * Evaluation("ngram_1"))
         # | (ngram_2 * Evaluation("ngram_2"))
         # | (ngram_3 * Evaluation("ngram_3"))
         # | (ngram_4 * Evaluation("ngram_4"))
         # | (ngram_5 * Evaluation("ngram_5"))
-        # | (ngram_6 * Evaluation("ngram_6"))
-        # | (ngram_7 * Evaluation("ngram_7"))
-        # | (ngram_8 * Evaluation("ngram_8"))
-        # | (fallback * Evaluation("fallback"))
-        # | (hard_voting * Evaluation("hard_voting"))
-        # | (soft_voting * Evaluation("soft_voting"))
-        # | (adaptive_voting * Evaluation("adaptive_voting"))
-        | (lstm * Evaluation("lstm"))
+        | (ngram_6 * Evaluation("ngram_6"))
+        | (ngram_7 * Evaluation("ngram_7"))
+        | (ngram_8 * Evaluation("ngram_8"))
+        | (fallback * Evaluation("fallback"))
+        | (hard_voting * Evaluation("hard_voting"))
+        | (soft_voting * Evaluation("soft_voting"))
+        | (adaptive_voting * Evaluation("adaptive_voting"))
+        # | (lstm * Evaluation("lstm"))
     )
     * ls.ToSingleStream(flatten=True)
     * ls.AddIndex(key="index")
