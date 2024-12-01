@@ -40,7 +40,7 @@ torch.cuda.manual_seed(123)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-NN_training = False
+NN_training = True
 
 # ============================================================
 # Data preparation
@@ -135,7 +135,7 @@ for iteration in range(n_iterations):
     fallback = Fallback(
         models=[
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-            BasicMiner(algorithm=NGram(window_length=3)),
+            BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
@@ -145,10 +145,10 @@ for iteration in range(n_iterations):
             BasicMiner(algorithm=Bag()),
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
             BasicMiner(algorithm=NGram(window_length=2)),
-            BasicMiner(algorithm=NGram(window_length=3)),
+            # BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
             # BasicMiner(algorithm=NGram(window_length=5)),
-            # BasicMiner(algorithm=NGram(window_length=6)),
+            BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
@@ -158,10 +158,10 @@ for iteration in range(n_iterations):
             BasicMiner(algorithm=Bag()),
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
             BasicMiner(algorithm=NGram(window_length=2)),
-            BasicMiner(algorithm=NGram(window_length=3)),
+            # BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
             # BasicMiner(algorithm=NGram(window_length=5)),
-            # BasicMiner(algorithm=NGram(window_length=6)),
+            BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
