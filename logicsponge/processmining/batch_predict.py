@@ -35,6 +35,21 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+if torch.backends.mps.is_available():
+    device = torch.device("mps")
+    device = torch.device("cpu")
+    logger.info("Using cpu.")
+
+elif torch.cuda.is_available():
+    msg = f"Using cuda: {torch.cuda.get_device_name(0)}."
+    logger.info(msg)
+    device = torch.device("cuda")
+
+else:
+    device = torch.device("cpu")
+    logger.info("Using cpu.")
+
+
 torch.manual_seed(123)
 torch.cuda.manual_seed(123)
 torch.backends.cudnn.deterministic = True
