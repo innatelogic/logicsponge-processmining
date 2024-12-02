@@ -109,20 +109,6 @@ class DataPreparation(ls.FunctionTerm):
         return DataItem({"case_id": handle_keys(self.case_keys, item), "action": handle_keys(self.action_keys, item)})
 
 
-class RemoveStuttering(ls.FunctionTerm):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.last_action = {}
-
-    def run(self, ds_view: ls.DataStreamView):
-        ds_view.next()
-        item = ds_view[-1]
-        case_id = item["case_id"]
-        if case_id not in self.last_action or self.last_action[case_id] != item["action"]:
-            self.output(item)
-        self.last_action[case_id] = item["action"]
-
-
 class StreamingActionPredictor(ls.FunctionTerm):
     def __init__(self, *args, strategy: StreamingMiner, **kwargs):
         super().__init__(*args, **kwargs)
@@ -338,9 +324,9 @@ models = [
     "ngram_3",
     "ngram_4",
     "ngram_5",
-    "ngram_6",
-    "ngram_7",
-    "ngram_8",
+    # "ngram_6",
+    # "ngram_7",
+    # "ngram_8",
     # "fallback",
     # "hard_voting",
     # "soft_voting",
@@ -370,9 +356,9 @@ sponge = (
         | (ngram_3 * Evaluation("ngram_3"))
         | (ngram_4 * Evaluation("ngram_4"))
         | (ngram_5 * Evaluation("ngram_5"))
-        | (ngram_6 * Evaluation("ngram_6"))
-        | (ngram_7 * Evaluation("ngram_7"))
-        | (ngram_8 * Evaluation("ngram_8"))
+        # | (ngram_6 * Evaluation("ngram_6"))
+        # | (ngram_7 * Evaluation("ngram_7"))
+        # | (ngram_8 * Evaluation("ngram_8"))
         # | (fallback * Evaluation("fallback"))
         # | (hard_voting * Evaluation("hard_voting"))
         # | (soft_voting * Evaluation("soft_voting"))
