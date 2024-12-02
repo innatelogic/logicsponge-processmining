@@ -317,11 +317,11 @@ lstm = StreamingActionPredictor(
 
 # Model names
 models = [
-    "fpt",
+    # "fpt",
     # "bag",
-    # "ngram_1",
+    "ngram_1",
     # "ngram_2",
-    "ngram_3",
+    # "ngram_3",
     # "ngram_4",
     # "ngram_5",
     # "ngram_6",
@@ -331,7 +331,7 @@ models = [
     # "hard_voting",
     # "soft_voting",
     # "adaptive_voting",
-    # "lstm",
+    "lstm",
 ]
 
 accuracy_list = [f"{model}.accuracy" for model in models]
@@ -349,11 +349,11 @@ sponge = (
     * ls.KeyFilter(keys=["case_id", "action"])
     * AddStartSymbol()
     * (
-        (fpt * Evaluation("fpt"))
+        # (fpt * Evaluation("fpt"))
         # | (bag * Evaluation("bag"))
-        # | (ngram_1 * Evaluation("ngram_1"))
+        (ngram_1 * Evaluation("ngram_1"))
         # | (ngram_2 * Evaluation("ngram_2"))
-        | (ngram_3 * Evaluation("ngram_3"))
+        # | (ngram_3 * Evaluation("ngram_3"))
         # | (ngram_4 * Evaluation("ngram_4"))
         # | (ngram_5 * Evaluation("ngram_5"))
         # | (ngram_6 * Evaluation("ngram_6"))
@@ -363,7 +363,7 @@ sponge = (
         # | (hard_voting * Evaluation("hard_voting"))
         # | (soft_voting * Evaluation("soft_voting"))
         # | (adaptive_voting * Evaluation("adaptive_voting"))
-        # | (lstm * Evaluation("lstm"))
+        | (lstm * Evaluation("lstm"))
     )
     * ls.ToSingleStream(flatten=True)
     * ls.AddIndex(key="index")
