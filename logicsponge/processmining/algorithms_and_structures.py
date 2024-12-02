@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class BaseStructure(PDFA, ABC):
-    def __init__(self, *args, min_total_visits: int = 0, **kwargs) -> None:
+    def __init__(self, *args, min_total_visits: int = 1, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
         self.case_info = {}  # provides state info
