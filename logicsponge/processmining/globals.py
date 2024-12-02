@@ -15,7 +15,6 @@ ComposedState = Any
 
 ActionName = str | int | tuple[str | int, ...]
 
-# Prediction = tuple[ActionName, list[ActionName], float]
 Prediction = dict[str, Any]
 
 ProbDistr = dict[ActionName, float]
