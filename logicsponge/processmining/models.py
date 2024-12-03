@@ -76,8 +76,7 @@ class StreamingMiner(ABC):
 
             if actual_next_action == predicted_action:
                 self.stats["correct_predictions"] += 1
-
-            if actual_next_action != predicted_action:
+            else:
                 self.stats["wrong_predictions"] += 1
 
     def evaluate(self, data: list[list[ActionName]], mode: str = "incremental") -> None:
@@ -188,7 +187,7 @@ class MultiMiner(StreamingMiner, ABC):
         super().__init__(*args, **kwargs)
         self.models = models
 
-        self.initial_state = self.initial_state = tuple(model.initial_state for model in self.models)
+        self.initial_state = tuple(model.initial_state for model in self.models)
 
     def update(self, case_id: CaseId, action: ActionName) -> None:
         for model in self.models:
