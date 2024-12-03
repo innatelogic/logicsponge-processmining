@@ -360,7 +360,7 @@ class AdaptiveVoting(MultiMiner):
 
     def update(self, case_id: CaseId, action: ActionName) -> None:
         """
-        Overwritten to account for keeping track of accuracies.
+        Overwritten to account for keeping track of accuracies in streaming mode.
         """
         self.total_predictions += 1
 
@@ -580,7 +580,7 @@ class NeuralNetworkMiner(StreamingMiner):
     def __init__(self, *args, model: RNNModel | LSTMModel, batch_size: int, optimizer, criterion, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.device = model.device
-        self.model = model.to(device=self.device)  # The neural network, make sure its at the device
+        self.model = model.to(device=self.device)  # The neural network, make sure it's at the device
         self.optimizer = optimizer
         self.criterion = criterion
 
