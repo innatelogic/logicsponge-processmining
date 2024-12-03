@@ -331,7 +331,7 @@ models = [
     "hard_voting",
     "soft_voting",
     "adaptive_voting",
-    "lstm",
+    # "lstm",
 ]
 
 accuracy_list = [f"{model}.accuracy" for model in models]
@@ -363,7 +363,7 @@ sponge = (
         | (hard_voting * Evaluation("hard_voting"))
         | (soft_voting * Evaluation("soft_voting"))
         | (adaptive_voting * Evaluation("adaptive_voting"))
-        | (lstm * Evaluation("lstm"))
+        # | (lstm * Evaluation("lstm"))
     )
     * ls.ToSingleStream(flatten=True)
     * ls.AddIndex(key="index")
