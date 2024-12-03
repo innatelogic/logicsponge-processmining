@@ -252,7 +252,6 @@ class NGram(BaseStructure):
                 self.state_info[next_state]["access_string"] = access_string
                 self.access_strings[access_string] = next_state
                 self.state_info[next_state]["level"] = self.state_info[current_state]["level"] + 1
-                # Update the transition dictionary instead of overwriting
                 self.transitions[current_state][action] = next_state
                 current_state = next_state
 
