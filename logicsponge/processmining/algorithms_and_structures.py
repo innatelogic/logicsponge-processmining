@@ -124,7 +124,7 @@ class BaseStructure(PDFA, ABC):
         self.state_info[state_id]["action_frequency"] = {}
         self.state_info[state_id]["active_visits"] = 0
         self.state_info[state_id]["level"] = 0
-        self.state_info[state_id]["access_string"] = {}
+        self.state_info[state_id]["access_string"] = None
 
         self.transitions[state_id] = {}
 
