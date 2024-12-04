@@ -113,7 +113,7 @@ for iteration in range(n_iterations):
     val_set_transformed = add_stop_to_sequences(val_set_transformed, STOP)
     test_set_transformed = add_stop_to_sequences(test_set_transformed, STOP)
 
-    data_statistics(test_set_transformed)
+    # data_statistics(test_set_transformed)
 
     alergia_train_set_transformed = add_input_symbols(train_set_transformed, "in")
 
@@ -307,7 +307,7 @@ for iteration in range(n_iterations):
 
         # Train the LSTM on the train set with batch size and sequence-to-sequence targets
         model = train_rnn(
-            model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=128, epochs=20
+            model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=20
         )
 
         lstm_accuracy = evaluate_rnn(model, nn_test_set_transformed, dataset_type="Test")
