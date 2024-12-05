@@ -170,7 +170,7 @@ for iteration in range(n_iterations):
 
     soft_voting = SoftVoting(
         models=[
-            # BasicMiner(algorithm=Bag()),
+            BasicMiner(algorithm=Bag()),
             # BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
             BasicMiner(algorithm=NGram(window_length=2)),
             BasicMiner(algorithm=NGram(window_length=3)),
