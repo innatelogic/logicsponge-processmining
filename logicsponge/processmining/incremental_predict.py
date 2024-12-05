@@ -317,12 +317,12 @@ lstm = StreamingActionPredictor(
 
 # Model names
 models = [
-    "fpt",
-    "bag",
+    # "fpt",
+    # "bag",
     # "ngram_1",
-    # "ngram_2",
-    # "ngram_3",
-    # "ngram_4",
+    "ngram_2",
+    "ngram_3",
+    "ngram_4",
     # "ngram_5",
     # "ngram_6",
     # "ngram_7",
@@ -349,12 +349,12 @@ sponge = (
     * ls.KeyFilter(keys=["case_id", "action"])
     * AddStartSymbol()
     * (
-        (fpt * Evaluation("fpt"))
-        | (bag * Evaluation("bag"))
+        # (fpt * Evaluation("fpt"))
+        # | (bag * Evaluation("bag"))
         # | (ngram_1 * Evaluation("ngram_1"))
-        # | (ngram_2 * Evaluation("ngram_2"))
-        # | (ngram_3 * Evaluation("ngram_3"))
-        # | (ngram_4 * Evaluation("ngram_4"))
+        (ngram_2 * Evaluation("ngram_2"))
+        | (ngram_3 * Evaluation("ngram_3"))
+        | (ngram_4 * Evaluation("ngram_4"))
         # | (ngram_5 * Evaluation("ngram_5"))
         # | (ngram_6 * Evaluation("ngram_6"))
         # | (ngram_7 * Evaluation("ngram_7"))
