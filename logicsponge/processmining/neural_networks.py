@@ -130,7 +130,7 @@ class PreprocessData:
         return pad_sequence(processed_sequences, batch_first=True, padding_value=0)
 
 
-def train_rnn(model, train_sequences, val_sequences, criterion, optimizer, batch_size, epochs=10, patience=1):
+def train_rnn(model, train_sequences, val_sequences, criterion, optimizer, batch_size, epochs=10, patience=3):
     dataset = torch.utils.data.TensorDataset(train_sequences)  # Create dataset
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)  # Create dataloader
 
