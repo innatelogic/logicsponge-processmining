@@ -21,7 +21,7 @@ DATA = "file"
 # ============================================================
 
 data_collection = {
-    "BPI_Challenge_2018": {
+    "BPI_Challenge_2012": {
         "url": "https://data.4tu.nl/file/533f66a4-8911-4ac7-8612-1235d65d1f37/3276db7f-8bee-4f2b-88ee-92dbffb5a893",
         "doi": "10.4121/uuid:3926db30-f712-4394-aebc-75976070e91f",
         "filetype": "xes.gz",
@@ -95,7 +95,7 @@ data_collection = {
 # ============================================================
 
 if DATA == "file":
-    data_name = "BPI_Challenge_2017"
+    data_name = "BPI_Challenge_2019"
     data = data_collection[data_name]
     file_path = os.path.join(FOLDERNAME, data["target_filename"])
     data["file_path"] = file_path
