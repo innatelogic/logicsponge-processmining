@@ -49,6 +49,7 @@ data_collection = {
         "case_keys": ["Incident ID"],
         "action_keys": ["IncidentActivity_Type"],
         "delimiter": ";",
+        "sort_by_time": "DateStamp"
     },
     "BPI_Challenge_2017": {
         "url": "https://data.4tu.nl/file/34c3f44b-3101-4ea9-8281-e38905c68b8d/f3aec4f7-d52c-4217-82f4-57d719a8298c",
@@ -104,6 +105,14 @@ if DATA == "file":
     )
 
     csv_file = pd.read_csv(data["file_path"], delimiter=data["delimiter"])
+
+    # Sort by timestamp if "sort_by_time" is defined
+    # if "sort_by_time" in data and data["sort_by_time"]:
+    #     timestamp_column = data["sort_by_time"]
+    #     if timestamp_column in csv_file.columns:
+    #         csv_file.sort_values(by=timestamp_column, inplace=True)
+    #     else:
+    #         raise KeyError(f'Timestamp column "{timestamp_column}" not found in the CSV file.')
 
     dataset: list[tuple[CaseId, ActionName]] = [
         (
