@@ -324,7 +324,7 @@ models = [
     "ngram_3",
     # "ngram_4",
     "ngram_5",
-    "ngram_6",
+    # "ngram_6",
     # "ngram_7",
     # "ngram_8",
     # "fallback",
@@ -356,7 +356,7 @@ sponge = (
         (ngram_3 * Evaluation("ngram_3"))
         # | (ngram_4 * Evaluation("ngram_4"))
         | (ngram_5 * Evaluation("ngram_5"))
-        | (ngram_6 * Evaluation("ngram_6"))
+        # | (ngram_6 * Evaluation("ngram_6"))
         # | (ngram_7 * Evaluation("ngram_7"))
         # | (ngram_8 * Evaluation("ngram_8"))
         # | (fallback * Evaluation("fallback"))
