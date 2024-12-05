@@ -349,8 +349,8 @@ sponge = (
     * ls.KeyFilter(keys=["case_id", "action"])
     * AddStartSymbol()
     * (
-        (fpt * Evaluation("fpt"))
-        | (bag * Evaluation("bag"))
+        # (fpt * Evaluation("fpt"))
+        (bag * Evaluation("bag"))
         | (ngram_1 * Evaluation("ngram_1"))
         | (ngram_2 * Evaluation("ngram_2"))
         # | (ngram_3 * Evaluation("ngram_3"))
