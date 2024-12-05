@@ -326,10 +326,10 @@ models = [
     # "ngram_5",
     # "ngram_6",
     # "ngram_7",
-    "ngram_8",
-    "fallback",
-    # "hard_voting",
-    # "soft_voting",
+    # "ngram_8",
+    # "fallback",
+    "hard_voting",
+    "soft_voting",
     # "adaptive_voting",
     # "lstm",
 ]
@@ -358,10 +358,10 @@ sponge = (
         # | (ngram_5 * Evaluation("ngram_5"))
         # | (ngram_6 * Evaluation("ngram_6"))
         # | (ngram_7 * Evaluation("ngram_7"))
-        (ngram_8 * Evaluation("ngram_8"))
-        | (fallback * Evaluation("fallback"))
-        # | (hard_voting * Evaluation("hard_voting"))
-        # | (soft_voting * Evaluation("soft_voting"))
+        # | (ngram_8 * Evaluation("ngram_8"))
+        # | (fallback * Evaluation("fallback"))
+        (hard_voting * Evaluation("hard_voting"))
+        | (soft_voting * Evaluation("soft_voting"))
         # | (adaptive_voting * Evaluation("adaptive_voting"))
         # | (lstm * Evaluation("lstm"))
     )
