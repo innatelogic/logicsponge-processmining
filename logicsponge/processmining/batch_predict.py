@@ -69,8 +69,8 @@ data_statistics(data)
 # Define the number of iterations
 # ============================================================
 
-# n_iterations = 5
-n_iterations = 1
+n_iterations = 5
+# n_iterations = 1
 
 # Store metrics across iterations
 all_metrics = {
