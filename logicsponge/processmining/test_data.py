@@ -132,8 +132,6 @@ if DATA == "file":
         for index, row in csv_file.iterrows()
     ]
 
-    print(csv_file[:100])
-
 
 # ============================================================
 # Synthetic data sets

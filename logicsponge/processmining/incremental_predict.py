@@ -5,7 +5,7 @@ import torch
 from torch import nn, optim
 
 import logicsponge.core as ls
-from logicsponge.core import DataItem, dashboard
+from logicsponge.core import DataItem  #, dashboard
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
 from logicsponge.processmining.data_utils import handle_keys
 from logicsponge.processmining.globals import probs_prediction
@@ -238,7 +238,7 @@ fallback = StreamingActionPredictor(
     strategy=Fallback(
         models=[
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-            BasicMiner(algorithm=NGram(window_length=6)),
+            BasicMiner(algorithm=NGram(window_length=4)),
         ],
         config=config,
     )
@@ -250,10 +250,10 @@ hard_voting = StreamingActionPredictor(
             BasicMiner(algorithm=Bag()),
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
             BasicMiner(algorithm=NGram(window_length=2)),
-            # BasicMiner(algorithm=NGram(window_length=3)),
+            BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
             # BasicMiner(algorithm=NGram(window_length=5)),
-            BasicMiner(algorithm=NGram(window_length=6)),
+            # BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
@@ -265,10 +265,10 @@ soft_voting = StreamingActionPredictor(
             BasicMiner(algorithm=Bag()),
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
             BasicMiner(algorithm=NGram(window_length=2)),
-            # BasicMiner(algorithm=NGram(window_length=3)),
+            BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
             # BasicMiner(algorithm=NGram(window_length=5)),
-            BasicMiner(algorithm=NGram(window_length=6)),
+            # BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
@@ -281,10 +281,10 @@ adaptive_voting = StreamingActionPredictor(
             BasicMiner(algorithm=Bag()),
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
             BasicMiner(algorithm=NGram(window_length=2)),
-            # BasicMiner(algorithm=NGram(window_length=3)),
+            BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
             # BasicMiner(algorithm=NGram(window_length=5)),
-            BasicMiner(algorithm=NGram(window_length=6)),
+            # BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
@@ -319,19 +319,19 @@ lstm = StreamingActionPredictor(
 models = [
     "fpt",
     "bag",
-    # "ngram_1",
-    # "ngram_2",
+    "ngram_1",
+    "ngram_2",
     "ngram_3",
     "ngram_4",
     "ngram_5",
-    # "ngram_6",
-    # "ngram_7",
-    # "ngram_8",
+    "ngram_6",
+    "ngram_7",
+    "ngram_8",
     "fallback",
     "hard_voting",
     "soft_voting",
     "adaptive_voting",
-    "lstm",
+    # "lstm",
 ]
 
 accuracy_list = [f"{model}.accuracy" for model in models]
@@ -351,31 +351,31 @@ sponge = (
     * (
         (fpt * Evaluation("fpt"))
         | (bag * Evaluation("bag"))
-        # | (ngram_1 * Evaluation("ngram_1"))
-        # | (ngram_2 * Evaluation("ngram_2"))
+        | (ngram_1 * Evaluation("ngram_1"))
+        | (ngram_2 * Evaluation("ngram_2"))
         | (ngram_3 * Evaluation("ngram_3"))
         | (ngram_4 * Evaluation("ngram_4"))
         | (ngram_5 * Evaluation("ngram_5"))
-        # | (ngram_6 * Evaluation("ngram_6"))
-        # | (ngram_7 * Evaluation("ngram_7"))
-        # | (ngram_8 * Evaluation("ngram_8"))
+        | (ngram_6 * Evaluation("ngram_6"))
+        | (ngram_7 * Evaluation("ngram_7"))
+        | (ngram_8 * Evaluation("ngram_8"))
         | (fallback * Evaluation("fallback"))
         | (hard_voting * Evaluation("hard_voting"))
         | (soft_voting * Evaluation("soft_voting"))
         | (adaptive_voting * Evaluation("adaptive_voting"))
-        | (lstm * Evaluation("lstm"))
+        # | (lstm * Evaluation("lstm"))
     )
     * ls.ToSingleStream(flatten=True)
     * ls.AddIndex(key="index")
     * ls.KeyFilter(keys=all_attributes)
-    # * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 100 == 0 or item["index"] >= len(dataset) - 10)
-    # * ls.Print()
-    * (dashboard.Plot("Accuracy (%)", x="index", y=accuracy_list))
+    * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 100 == 0 or item["index"] >= len(dataset) - 10)
+    * ls.Print()
+    # * (dashboard.Plot("Accuracy (%)", x="index", y=accuracy_list))
     # * (dashboard.Plot("Latency Mean (ms)", x="index", y=latency_mean_list))
 )
 
 
 sponge.start()
 
-dashboard.show_stats(sponge)
-dashboard.run()
+# dashboard.show_stats(sponge)
+# dashboard.run()
