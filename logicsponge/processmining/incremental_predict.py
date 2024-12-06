@@ -323,14 +323,14 @@ models = [
     # "ngram_2",
     # "ngram_3",
     # "ngram_4",
-    "ngram_5",
-    "ngram_6",
-    "ngram_7",
-    "ngram_8",
-    # "fallback",
-    # "hard_voting",
-    # "soft_voting",
-    # "adaptive_voting",
+    # "ngram_5",
+    # "ngram_6",
+    # "ngram_7",
+    # "ngram_8",
+    "fallback",
+    "hard_voting",
+    "soft_voting",
+    "adaptive_voting",
     # "lstm",
 ]
 
@@ -355,14 +355,14 @@ sponge = (
         # | (ngram_2 * Evaluation("ngram_2"))
         # | (ngram_3 * Evaluation("ngram_3"))
         # | (ngram_4 * Evaluation("ngram_4"))
-        (ngram_5 * Evaluation("ngram_5"))
-        | (ngram_6 * Evaluation("ngram_6"))
-        | (ngram_7 * Evaluation("ngram_7"))
-        | (ngram_8 * Evaluation("ngram_8"))
-        # | (fallback * Evaluation("fallback"))
-        # | (hard_voting * Evaluation("hard_voting"))
-        # | (soft_voting * Evaluation("soft_voting"))
-        # | (adaptive_voting * Evaluation("adaptive_voting"))
+        # | (ngram_5 * Evaluation("ngram_5"))
+        # | (ngram_6 * Evaluation("ngram_6"))
+        # | (ngram_7 * Evaluation("ngram_7"))
+        # | (ngram_8 * Evaluation("ngram_8"))
+        (fallback * Evaluation("fallback"))
+        | (hard_voting * Evaluation("hard_voting"))
+        | (soft_voting * Evaluation("soft_voting"))
+        | (adaptive_voting * Evaluation("adaptive_voting"))
         # | (lstm * Evaluation("lstm"))
     )
     * ls.ToSingleStream(flatten=True)
