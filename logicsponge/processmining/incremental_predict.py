@@ -1,3 +1,4 @@
+import gc
 import logging
 import time
 
@@ -24,6 +25,13 @@ from logicsponge.processmining.neural_networks import LSTMModel
 from logicsponge.processmining.test_data import dataset
 
 logger = logging.getLogger(__name__)
+
+# disable circular gc here, since a phase 2 may take minutes
+gc.disable()
+
+# def gb_callback_example(phase, info: dict):
+#     print("gc", phase, info)
+# gc.callbacks.append(gb_callback_example)
 
 if torch.backends.mps.is_available():
     device = torch.device("mps")
