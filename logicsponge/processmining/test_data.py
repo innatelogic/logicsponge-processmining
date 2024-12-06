@@ -96,7 +96,7 @@ data_collection = {
 # ============================================================
 
 if DATA == "file":
-    data_name = "BPI_Challenge_2019"
+    data_name = "BPI_Challenge_2014"
     data = data_collection[data_name]
     file_path = os.path.join(FOLDERNAME, data["target_filename"])
     data["file_path"] = file_path
@@ -107,12 +107,12 @@ if DATA == "file":
     csv_file = pd.read_csv(data["file_path"], delimiter=data["delimiter"])
 
     # Sort by timestamp if "sort_by_time" is defined
-    # if "sort_by_time" in data and data["sort_by_time"]:
-    #     timestamp_column = data["sort_by_time"]
-    #     if timestamp_column in csv_file.columns:
-    #         csv_file.sort_values(by=timestamp_column, inplace=True)
-    #     else:
-    #         raise KeyError(f'Timestamp column "{timestamp_column}" not found in the CSV file.')
+    if "sort_by_time" in data and data["sort_by_time"]:
+        timestamp_column = data["sort_by_time"]
+        if timestamp_column in csv_file.columns:
+            csv_file.sort_values(by=timestamp_column, inplace=True)
+        else:
+            raise KeyError(f'Timestamp column "{timestamp_column}" not found in the CSV file.')
 
     dataset: list[tuple[CaseId, ActionName]] = [
         (
@@ -121,6 +121,8 @@ if DATA == "file":
         )
         for index, row in csv_file.iterrows()
     ]
+
+    print(csv_file[:100])
 
 
 # ============================================================

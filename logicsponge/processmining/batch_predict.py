@@ -55,7 +55,7 @@ torch.cuda.manual_seed(123)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-NN_training = False
+NN_training = True
 
 # ============================================================
 # Data preparation
@@ -77,20 +77,20 @@ all_metrics = {
     name: {"accuracies": [], "num_states": []}
     for name in [
         "fpt",
-        # "bag",
-        # "ngram_1",
-        # "ngram_2",
-        # "ngram_3",
-        # "ngram_4",
-        # "ngram_5",
-        # "ngram_6",
-        # "ngram_7",
-        # "ngram_8",
-        # "fallback fpt->ngram",
-        # "hard voting",
+        "bag",
+        "ngram_1",
+        "ngram_2",
+        "ngram_3",
+        "ngram_4",
+        "ngram_5",
+        "ngram_6",
+        "ngram_7",
+        "ngram_8",
+        "fallback fpt->ngram",
+        "hard voting",
         "soft voting",
-        # "alergia",
-        # "LSTM",
+        "alergia",
+        "LSTM",
     ]
 }
 
@@ -193,17 +193,17 @@ for iteration in range(n_iterations):
     start_time = time.time()
     for case_id, action_name in train_set:
         fpt.update(case_id, action_name)
-        # bag.update(case_id, action_name)
-        # ngram_1.update(case_id, action_name)
-        # ngram_2.update(case_id, action_name)
-        # ngram_3.update(case_id, action_name)
-        # ngram_4.update(case_id, action_name)
-        # ngram_5.update(case_id, action_name)
-        # ngram_6.update(case_id, action_name)
-        # ngram_7.update(case_id, action_name)
-        # ngram_8.update(case_id, action_name)
-        # fallback.update(case_id, action_name)
-        # hard_voting.update(case_id, action_name)
+        bag.update(case_id, action_name)
+        ngram_1.update(case_id, action_name)
+        ngram_2.update(case_id, action_name)
+        ngram_3.update(case_id, action_name)
+        ngram_4.update(case_id, action_name)
+        ngram_5.update(case_id, action_name)
+        ngram_6.update(case_id, action_name)
+        ngram_7.update(case_id, action_name)
+        ngram_8.update(case_id, action_name)
+        fallback.update(case_id, action_name)
+        hard_voting.update(case_id, action_name)
         soft_voting.update(case_id, action_name)
     end_time = time.time()
     elapsed_time = end_time - start_time
@@ -211,13 +211,13 @@ for iteration in range(n_iterations):
     logger.info(msg)
 
     # Train Alergia
-    # start_time = time.time()
-    # algorithm = run_Alergia(alergia_train_set_transformed, automaton_type="smm", eps=0.5, print_info=True)
-    # smm = Alergia(algorithm=algorithm)
-    # end_time = time.time()
-    # elapsed_time = end_time - start_time
-    # msg = f"Training time for Alergia: {elapsed_time:.4f} seconds"
-    # logger.info(msg)
+    start_time = time.time()
+    algorithm = run_Alergia(alergia_train_set_transformed, automaton_type="smm", eps=0.5, print_info=True)
+    smm = Alergia(algorithm=algorithm)
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    msg = f"Training time for Alergia: {elapsed_time:.4f} seconds"
+    logger.info(msg)
 
     # ============================================================
     # Evaluation
@@ -226,19 +226,19 @@ for iteration in range(n_iterations):
     # All strategies (without LSTM)
     strategies = {
         "fpt": (fpt, test_set_transformed),
-        # "bag": (bag, test_set_transformed),
-        # "ngram_1": (ngram_1, test_set_transformed),
-        # "ngram_2": (ngram_2, test_set_transformed),
-        # "ngram_3": (ngram_3, test_set_transformed),
-        # "ngram_4": (ngram_4, test_set_transformed),
-        # "ngram_5": (ngram_5, test_set_transformed),
-        # "ngram_6": (ngram_6, test_set_transformed),
-        # "ngram_7": (ngram_7, test_set_transformed),
-        # "ngram_8": (ngram_8, test_set_transformed),
-        # "fallback fpt->ngram": (fallback, test_set_transformed),
-        # "hard voting": (hard_voting, test_set_transformed),
+        "bag": (bag, test_set_transformed),
+        "ngram_1": (ngram_1, test_set_transformed),
+        "ngram_2": (ngram_2, test_set_transformed),
+        "ngram_3": (ngram_3, test_set_transformed),
+        "ngram_4": (ngram_4, test_set_transformed),
+        "ngram_5": (ngram_5, test_set_transformed),
+        "ngram_6": (ngram_6, test_set_transformed),
+        "ngram_7": (ngram_7, test_set_transformed),
+        "ngram_8": (ngram_8, test_set_transformed),
+        "fallback fpt->ngram": (fallback, test_set_transformed),
+        "hard voting": (hard_voting, test_set_transformed),
         "soft voting": (soft_voting, test_set_transformed),
-        # "alergia": (smm, test_set_transformed),
+        "alergia": (smm, test_set_transformed),
     }
 
     # Store the statistics for each iteration and also print them out
@@ -307,7 +307,7 @@ for iteration in range(n_iterations):
 
         # Train the LSTM on the train set with batch size and sequence-to-sequence targets
         model = train_rnn(
-            model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=10
+            model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=20
         )
 
         lstm_accuracy = evaluate_rnn(model, nn_test_set_transformed, dataset_type="Test")
