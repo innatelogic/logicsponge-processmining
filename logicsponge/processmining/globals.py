@@ -42,7 +42,7 @@ CONFIG = {
 # ==========================================================
 
 
-def probs_prediction(probs: ProbDistr, config: dict[str, Any] | None = None) -> Prediction:
+def probs_prediction(probs: ProbDistr, config: dict[str, Any] | None = None) -> Prediction | None:
     """
     Returns the top-k actions based on their probabilities.
     If STOP has a probability of 1.0 and there are no other actions, return None.
@@ -56,7 +56,7 @@ def probs_prediction(probs: ProbDistr, config: dict[str, Any] | None = None) -> 
 
     # If there are no probabilities, return None
     if not probs:
-        return {}
+        return None
 
     # Create a copy of probs to avoid modifying the original dictionary
     probs_copy = probs.copy()
@@ -66,11 +66,11 @@ def probs_prediction(probs: ProbDistr, config: dict[str, Any] | None = None) -> 
         stop_probability = probs_copy.get(STOP, 0.0)
 
         # If STOP has a probability of 1 and there are no other actions available, return None
-        if stop_probability == 1.0 and len(probs_copy) == 1:
-            return {}
+        if stop_probability >= 1.0 and len(probs_copy) == 1:
+            return None
 
         # If STOP has a probability of 1 but there are other actions, give a uniform distribution to the other actions
-        if stop_probability == 1.0 and len(probs_copy) > 1:
+        if stop_probability >= 1.0 and len(probs_copy) > 1:
             del probs_copy[STOP]  # Remove STOP from consideration
 
             # Verify STOP is indeed deleted
@@ -98,8 +98,8 @@ def probs_prediction(probs: ProbDistr, config: dict[str, Any] | None = None) -> 
                 probs_copy = {action: prob / total_prob for action, prob in probs_copy.items()}
 
     # If there are no probabilities after filtering, return None
-    if not probs_copy:
-        return {}
+    if probs_copy == {}:
+        return None
 
     # Convert dictionary to a sorted list of items (actions and probabilities) for consistency
     sorted_probs = sorted(probs_copy.items(), key=lambda x: (-x[1], x[0]))

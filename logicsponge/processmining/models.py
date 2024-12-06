@@ -63,13 +63,13 @@ class StreamingMiner(ABC):
             "log_loss": 0.0,  # not implemented yet
         }
 
-    def update_stats(self, actual_next_action: ActionName, prediction: Prediction) -> None:
+    def update_stats(self, actual_next_action: ActionName, prediction: Prediction | None) -> None:
         """
         Updates the statistics based on the actual action, the prediction, and the top-k predictions.
         """
         self.stats["total_predictions"] += 1
 
-        if not prediction:
+        if prediction is None:
             self.stats["empty_predictions"] += 1
         else:
             predicted_action = prediction["action"]
@@ -227,10 +227,10 @@ class HardVoting(MultiMiner):
         valid_predictions = []
         for probs in probs_list:
             prediction = probs_prediction(probs, self.config)
-            if prediction:
+            if prediction is not None:
                 valid_predictions.append(prediction)
 
-        if not valid_predictions:
+        if len(valid_predictions) == 0:
             return {}
 
         # Extract only the action part of each valid prediction for voting
@@ -366,7 +366,7 @@ class AdaptiveVoting(MultiMiner):
 
         for i, model in enumerate(self.models):
             prediction = probs_prediction(model.case_probs(case_id), config=self.config)
-            if prediction and prediction["action"] == action:
+            if prediction is not None and prediction["action"] == action:
                 self.correct_predictions[i] += 1
 
             model.update(case_id, action)

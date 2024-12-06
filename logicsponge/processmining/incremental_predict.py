@@ -1,3 +1,4 @@
+import gc
 import logging
 import time
 
@@ -5,7 +6,7 @@ import torch
 from torch import nn, optim
 
 import logicsponge.core as ls
-from logicsponge.core import DataItem  #, dashboard
+from logicsponge.core import DataItem  # , dashboard
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
 from logicsponge.processmining.data_utils import handle_keys
 from logicsponge.processmining.globals import probs_prediction
@@ -24,6 +25,13 @@ from logicsponge.processmining.neural_networks import LSTMModel
 from logicsponge.processmining.test_data import dataset
 
 logger = logging.getLogger(__name__)
+
+# disable circular gc here, since a phase 2 may take minutes
+gc.disable()
+
+# def gb_callback_example(phase, info: dict):
+#     print("gc", phase, info)
+# gc.callbacks.append(gb_callback_example)
 
 if torch.backends.mps.is_available():
     device = torch.device("mps")
@@ -146,10 +154,10 @@ class StreamingActionPredictor(ls.FunctionTerm):
 class Evaluation(ls.FunctionTerm):
     def __init__(self, *args, top_actions: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
+        self.top_actions = top_actions
         self.correct_predictions = 0
         self.total_predictions = 0
         self.missing_predictions = 0
-        self.top_actions = top_actions
         self.latency_sum = 0
         self.latency_max = 0
 
@@ -157,7 +165,7 @@ class Evaluation(ls.FunctionTerm):
         self.latency_sum += item["latency"]
         self.latency_max = max(item["latency"], self.latency_max)
 
-        if not item["prediction"]:
+        if item["prediction"] is None:
             self.missing_predictions += 1
         elif self.top_actions:
             if item["action"] in item["prediction"]["top_k_actions"]:
