@@ -49,7 +49,7 @@ data_collection = {
         "case_keys": ["Incident ID"],
         "action_keys": ["IncidentActivity_Type"],
         "delimiter": ";",
-        "sort_by_time": "DateStamp"
+        "sort_by_time": "DateStamp",
     },
     "BPI_Challenge_2017": {
         "url": "https://data.4tu.nl/file/34c3f44b-3101-4ea9-8281-e38905c68b8d/f3aec4f7-d52c-4217-82f4-57d719a8298c",

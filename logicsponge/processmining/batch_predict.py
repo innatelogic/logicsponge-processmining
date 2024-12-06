@@ -4,8 +4,8 @@ import time
 import matplotlib as mpl
 import numpy as np
 import pandas as pd
-from aalpy.learning_algs import run_Alergia
 import torch
+from aalpy.learning_algs import run_Alergia
 from torch import nn, optim
 
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram, Parikh
