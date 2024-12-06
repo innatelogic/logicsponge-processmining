@@ -156,3 +156,7 @@ cython_debug/
 
 # Downloaded and synthetic data for process mining
 /logicsponge/processmining/data/
+
+.vscode/
+data/
+torchlogs/
