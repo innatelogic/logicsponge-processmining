@@ -96,7 +96,7 @@ data_collection = {
 # ============================================================
 
 if DATA == "file":
-    data_name = "BPI_Challenge_2014"
+    data_name = "BPI_Challenge_2018"
     data = data_collection[data_name]
     file_path = os.path.join(FOLDERNAME, data["target_filename"])
     data["file_path"] = file_path
@@ -107,22 +107,22 @@ if DATA == "file":
     csv_file = pd.read_csv(data["file_path"], delimiter=data["delimiter"])
 
     # Sort by timestamp if "sort_by_time" is defined
-    if "sort_by_time" in data and data["sort_by_time"]:
-        timestamp_column = data["sort_by_time"]
-        if timestamp_column in csv_file.columns:
-            # Convert the timestamp column to datetime format
-            csv_file[timestamp_column] = pd.to_datetime(csv_file[timestamp_column], format='%d-%m-%Y %H:%M:%S',
-                                                        errors='coerce')
-
-            # Check for any invalid datetime values (NaT) after conversion
-            if csv_file[timestamp_column].isna().any():
-                raise ValueError(
-                    f"Invalid datetime format in column '{timestamp_column}'. Ensure the format is '%d-%m-%Y %H:%M:%S'.")
-
-            # Sort the DataFrame by the timestamp column
-            csv_file.sort_values(by=timestamp_column, inplace=True)
-        else:
-            raise KeyError(f'Timestamp column "{timestamp_column}" not found in the CSV file.')
+    # if "sort_by_time" in data and data["sort_by_time"]:
+    #     timestamp_column = data["sort_by_time"]
+    #     if timestamp_column in csv_file.columns:
+    #         # Convert the timestamp column to datetime format
+    #         csv_file[timestamp_column] = pd.to_datetime(csv_file[timestamp_column], format='%d-%m-%Y %H:%M:%S',
+    #                                                     errors='coerce')
+    #
+    #         # Check for any invalid datetime values (NaT) after conversion
+    #         if csv_file[timestamp_column].isna().any():
+    #             raise ValueError(
+    #                 f"Invalid datetime format in column '{timestamp_column}'. Ensure the format is '%d-%m-%Y %H:%M:%S'.")
+    #
+    #         # Sort the DataFrame by the timestamp column
+    #         csv_file.sort_values(by=timestamp_column, inplace=True)
+    #     else:
+    #         raise KeyError(f'Timestamp column "{timestamp_column}" not found in the CSV file.')
 
     dataset: list[tuple[CaseId, ActionName]] = [
         (
