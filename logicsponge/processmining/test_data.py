@@ -110,6 +110,16 @@ if DATA == "file":
     if "sort_by_time" in data and data["sort_by_time"]:
         timestamp_column = data["sort_by_time"]
         if timestamp_column in csv_file.columns:
+            # Convert the timestamp column to datetime format
+            csv_file[timestamp_column] = pd.to_datetime(csv_file[timestamp_column], format='%d-%m-%Y %H:%M:%S',
+                                                        errors='coerce')
+
+            # Check for any invalid datetime values (NaT) after conversion
+            if csv_file[timestamp_column].isna().any():
+                raise ValueError(
+                    f"Invalid datetime format in column '{timestamp_column}'. Ensure the format is '%d-%m-%Y %H:%M:%S'.")
+
+            # Sort the DataFrame by the timestamp column
             csv_file.sort_values(by=timestamp_column, inplace=True)
         else:
             raise KeyError(f'Timestamp column "{timestamp_column}" not found in the CSV file.')
