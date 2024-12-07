@@ -4,7 +4,7 @@ import os
 import random
 import shutil
 from collections import Counter
-from typing import cast
+from typing import Any, cast
 
 import pandas as pd
 import pm4py
@@ -269,13 +269,13 @@ class FileHandler:
         raise ValueError(msg)
 
 
-def handle_keys(keys: list[str | int], row: pd.Series | DataItem) -> str | int | tuple[str | int, ...]:
+def handle_keys(keys: list[str | int], row: DataItem | dict[str | int, Any]) -> str | int | tuple[str | int, ...]:
     """
     Handles the case and action keys, returning either a single value or a tuple of values.
     Ensures the return type matches the expected CaseId or ActionName.
     """
     if len(keys) == 1:
-        return cast(str | int, row[keys[0]])  # Return the value directly if there's only one key
+        # Return the value directly if there's only one key
+        return cast(str | int, row[keys[0]])
 
-    # return tuple(cast(str | int, row[key]) for key in keys)
     return ", ".join(str(cast(str | int, row[key])) for key in keys)

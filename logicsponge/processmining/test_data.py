@@ -1,4 +1,6 @@
 import os
+from collections.abc import Iterator
+from typing import Any
 
 import pandas as pd
 
@@ -14,6 +16,23 @@ DATA = "file"
 # DATA = "synthetic"
 # DATA = "explicit"
 # DATA = "PDFA"
+
+
+def csv_row_iterator(file_path: str, delimiter: str = ",", chunksize: int = 2) -> Iterator[dict[str, Any]]:
+    """
+    Creates an iterator that yields rows from a large CSV file.
+
+    Args:
+        file_path (str): Path to the CSV file.
+        delimiter (str): The delimiter.
+        chunksize (int): Number of rows to read at a time.
+
+    Yields:
+        NamedTuple: Each row as a nametuple of column names to values.
+    """
+    chunk_iter = pd.read_csv(file_path, chunksize=chunksize, delimiter=delimiter)
+    for chunk in chunk_iter:
+        yield from chunk.to_dict("records")
 
 
 # ============================================================
@@ -97,14 +116,13 @@ data_collection = {
 
 if DATA == "file":
     data_name = "Sepsis_Cases"
-    data = data_collection[data_name]
-    file_path = os.path.join(FOLDERNAME, data["target_filename"])
-    data["file_path"] = file_path
+    mydata = data_collection[data_name]  # type: ignore
+    file_path = os.path.join(FOLDERNAME, mydata["target_filename"])
+    mydata["file_path"] = file_path
     file_handler.handle_file(
-        file_type=data["filetype"], url=data["url"], filename=data["target_filename"], doi=data["doi"]
+        file_type=mydata["filetype"], url=mydata["url"], filename=mydata["target_filename"], doi=mydata["doi"]
     )
-
-    csv_file = pd.read_csv(data["file_path"], delimiter=data["delimiter"])
+    row_iterator = csv_row_iterator(file_path=mydata["file_path"], delimiter=mydata["delimiter"])
 
     # Sort by timestamp if "sort_by_time" is defined
     # if "sort_by_time" in data and data["sort_by_time"]:
@@ -124,13 +142,16 @@ if DATA == "file":
     #     else:
     #         raise KeyError(f'Timestamp column "{timestamp_column}" not found in the CSV file.')
 
-    dataset: list[tuple[CaseId, ActionName]] = [
-        (
-            handle_keys(data["case_keys"], row),
-            handle_keys(data["action_keys"], row),
-        )
-        for index, row in csv_file.iterrows()
-    ]
+    dataset: Iterator[tuple[CaseId, ActionName]]
+
+    def my_iterator() -> Iterator[tuple]:
+        for row in row_iterator:
+            yield (
+                handle_keys(mydata["case_keys"], row),  # type: ignore
+                handle_keys(mydata["action_keys"], row),  # type: ignore
+            )
+
+    dataset = my_iterator()
 
 
 # ============================================================
@@ -160,7 +181,7 @@ if DATA == "synthetic":
                 # Store the modified sequence
                 sequences.append([*incremented_numbers, STOP])
 
-    dataset = interleave_sequences(sequences, random_index=False)
+    dataset = iter(interleave_sequences(sequences, random_index=False))
 
 # ============================================================
 # Synthetic data sets
@@ -189,7 +210,7 @@ if DATA == "synthetic":
                 # Store the modified sequence
                 sequences.append([*incremented_numbers, STOP])
 
-    dataset = interleave_sequences(sequences, random_index=False)
+    dataset = iter(interleave_sequences(sequences, random_index=False))
 
 
 # ============================================================
@@ -198,7 +219,7 @@ if DATA == "synthetic":
 
 
 if DATA == "explicit":
-    dataset = [
+    data: list[list[ActionName]] = [
         ["b"],
         ["b"],
         ["b"],
@@ -230,8 +251,7 @@ if DATA == "explicit":
         ["a", "a"],
         ["b", "b", "a"],
     ]
-
-    dataset = interleave_sequences(dataset)
+    dataset = iter(interleave_sequences(data))
 
 
 # ============================================================
@@ -254,7 +274,7 @@ if DATA == "PDFA":
     pdfa.set_probs(0, {STOP: 0.0, "init": 1.0, "a": 0.0, "b": 0.0})
     pdfa.set_probs(1, {STOP: 0.01, "init": 0.0, "a": 0.495, "b": 0.495})
 
-    dataset = interleave_sequences(pdfa.simulate(100000))
+    dataset = iter(interleave_sequences(pdfa.simulate(100000)))
 
 
 # if DATA == "PDFA":

@@ -1,6 +1,7 @@
 import gc
 import logging
 import time
+from collections.abc import Iterator
 
 import torch
 from torch import nn, optim
@@ -64,21 +65,17 @@ class ListStreamer(ls.SourceTerm):
     For streaming from list.
     """
 
-    def __init__(self, *args, data_list: list, **kwargs):
+    def __init__(self, *args, data_iterator: Iterator, **kwargs):
         super().__init__(*args, **kwargs)
-        self.data_list = data_list
-        self.remaining = len(data_list)
+        self.data_iterator = data_iterator
 
     def run(self):
-        if self.remaining > 0:
-            for case_id, action in self.data_list:
-                out = DataItem({"case_id": case_id, "action": action})
-                self.output(out)
-                self.remaining -= 1
-            logging.info("Finished streaming.")
-        else:
-            # to avoid busy waiting: if done sleep
-            time.sleep(10)
+        for case_id, action in self.data_iterator:
+            out = DataItem({"case_id": case_id, "action": action})
+            self.output(out)
+
+        # repeatedly sleep if done
+        time.sleep(10)
 
 
 class AddStartSymbol(ls.FunctionTerm):
@@ -175,11 +172,7 @@ class Evaluation(ls.FunctionTerm):
 
         self.total_predictions += 1
 
-        accuracy = (
-            self.correct_predictions / self.total_predictions * 100
-            if self.total_predictions > 0
-            else 0
-        )
+        accuracy = self.correct_predictions / self.total_predictions * 100 if self.total_predictions > 0 else 0
 
         return DataItem(
             {
@@ -348,7 +341,7 @@ latency_max_list = [f"{model}.latency_max" for model in models]
 all_attributes = ["index", *accuracy_list, *latency_mean_list]
 
 # streamer = file.CSVStreamer(file_path=data["file_path"], delay=0, poll_delay=2)
-streamer = ListStreamer(data_list=dataset, delay=0.0)
+streamer = ListStreamer(data_iterator=dataset)
 
 sponge = (
     streamer
@@ -357,26 +350,25 @@ sponge = (
     * ls.KeyFilter(keys=["case_id", "action"])
     * AddStartSymbol()
     * (
-        (fpt * Evaluation("fpt"))
-        | (bag * Evaluation("bag"))
-        | (ngram_1 * Evaluation("ngram_1"))
-        | (ngram_2 * Evaluation("ngram_2"))
-        | (ngram_3 * Evaluation("ngram_3"))
-        | (ngram_4 * Evaluation("ngram_4"))
-        | (ngram_5 * Evaluation("ngram_5"))
-        | (ngram_6 * Evaluation("ngram_6"))
-        | (ngram_7 * Evaluation("ngram_7"))
-        | (ngram_8 * Evaluation("ngram_8"))
-        | (fallback * Evaluation("fallback"))
-        | (hard_voting * Evaluation("hard_voting"))
-        | (soft_voting * Evaluation("soft_voting"))
-        | (adaptive_voting * Evaluation("adaptive_voting"))
-        | (lstm * Evaluation("lstm"))
+        (fpt * Evaluation("fpt")) | (bag * Evaluation("bag"))
+        # | (ngram_1 * Evaluation("ngram_1"))
+        # | (ngram_2 * Evaluation("ngram_2"))
+        # | (ngram_3 * Evaluation("ngram_3"))
+        # | (ngram_4 * Evaluation("ngram_4"))
+        # | (ngram_5 * Evaluation("ngram_5"))
+        # | (ngram_6 * Evaluation("ngram_6"))
+        # | (ngram_7 * Evaluation("ngram_7"))
+        # | (ngram_8 * Evaluation("ngram_8"))
+        # | (fallback * Evaluation("fallback"))
+        # | (hard_voting * Evaluation("hard_voting"))
+        # | (soft_voting * Evaluation("soft_voting"))
+        # | (adaptive_voting * Evaluation("adaptive_voting"))
+        # | (lstm * Evaluation("lstm"))
     )
     * ls.ToSingleStream(flatten=True)
     * ls.AddIndex(key="index")
     * ls.KeyFilter(keys=all_attributes)
-    * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 100 == 0 or item["index"] >= len(dataset) - 10)
+    * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 100 == 0)
     * ls.Print()
     # * (dashboard.Plot("Accuracy (%)", x="index", y=accuracy_list))
     # * (dashboard.Plot("Latency Mean (ms)", x="index", y=latency_mean_list))
