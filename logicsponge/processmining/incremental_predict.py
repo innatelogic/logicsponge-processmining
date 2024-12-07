@@ -366,7 +366,7 @@ sponge = (
         | (ngram_4 * Evaluation("ngram_4"))
         | (ngram_5 * Evaluation("ngram_5"))
         | (ngram_6 * Evaluation("ngram_6"))
-        (ngram_7 * Evaluation("ngram_7"))
+        | (ngram_7 * Evaluation("ngram_7"))
         | (ngram_8 * Evaluation("ngram_8"))
         | (fallback * Evaluation("fallback"))
         | (hard_voting * Evaluation("hard_voting"))
