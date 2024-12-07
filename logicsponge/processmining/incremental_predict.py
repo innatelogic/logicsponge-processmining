@@ -176,7 +176,8 @@ class Evaluation(ls.FunctionTerm):
         self.total_predictions += 1
 
         accuracy = (
-            self.correct_predictions / (self.total_predictions + self.missing_predictions) * 100
+            # self.correct_predictions / (self.total_predictions + self.missing_predictions) * 100
+            self.correct_predictions / self.total_predictions * 100
             if self.total_predictions > 0
             else 0
         )
