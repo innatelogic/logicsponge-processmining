@@ -96,7 +96,7 @@ data_collection = {
 # ============================================================
 
 if DATA == "file":
-    data_name = "BPI_Challenge_2017"
+    data_name = "Sepsis_Cases"
     data = data_collection[data_name]
     file_path = os.path.join(FOLDERNAME, data["target_filename"])
     data["file_path"] = file_path
@@ -197,41 +197,41 @@ if DATA == "synthetic":
 # ============================================================
 
 
-# if DATA == "explicit":
-#     dataset = [
-#         ["b"],
-#         ["b"],
-#         ["b"],
-#         ["b"],
-#         ["b"],
-#         ["b"],
-#         ["b"],
-#         ["b"],
-#         ["b"],
-#         ["a", "a", "a"],
-#         ["a", "a", "a"],
-#         ["a", "a", "a"],
-#         ["b", "a"],
-#         ["b", "b"],
-#         ["b", "b"],
-#         ["b", "b"],
-#         ["b", "b"],
-#         ["b", "b"],
-#         ["b", "b", "b"],
-#         ["a", "a", "a", "a"],
-#         ["a"],
-#         ["a"],
-#         ["a"],
-#         ["a"],
-#         ["a"],
-#         ["a", "a", "b"],
-#         ["a", "a"],
-#         ["a", "a"],
-#         ["a", "a"],
-#         ["b", "b", "a"],
-#     ]
+if DATA == "explicit":
+    dataset = [
+        ["b"],
+        ["b"],
+        ["b"],
+        ["b"],
+        ["b"],
+        ["b"],
+        ["b"],
+        ["b"],
+        ["b"],
+        ["a", "a", "a"],
+        ["a", "a", "a"],
+        ["a", "a", "a"],
+        ["b", "a"],
+        ["b", "b"],
+        ["b", "b"],
+        ["b", "b"],
+        ["b", "b"],
+        ["b", "b"],
+        ["b", "b", "b"],
+        ["a", "a", "a", "a"],
+        ["a"],
+        ["a"],
+        ["a"],
+        ["a"],
+        ["a"],
+        ["a", "a", "b"],
+        ["a", "a"],
+        ["a", "a"],
+        ["a", "a"],
+        ["b", "b", "a"],
+    ]
 
-# dataset = interleave_sequences(dataset)
+    dataset = interleave_sequences(dataset)
 
 
 # ============================================================
