@@ -10,7 +10,7 @@ import logicsponge.core as ls
 from logicsponge.core import DataItem  # , dashboard
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
 from logicsponge.processmining.data_utils import handle_keys
-from logicsponge.processmining.globals import probs_prediction
+from logicsponge.processmining.globals import probs_prediction, START
 from logicsponge.processmining.models import (
     AdaptiveVoting,
     BasicMiner,
@@ -78,6 +78,28 @@ class ListStreamer(ls.SourceTerm):
         time.sleep(10)
 
 
+# class ListStreamer(ls.SourceTerm):
+#     """
+#     For streaming from list.
+#     """
+#
+#     def __init__(self, *args, data_list: list, **kwargs):
+#         super().__init__(*args, **kwargs)
+#         self.data_list = data_list
+#         self.remaining = len(data_list)
+#
+#     def run(self):
+#         if self.remaining > 0:
+#             for case_id, action in self.data_list:
+#                 out = DataItem({"case_id": case_id, "action": action})
+#                 self.output(out)
+#                 self.remaining -= 1
+#             logging.info("Finished streaming.")
+#         else:
+#             # to avoid busy waiting: if done sleep
+#             time.sleep(10)
+
+
 class AddStartSymbol(ls.FunctionTerm):
     """
     For streaming from list.
@@ -92,7 +114,7 @@ class AddStartSymbol(ls.FunctionTerm):
         item = ds_view[-1]
         case_id = item["case_id"]
         if case_id not in self.case_ids:
-            out = DataItem({"case_id": case_id, "action": "start"})
+            out = DataItem({"case_id": case_id, "action": START})
             self.output(out)
             self.case_ids.add(case_id)
         self.output(item)
@@ -124,7 +146,7 @@ class StreamingActionPredictor(ls.FunctionTerm):
         ds_view.next()
         item = ds_view[-1]
         case_id = item["case_id"]
-        if case_id not in self.case_ids:  # no prediction for __start__ symbol
+        if case_id not in self.case_ids:  # no prediction for START symbol
             self.strategy.update(item["case_id"], item["action"])
             self.case_ids.add(case_id)
         else:
@@ -320,19 +342,19 @@ lstm = StreamingActionPredictor(
 models = [
     "fpt",
     "bag",
-    "ngram_1",
-    "ngram_2",
-    "ngram_3",
-    "ngram_4",
-    "ngram_5",
-    "ngram_6",
-    "ngram_7",
-    "ngram_8",
-    "fallback",
-    "hard_voting",
-    "soft_voting",
-    "adaptive_voting",
-    "lstm",
+    # "ngram_1",
+    # "ngram_2",
+    # "ngram_3",
+    # "ngram_4",
+    # "ngram_5",
+    # "ngram_6",
+    # "ngram_7",
+    # "ngram_8",
+    # "fallback",
+    # "hard_voting",
+    # "soft_voting",
+    # "adaptive_voting",
+    # "lstm",
 ]
 
 accuracy_list = [f"{model}.accuracy" for model in models]
@@ -341,6 +363,7 @@ latency_max_list = [f"{model}.latency_max" for model in models]
 all_attributes = ["index", *accuracy_list, *latency_mean_list]
 
 # streamer = file.CSVStreamer(file_path=data["file_path"], delay=0, poll_delay=2)
+# streamer = ListStreamer(data_list=dataset)
 streamer = ListStreamer(data_iterator=dataset)
 
 sponge = (
@@ -352,19 +375,19 @@ sponge = (
     * (
         (fpt * Evaluation("fpt"))
         | (bag * Evaluation("bag"))
-        | (ngram_1 * Evaluation("ngram_1"))
-        | (ngram_2 * Evaluation("ngram_2"))
-        | (ngram_3 * Evaluation("ngram_3"))
-        | (ngram_4 * Evaluation("ngram_4"))
-        | (ngram_5 * Evaluation("ngram_5"))
-        | (ngram_6 * Evaluation("ngram_6"))
-        | (ngram_7 * Evaluation("ngram_7"))
-        | (ngram_8 * Evaluation("ngram_8"))
-        | (fallback * Evaluation("fallback"))
-        | (hard_voting * Evaluation("hard_voting"))
-        | (soft_voting * Evaluation("soft_voting"))
-        | (adaptive_voting * Evaluation("adaptive_voting"))
-        | (lstm * Evaluation("lstm"))
+        # | (ngram_1 * Evaluation("ngram_1"))
+        # | (ngram_2 * Evaluation("ngram_2"))
+        # | (ngram_3 * Evaluation("ngram_3"))
+        # | (ngram_4 * Evaluation("ngram_4"))
+        # | (ngram_5 * Evaluation("ngram_5"))
+        # | (ngram_6 * Evaluation("ngram_6"))
+        # | (ngram_7 * Evaluation("ngram_7"))
+        # | (ngram_8 * Evaluation("ngram_8"))
+        # | (fallback * Evaluation("fallback"))
+        # | (hard_voting * Evaluation("hard_voting"))
+        # | (soft_voting * Evaluation("soft_voting"))
+        # | (adaptive_voting * Evaluation("adaptive_voting"))
+        # | (lstm * Evaluation("lstm"))
     )
     * ls.ToSingleStream(flatten=True)
     * ls.AddIndex(key="index")
