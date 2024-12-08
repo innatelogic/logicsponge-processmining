@@ -1,4 +1,5 @@
 import os
+from collections import defaultdict
 from collections.abc import Iterator
 from typing import Any
 
@@ -18,7 +19,9 @@ DATA = "file"
 # DATA = "PDFA"
 
 
-def csv_row_iterator(file_path: str, delimiter: str = ",", chunksize: int = 2) -> Iterator[dict[str, Any]]:
+def csv_row_iterator(
+    file_path: str, delimiter: str = ",", chunksize: int = 2, dtypes: dict[str, str] | None = None
+) -> Iterator[dict[str, Any]]:
     """
     Creates an iterator that yields rows from a large CSV file.
 
@@ -30,7 +33,16 @@ def csv_row_iterator(file_path: str, delimiter: str = ",", chunksize: int = 2) -
     Yields:
         NamedTuple: Each row as a nametuple of column names to values.
     """
-    chunk_iter = pd.read_csv(file_path, chunksize=chunksize, delimiter=delimiter)
+
+    # by default everything is a str, unless explicitely specified.
+    if dtypes is None:
+        dtypes = {}
+    all_dtypes: defaultdict[str, str] = defaultdict(lambda: "string", **dtypes)
+
+    # using keep_default_na=False to not convert "na" to float('nan') but keep it as a str
+    chunk_iter = pd.read_csv(
+        file_path, chunksize=chunksize, delimiter=delimiter, dtype=all_dtypes, keep_default_na=False
+    )
     for chunk in chunk_iter:
         yield from chunk.to_dict("records")
 
@@ -48,6 +60,7 @@ data_collection = {
         "case_keys": ["case:concept:name"],
         "action_keys": ["concept:name"],
         "delimiter": ",",
+        "dtypes": None,
     },
     "BPI_Challenge_2013": {
         "url": "https://data.4tu.nl/file/0fc5c579-e544-4fab-9143-fab1f5192432/aa51ffbb-25fd-4b5a-b0b8-9aba659b7e8c",
@@ -58,6 +71,7 @@ data_collection = {
         "case_keys": ["case:concept:name"],
         "action_keys": ["lifecycle:transition"],
         "delimiter": ",",
+        "dtypes": None,
     },
     "BPI_Challenge_2014": {
         "url": "https://data.4tu.nl/file/657fb1d6-b4c2-4adc-ba48-ed25bf313025/bd6cfa31-44f8-4542-9bad-f1f70c894728",
@@ -69,6 +83,7 @@ data_collection = {
         "action_keys": ["IncidentActivity_Type"],
         "delimiter": ";",
         "sort_by_time": "DateStamp",
+        "dtypes": None,
     },
     "BPI_Challenge_2017": {
         "url": "https://data.4tu.nl/file/34c3f44b-3101-4ea9-8281-e38905c68b8d/f3aec4f7-d52c-4217-82f4-57d719a8298c",
@@ -79,6 +94,7 @@ data_collection = {
         "case_keys": ["case:concept:name"],
         "action_keys": ["concept:name"],
         "delimiter": ",",
+        "dtypes": None,
     },
     "BPI_Challenge_2018": {
         "url": "https://data.4tu.nl/file/443451fd-d38a-4464-88b4-0fc641552632/cd4fd2b8-6c95-47ae-aad9-dc1a085db364",
@@ -89,6 +105,7 @@ data_collection = {
         "case_keys": ["case:concept:name"],
         "action_keys": ["concept:name"],
         "delimiter": ",",
+        "dtypes": None,
     },
     "BPI_Challenge_2019": {
         "url": "https://data.4tu.nl/file/35ed7122-966a-484e-a0e1-749b64e3366d/864493d1-3a58-47f6-ad6f-27f95f995828",
@@ -98,6 +115,7 @@ data_collection = {
         "case_keys": ["case:Purchasing Document", "case:Item"],
         "action_keys": ["concept:name"],
         "delimiter": ",",
+        "dtypes": None,
     },
     "Sepsis_Cases": {
         "url": "https://data.4tu.nl/file/33632f3c-5c48-40cf-8d8f-2db57f5a6ce7/643dccf2-985a-459e-835c-a82bce1c0339",
@@ -107,6 +125,7 @@ data_collection = {
         "case_keys": ["case:concept:name"],
         "action_keys": ["concept:name"],
         "delimiter": ",",
+        "dtypes": None,
     },
 }
 
@@ -122,7 +141,9 @@ if DATA == "file":
     file_handler.handle_file(
         file_type=mydata["filetype"], url=mydata["url"], filename=mydata["target_filename"], doi=mydata["doi"]
     )
-    row_iterator = csv_row_iterator(file_path=mydata["file_path"], delimiter=mydata["delimiter"])
+    row_iterator = csv_row_iterator(
+        file_path=mydata["file_path"], delimiter=mydata["delimiter"], dtypes=mydata["dtypes"]
+    )
 
     # Sort by timestamp if "sort_by_time" is defined
     # if "sort_by_time" in data and data["sort_by_time"]:

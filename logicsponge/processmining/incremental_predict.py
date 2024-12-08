@@ -10,7 +10,7 @@ import logicsponge.core as ls
 from logicsponge.core import DataItem  # , dashboard
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
 from logicsponge.processmining.data_utils import handle_keys
-from logicsponge.processmining.globals import probs_prediction, START
+from logicsponge.processmining.globals import START, probs_prediction
 from logicsponge.processmining.models import (
     AdaptiveVoting,
     BasicMiner,
@@ -373,8 +373,7 @@ sponge = (
     * ls.KeyFilter(keys=["case_id", "action"])
     * AddStartSymbol()
     * (
-        (fpt * Evaluation("fpt"))
-        | (bag * Evaluation("bag"))
+        (fpt * Evaluation("fpt")) | (bag * Evaluation("bag"))
         # | (ngram_1 * Evaluation("ngram_1"))
         # | (ngram_2 * Evaluation("ngram_2"))
         # | (ngram_3 * Evaluation("ngram_3"))
@@ -392,7 +391,7 @@ sponge = (
     * ls.ToSingleStream(flatten=True)
     * ls.AddIndex(key="index", index=1)
     * ls.KeyFilter(keys=all_attributes)
-    * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 100 == 0 or item["index"] > 15200)
+    * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 100 == 0)  #  or item["index"] > 15200)
     * ls.Print()
     # * (dashboard.Plot("Accuracy (%)", x="index", y=accuracy_list))
     # * (dashboard.Plot("Latency Mean (ms)", x="index", y=latency_mean_list))
