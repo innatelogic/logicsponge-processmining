@@ -392,7 +392,7 @@ sponge = (
     * ls.ToSingleStream(flatten=True)
     * ls.AddIndex(key="index", index=1)
     * ls.KeyFilter(keys=all_attributes)
-    * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 100 == 0 or item["index"] >= 15200)
+    * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 100 == 0)
     * ls.Print()
     # * (dashboard.Plot("Accuracy (%)", x="index", y=accuracy_list))
     # * (dashboard.Plot("Latency Mean (ms)", x="index", y=latency_mean_list))
