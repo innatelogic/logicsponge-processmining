@@ -4,6 +4,7 @@ import os
 import random
 import shutil
 from collections import Counter
+from collections.abc import Iterator
 from typing import Any, cast
 
 import pandas as pd
@@ -72,7 +73,7 @@ def add_stop_to_sequences(data: list[list[ActionName]], stop: ActionName) -> lis
     return [[*seq, stop] for seq in data]
 
 
-def transform_to_seqs(data: list[tuple[CaseId, ActionName]]) -> list[list[ActionName]]:
+def transform_to_seqs(data: Iterator[tuple[CaseId, ActionName]]) -> list[list[ActionName]]:
     """
     Transforms list of tuples (case_id, action) into list of sequences.
     """
