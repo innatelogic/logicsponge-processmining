@@ -15,14 +15,14 @@ class Automaton:
     name: str
     state_info: dict[StateId, Any]
     transitions: dict[StateId, dict[ActionName, Any]]
-    initial_state: StateId | None
+    initial_state: StateId
     actions: OrderedDict[ActionName, bool]
 
     def __init__(self, name: str = "Automaton") -> None:
         self.name = name
         self.state_info = {}
         self.transitions = {}
-        self.initial_state = None
+        self.initial_state = 0  # dummy element, will be overwritten when setting initial state
         self.actions = OrderedDict()  # maps actions (excluding STOP) to dummy value True
 
     def add_action(self, action: ActionName) -> None:

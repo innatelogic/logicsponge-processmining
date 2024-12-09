@@ -30,13 +30,11 @@ class BaseStructure(PDFA, ABC):
         self.min_total_visits = min_total_visits
 
         # create initial state
-        initial_state = 0
-        initial_state_object = self.create_state(state_id=initial_state)
-        self.set_initial_state(initial_state)
-        self.state_info[initial_state]["object"] = initial_state_object
-        self.state_info[initial_state]["access_string"] = ()
-
-        self.initial_state = 0
+        self.initial_state = 0  # initial_state is always a valid StateId in BaseStructure
+        initial_state_object = self.create_state(state_id=self.initial_state)
+        self.set_initial_state(self.initial_state)
+        self.state_info[self.initial_state]["object"] = initial_state_object
+        self.state_info[self.initial_state]["access_string"] = ()
 
     @property
     def states(self) -> list[StateId]:

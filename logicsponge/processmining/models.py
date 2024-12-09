@@ -611,9 +611,6 @@ class NeuralNetworkMiner(StreamingMiner):
         Dynamically update the activity_to_idx mapping if a new action is encountered.
         """
 
-        # print("begin update")
-        # update_start_time = time.time()
-
         # Dynamically update activity_to_idx if the action is new
         if action not in self.action_index:
             current_idx = len(self.action_index) + 1  # Get the next available index
@@ -629,10 +626,7 @@ class NeuralNetworkMiner(StreamingMiner):
         self.sequences[case_id].append(action_idx)
 
         # Continue with the training step using the updated sequence
-        # start_time = time.time()
         batch = self.select_batch(case_id)
-        # end_time = time.time()
-        # print(f"select batch, time needed: {(end_time - start_time) * 1000}")
 
         # Ensure each sequence in the batch has at least two tokens
         if len(batch) == 0:
@@ -640,15 +634,12 @@ class NeuralNetworkMiner(StreamingMiner):
             logger.info(msg)
             return None
 
-        # set model to training mode
+        # Set model to training mode
         self.model.train()
 
         # Convert the batch of sequences into tensors, padding them to the same length
-        # start_time = time.time()
         batch_sequences = [torch.tensor(seq, dtype=torch.long, device=self.device) for seq in batch]
         x_batch = pad_sequence(batch_sequences, batch_first=True, padding_value=0)
-        # end_time = time.time()
-        # print(f"convert batch, time needed: {(end_time - start_time) * 1000}")
 
         # Input is all but the last token in each sequence, target is shifted by one position
         x_input = x_batch[:, :-1]  # Input sequence
@@ -657,12 +648,8 @@ class NeuralNetworkMiner(StreamingMiner):
         self.optimizer.zero_grad()
 
         # Forward pass through the model
-        # start_time = time.time()
         outputs = self.model(x_input)
-        # end_time = time.time()
-        # print(f"forward pass, time needed: {(end_time - start_time) * 1000}")
 
-        # start_time = time.time()
         # Reshape outputs to [batch_size * sequence_length, vocab_size] for loss calculation
         outputs = outputs.view(-1, outputs.shape[-1])
 
@@ -672,30 +659,14 @@ class NeuralNetworkMiner(StreamingMiner):
         # Apply the mask
         outputs = outputs[mask]
         y_target = y_target[mask]
-        # end_time = time.time()
-        # print(f"reshape & mask, time needed: {(end_time - start_time) * 1000}")
 
         # Compute loss
-        # start_time = time.time()
         loss = self.criterion(outputs, y_target)
-        # end_time = time.time()
-        # print(f"compute loss, time needed: {(end_time - start_time) * 1000}")
 
         # Backward pass and gradient clipping
-        # start_time = time.time()
         loss.backward()
-        # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-        # end_time = time.time()
-        # print(f"backward pass, time needed: {(end_time - start_time) * 1000}")
 
-        # start_time = time.time()
         self.optimizer.step()
-        # end_time = time.time()
-        # print(f"optimizer step, time needed: {(end_time - start_time) * 1000}")
-
-        # update_end_time = time.time()
-        # print(f"end update, time needed: {(update_end_time - update_start_time) * 1000}")
-        # print("==========")
 
         return loss.item()
 

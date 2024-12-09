@@ -342,19 +342,19 @@ lstm = StreamingActionPredictor(
 models = [
     "fpt",
     "bag",
-    # "ngram_1",
-    # "ngram_2",
-    # "ngram_3",
-    # "ngram_4",
-    # "ngram_5",
-    # "ngram_6",
-    # "ngram_7",
-    # "ngram_8",
-    # "fallback",
-    # "hard_voting",
-    # "soft_voting",
-    # "adaptive_voting",
-    # "lstm",
+    "ngram_1",
+    "ngram_2",
+    "ngram_3",
+    "ngram_4",
+    "ngram_5",
+    "ngram_6",
+    "ngram_7",
+    "ngram_8",
+    "fallback",
+    "hard_voting",
+    "soft_voting",
+    "adaptive_voting",
+    "lstm",
 ]
 
 accuracy_list = [f"{model}.accuracy" for model in models]
@@ -365,6 +365,7 @@ all_attributes = ["index", *accuracy_list, *latency_mean_list]
 # streamer = file.CSVStreamer(file_path=data["file_path"], delay=0, poll_delay=2)
 # streamer = ListStreamer(data_list=dataset)
 streamer = ListStreamer(data_iterator=dataset)
+len_dataset = 15214
 
 sponge = (
     streamer
@@ -374,24 +375,24 @@ sponge = (
     * AddStartSymbol()
     * (
         (fpt * Evaluation("fpt")) | (bag * Evaluation("bag"))
-        # | (ngram_1 * Evaluation("ngram_1"))
-        # | (ngram_2 * Evaluation("ngram_2"))
-        # | (ngram_3 * Evaluation("ngram_3"))
-        # | (ngram_4 * Evaluation("ngram_4"))
-        # | (ngram_5 * Evaluation("ngram_5"))
-        # | (ngram_6 * Evaluation("ngram_6"))
-        # | (ngram_7 * Evaluation("ngram_7"))
-        # | (ngram_8 * Evaluation("ngram_8"))
-        # | (fallback * Evaluation("fallback"))
-        # | (hard_voting * Evaluation("hard_voting"))
-        # | (soft_voting * Evaluation("soft_voting"))
-        # | (adaptive_voting * Evaluation("adaptive_voting"))
-        # | (lstm * Evaluation("lstm"))
+        | (ngram_1 * Evaluation("ngram_1"))
+        | (ngram_2 * Evaluation("ngram_2"))
+        | (ngram_3 * Evaluation("ngram_3"))
+        | (ngram_4 * Evaluation("ngram_4"))
+        | (ngram_5 * Evaluation("ngram_5"))
+        | (ngram_6 * Evaluation("ngram_6"))
+        | (ngram_7 * Evaluation("ngram_7"))
+        | (ngram_8 * Evaluation("ngram_8"))
+        | (fallback * Evaluation("fallback"))
+        | (hard_voting * Evaluation("hard_voting"))
+        | (soft_voting * Evaluation("soft_voting"))
+        | (adaptive_voting * Evaluation("adaptive_voting"))
+        | (lstm * Evaluation("lstm"))
     )
     * ls.ToSingleStream(flatten=True)
     * ls.AddIndex(key="index", index=1)
     * ls.KeyFilter(keys=all_attributes)
-    * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 100 == 0)  #  or item["index"] > 15200)
+    * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 100 == 0 or item["index"] > len_dataset - 10)
     * ls.Print()
     # * (dashboard.Plot("Accuracy (%)", x="index", y=accuracy_list))
     # * (dashboard.Plot("Latency Mean (ms)", x="index", y=latency_mean_list))
