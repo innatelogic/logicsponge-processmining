@@ -22,7 +22,7 @@ class Automaton:
         self.name = name
         self.state_info = {}
         self.transitions = {}
-        self.initial_state = 0  # dummy element, will be overwritten when setting initial state
+        self.initial_state = 0  # dummy value, will be overwritten when initial state is set
         self.actions = OrderedDict()  # maps actions (excluding STOP) to dummy value True
 
     def add_action(self, action: ActionName) -> None:
