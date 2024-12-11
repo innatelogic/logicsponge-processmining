@@ -36,7 +36,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 if torch.backends.mps.is_available():
-    device = torch.device("mps")
+    # device = torch.device("mps")
     device = torch.device("cpu")
     logger.info("Using cpu.")
 

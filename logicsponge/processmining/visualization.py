@@ -5,7 +5,7 @@ from dash import State as DashState
 from dash import dcc, html
 from dash.dependencies import Input, Output
 
-from logicsponge.processmining.algorithms_and_structures import FrequencyPrefixTree, NGram
+from logicsponge.processmining.algorithms_and_structures import FrequencyPrefixTree
 
 # from innatelogic.circuits.process_mining.test_data import data
 from logicsponge.processmining.test_data import dataset
@@ -27,6 +27,7 @@ dataset = iter(dataset)  # Convert to an iterator if not already one
 # ============================================================
 # Generate graph
 # ============================================================
+
 
 def generate_cytoscape_elements(pm):
     elements = []
@@ -104,7 +105,7 @@ app.layout = html.Div(
                         "target-arrow-size": 20,
                         "target-arrow-color": "#53585F",
                         "line-color": "#53585F",
-                        "width": 2,
+                        "width": 3,
                         "font-size": "18px",
                         "text-background-color": "white",
                         "text-background-opacity": 1,
@@ -113,7 +114,14 @@ app.layout = html.Div(
                         "color": "black",
                     },
                 },
-                {"selector": "edge.highlighted", "style": {"line-color": "#A9514C", "target-arrow-color": "#A9514C", "width": 8}},
+                {
+                    "selector": "edge.highlighted",
+                    "style": {
+                        "width": 3,
+                        "line-color": "#A9514C",
+                        "target-arrow-color": "#A9514C",
+                    },
+                },
             ],
         ),
     ]
