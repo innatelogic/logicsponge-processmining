@@ -47,22 +47,3 @@ sponge = (
 
 
 sponge.start()
-
-
-d = {
-    'case_id': 'FAA',
-    'action': 'Return ER',
-    'prediction': {
-        'action': 'Return ER',
-        'top_k_actions': ['Return ER', 'Leucocytes', 'Release E'],
-        'probability': 0.9986388006307096,
-        'probs': {
-            # [...]
-            'Leucocytes': 0.0013611993692904283,
-            'Return ER': 0.9986388006307096,
-            # [...]
-        }
-    },
-    'latency': 0.06985664367675781,
-    'index': 15214
-}
