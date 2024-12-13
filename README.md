@@ -1,6 +1,6 @@
 <img src="media/logicsponge.png" alt="LogicSponge Logo" width="350">
 
-**logicsponge-processmining** is a library for process-mining tasks that is built on **logicsponge**. Process mining involves a set of tools for modeling, analyzing, and improving business processes.
+**logicsponge-processmining** is a library for process-mining tasks that is built on **logicsponge-core**. Process mining involves a set of tools for modeling, analyzing, and improving business processes.
 
 # In a nutshell
 
@@ -10,8 +10,7 @@ The current implementation includes the following features:
 
 # Getting started
 
-We recommend starting with our [logicsponge tutorial](https://github.com/innatelogic/logicsponge) to get acquainted with the basics of how logicsponge processes data streams.  
-Afterwards, to get started with logicsponge-processmining, install it using pip:
+We recommend starting with our [logicsponge tutorial](https://github.com/innatelogic/logicsponge) to get acquainted with the basics of how logicsponge processes data streams.   Afterwards, to get started with logicsponge-processmining, install it using pip:
 
 ```sh
 pip install logicsponge-processmining
@@ -20,7 +19,7 @@ pip install logicsponge-processmining
 # Event-log prediction
 
 Event-log prediction involves anticipating events given historical data about a process. In the streaming case, we receive a sequence of events, where each event is a pair
-(case_id, activity) consisting of a case ID and an activity. As events arrive, we train a model incrementally, allowing it to predict the next activity for a given case based on
+(case ID, activity) consisting of a case ID and an activity (also referred to as action). As events arrive, we train a model incrementally, allowing it to predict the next activity for a given case based on
 the sequence of activities observed so far.
 
 logicsponge-processmining offers several predefined models: frequency prefix trees, n-grams, LSTMs, and ensemble methods (soft, hard, and adaptive voting).
