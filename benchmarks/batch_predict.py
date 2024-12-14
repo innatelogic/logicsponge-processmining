@@ -9,6 +9,7 @@ from aalpy.learning_algs import run_Alergia
 from torch import nn, optim
 
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram, Parikh
+from logicsponge.processmining.config import DEFAULT_CONFIG
 from logicsponge.processmining.data_utils import (
     add_input_symbols,
     add_start_to_sequences,
@@ -18,7 +19,6 @@ from logicsponge.processmining.data_utils import (
     split_sequence_data,
     transform_to_seqs,
 )
-from logicsponge.processmining.globals import START, STOP
 from logicsponge.processmining.models import Alergia, BasicMiner, Fallback, HardVoting, Relativize, SoftVoting
 from logicsponge.processmining.neural_networks import LSTMModel, PreprocessData, evaluate_rnn, train_rnn
 from logicsponge.processmining.test_data import dataset
@@ -56,6 +56,14 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 NN_training = True
+
+
+# ============================================================
+# Define start and stop symbols
+# ============================================================
+
+start_symbol = DEFAULT_CONFIG['start_symbol']
+stop_symbol = DEFAULT_CONFIG['stop_symbol']
 
 # ============================================================
 # Data preparation
@@ -108,10 +116,10 @@ for iteration in range(n_iterations):
     # Train set for process miners
     train_set = interleave_sequences(train_set_transformed, False)
 
-    # Append STOP action
-    train_set_transformed = add_stop_to_sequences(train_set_transformed, STOP)
-    val_set_transformed = add_stop_to_sequences(val_set_transformed, STOP)
-    test_set_transformed = add_stop_to_sequences(test_set_transformed, STOP)
+    # Append STOP symbol
+    train_set_transformed = add_stop_to_sequences(train_set_transformed, stop_symbol)
+    val_set_transformed = add_stop_to_sequences(val_set_transformed, stop_symbol)
+    test_set_transformed = add_stop_to_sequences(test_set_transformed, stop_symbol)
 
     # data_statistics(test_set_transformed)
 
@@ -285,10 +293,10 @@ for iteration in range(n_iterations):
 
     # LSTM Evaluation
     if NN_training:
-        # For RNNs: Append START action
-        nn_train_set_transformed = add_start_to_sequences(train_set_transformed, START)
-        nn_val_set_transformed = add_start_to_sequences(val_set_transformed, START)
-        nn_test_set_transformed = add_start_to_sequences(test_set_transformed, START)
+        # For RNNs: Append START symbol
+        nn_train_set_transformed = add_start_to_sequences(train_set_transformed, start_symbol)
+        nn_val_set_transformed = add_start_to_sequences(val_set_transformed, start_symbol)
+        nn_test_set_transformed = add_start_to_sequences(test_set_transformed, start_symbol)
 
         nn_train_set_transformed = nn_processor.preprocess_data(nn_train_set_transformed)
         nn_val_set_transformed = nn_processor.preprocess_data(nn_val_set_transformed)

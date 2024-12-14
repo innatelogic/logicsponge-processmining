@@ -6,12 +6,14 @@ from typing import Any
 import pandas as pd
 
 from logicsponge.processmining.automata import PDFA
+from logicsponge.processmining.config import DEFAULT_CONFIG
 from logicsponge.processmining.data_utils import FileHandler, handle_keys, interleave_sequences
-from logicsponge.processmining.globals import STOP, ActionName, CaseId
+from logicsponge.processmining.types import ActionName, CaseId
 
 FOLDERNAME = "data"
 file_handler = FileHandler(folder=FOLDERNAME)
 
+stop_symbol = DEFAULT_CONFIG['stop_symbol']
 
 DATA = "file"
 # DATA = "synthetic"
@@ -201,7 +203,7 @@ if DATA == "synthetic":
                 incremented_numbers = [num + 1 for num in numbers[1:]]
 
                 # Store the modified sequence
-                sequences.append([*incremented_numbers, STOP])
+                sequences.append([*incremented_numbers, stop_symbol])
 
     dataset = iter(interleave_sequences(sequences, random_index=False))
 
@@ -230,7 +232,7 @@ if DATA == "synthetic":
                 incremented_numbers = [num + 1 for num in numbers[1:]]
 
                 # Store the modified sequence
-                sequences.append([*incremented_numbers, STOP])
+                sequences.append([*incremented_numbers, stop_symbol])
 
     dataset = iter(interleave_sequences(sequences, random_index=False))
 
@@ -293,8 +295,8 @@ if DATA == "PDFA":
     pdfa.transitions[1]["a"] = 1
     pdfa.transitions[1]["b"] = 1
 
-    pdfa.set_probs(0, {STOP: 0.0, "init": 1.0, "a": 0.0, "b": 0.0})
-    pdfa.set_probs(1, {STOP: 0.01, "init": 0.0, "a": 0.495, "b": 0.495})
+    pdfa.set_probs(0, {stop_symbol: 0.0, "init": 1.0, "a": 0.0, "b": 0.0})
+    pdfa.set_probs(1, {stop_symbol: 0.01, "init": 0.0, "a": 0.495, "b": 0.495})
 
     dataset = iter(interleave_sequences(pdfa.simulate(100000)))
 
@@ -314,9 +316,9 @@ if DATA == "PDFA":
 #     pdfa.transitions[2]["a"] = 2
 #     pdfa.transitions[2]["b"] = 2
 #
-#     pdfa.set_probs(0, {STOP: 0.0, "a": 0.5, "b": 0.5})
-#     pdfa.set_probs(1, {STOP: 0.4, "a": 0.5, "b": 0.1})
-#     pdfa.set_probs(2, {STOP: 0.4, "a": 0.1, "b": 0.5})
+#     pdfa.set_probs(0, {stop_symbol: 0.0, "a": 0.5, "b": 0.5})
+#     pdfa.set_probs(1, {stop_symbol: 0.4, "a": 0.5, "b": 0.1})
+#     pdfa.set_probs(2, {stop_symbol: 0.4, "a": 0.1, "b": 0.5})
 #
 #     dataset = interleave_sequences(pdfa.simulate(100000))
 

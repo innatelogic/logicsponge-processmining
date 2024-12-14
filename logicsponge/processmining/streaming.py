@@ -3,8 +3,7 @@ from collections.abc import Iterator
 
 import logicsponge.core as ls
 from logicsponge.core import DataItem  # , dashboard
-from logicsponge.processmining.data_utils import handle_keys
-from logicsponge.processmining.globals import START, probs_prediction
+from logicsponge.processmining.data_utils import handle_keys, probs_prediction
 from logicsponge.processmining.models import (
     StreamingMiner,
 )
@@ -54,16 +53,17 @@ class AddStartSymbol(ls.FunctionTerm):
     For streaming from list.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, start_symbol: str, **kwargs):
         super().__init__(*args, **kwargs)
         self.case_ids = set()
+        self.start_symbol = start_symbol
 
     def run(self, ds_view: ls.DataStreamView):
         ds_view.next()
         item = ds_view[-1]
         case_id = item["case_id"]
         if case_id not in self.case_ids:
-            out = DataItem({"case_id": case_id, "action": START})
+            out = DataItem({"case_id": case_id, "action": self.start_symbol})
             self.output(out)
             self.case_ids.add(case_id)
         self.output(item)

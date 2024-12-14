@@ -2,7 +2,8 @@ import random
 from collections import OrderedDict
 from typing import Any
 
-from logicsponge.processmining.globals import STOP, ActionName, ProbDistr, StateId
+from logicsponge.processmining.config import update_config
+from logicsponge.processmining.types import ActionName, ProbDistr, StateId
 
 
 class State:
@@ -18,15 +19,16 @@ class Automaton:
     initial_state: StateId
     actions: OrderedDict[ActionName, bool]
 
-    def __init__(self, name: str = "Automaton") -> None:
+    def __init__(self, name: str = "Automaton", config: dict | None = None) -> None:
         self.name = name
+        self.config = update_config(config)  # Merge provided config with defaults
         self.state_info = {}
         self.transitions = {}
         self.initial_state = 0  # dummy value, will be overwritten when initial state is set
         self.actions = OrderedDict()  # maps actions (excluding STOP) to dummy value True
 
     def add_action(self, action: ActionName) -> None:
-        if action != STOP:
+        if action != self.config["stop_symbol"]:
             self.actions[action] = True
 
     def add_actions(self, actions: list[ActionName]) -> None:
@@ -68,6 +70,9 @@ class Automaton:
 
 
 class PDFA(Automaton):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
     def set_probs(self, state: StateId, probs: ProbDistr):
         if state not in self.state_info:
             self.state_info[state] = {}
@@ -92,7 +97,7 @@ class PDFA(Automaton):
 
                 action_choice: ActionName = random.choices(actions, weights=probabilities, k=1)[0]  # noqa: S311
 
-                if action_choice == STOP:
+                if action_choice == self.config["stop_symbol"]:
                     break
 
                 sequence.append(action_choice)

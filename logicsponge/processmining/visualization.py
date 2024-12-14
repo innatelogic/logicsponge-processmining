@@ -6,8 +6,6 @@ from dash import dcc, html
 from dash.dependencies import Input, Output
 
 from logicsponge.processmining.algorithms_and_structures import FrequencyPrefixTree
-
-# from innatelogic.circuits.process_mining.test_data import data
 from logicsponge.processmining.test_data import dataset
 
 mpl.use("Agg")

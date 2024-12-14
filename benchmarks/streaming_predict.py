@@ -9,7 +9,7 @@ from logicsponge.core import DataItem, DataItemFilter
 
 # from logicsponge.core import dashboard
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
-from logicsponge.processmining.globals import START
+from logicsponge.processmining.config import DEFAULT_CONFIG
 from logicsponge.processmining.models import (
     AdaptiveVoting,
     BasicMiner,
@@ -57,6 +57,9 @@ torch.backends.cudnn.benchmark = False
 config = {
     "include_stop": False,
 }
+
+start_symbol = DEFAULT_CONFIG['start_symbol']
+
 
 fpt = StreamingActionPredictor(
     strategy=BasicMiner(algorithm=FrequencyPrefixTree(), config=config),
@@ -205,7 +208,7 @@ streamer = IteratorStreamer(data_iterator=dataset)
 
 
 def start_filter(item: DataItem):
-    return item["action"] != START
+    return item["action"] != start_symbol
 
 
 len_dataset = 15214
@@ -213,7 +216,7 @@ len_dataset = 15214
 sponge = (
     streamer
     * ls.KeyFilter(keys=["case_id", "action"])
-    * AddStartSymbol()
+    * AddStartSymbol(start_symbol=start_symbol)
     * (
         (fpt * DataItemFilter(data_item_filter=start_filter) * Evaluation("fpt"))
         | (bag * DataItemFilter(data_item_filter=start_filter) * Evaluation("bag"))

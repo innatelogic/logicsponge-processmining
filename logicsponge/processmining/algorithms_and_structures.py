@@ -3,8 +3,7 @@ from abc import ABC, abstractmethod
 from collections import deque
 
 from logicsponge.processmining.automata import PDFA, State
-from logicsponge.processmining.globals import (
-    STOP,
+from logicsponge.processmining.types import (
     ActionName,
     CaseId,
     ProbDistr,
@@ -21,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 class BaseStructure(PDFA, ABC):
     def __init__(self, *args, min_total_visits: int = 1, **kwargs) -> None:
+        # Pass args, config, and kwargs to the parent class
         super().__init__(*args, **kwargs)
 
         self.case_info = {}  # provides state info
@@ -82,7 +82,7 @@ class BaseStructure(PDFA, ABC):
 
     def get_probabilities(self, state_id: StateId) -> ProbDistr:
         total_visits = self.state_info[state_id]["total_visits"]
-        probs = {STOP: 0.0}  # Initialize the probabilities dictionary with STOP action
+        probs = {self.config["stop_symbol"]: 0.0}  # Initialize the probabilities dictionary with STOP action
 
         # Update the probability for each action based on visits to successors
         for action in self.actions:
@@ -94,7 +94,7 @@ class BaseStructure(PDFA, ABC):
                 probs[action] = 0.0
 
         # Sum the probabilities for all actions (excluding STOP)
-        action_sum = sum(prob for action, prob in probs.items() if action != STOP)
+        action_sum = sum(prob for action, prob in probs.items() if action != self.config["stop_symbol"])
 
         # Ensure that the probabilities are correctly normalized
         if action_sum > 1:
@@ -103,7 +103,7 @@ class BaseStructure(PDFA, ABC):
                 probs[action] /= action_sum
 
         # Compute the "STOP" probability as the remainder to ensure all probabilities sum to 1
-        probs[STOP] = max(0.0, 1.0 - action_sum)
+        probs[self.config["stop_symbol"]] = max(0.0, 1.0 - action_sum)
 
         return probs
 
@@ -173,10 +173,9 @@ class BaseStructure(PDFA, ABC):
 
 
 class FrequencyPrefixTree(BaseStructure):
-    def __init__(self, *args, depth: int = 1, **kwargs) -> None:
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.last_transition = None
-        self.depth = depth
 
     def update(self, case_id: CaseId, action: ActionName) -> None:
         """

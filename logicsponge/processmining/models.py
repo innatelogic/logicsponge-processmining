@@ -1,4 +1,3 @@
-import copy
 import logging
 import random
 from abc import ABC, abstractmethod
@@ -10,18 +9,16 @@ import pandas as pd
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
-from logicsponge.processmining.data_utils import add_input_symbols_sequence
-from logicsponge.processmining.globals import (
-    CONFIG,
-    STOP,
+from logicsponge.processmining.config import update_config
+from logicsponge.processmining.data_utils import add_input_symbols_sequence, probs_prediction
+from logicsponge.processmining.neural_networks import LSTMModel, RNNModel
+from logicsponge.processmining.types import (
     ActionName,
     CaseId,
     ComposedState,
     Prediction,
     ProbDistr,
-    probs_prediction,
 )
-from logicsponge.processmining.neural_networks import LSTMModel, RNNModel
 
 mpl.use("Agg")
 
@@ -45,11 +42,7 @@ class StreamingMiner(ABC):
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         # Use CONFIG as a fallback if no specific config is provided
-        self.config = copy.deepcopy(CONFIG)
-
-        # If a specific configuration is provided, update the default copy with its values
-        if config is not None:
-            self.config.update(config)
+        self.config = update_config(config)
 
         # Set the initial state (or other initialization tasks)
         self.initial_state: ComposedState | None = None
@@ -246,7 +239,7 @@ class HardVoting(MultiMiner):
         highest_count = most_common[0][1]
         most_voted_actions = [action for action, count in most_common if count == highest_count]
 
-        selected_action = STOP
+        selected_action = self.config["stop_symbol"]
 
         # If there is only one action with the highest count, select that action
         if len(most_voted_actions) == 1:
@@ -259,7 +252,7 @@ class HardVoting(MultiMiner):
                     break
 
         # Create a result dictionary with only the selected action
-        return {STOP: 0.0, selected_action: 1.0}  # include STOP as an invariant
+        return {self.config["stop_symbol"]: 0.0, selected_action: 1.0}  # include STOP as an invariant
 
     def state_probs(self, state: ComposedState | None) -> ProbDistr:
         """
