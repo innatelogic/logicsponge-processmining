@@ -3,10 +3,12 @@ from collections.abc import Iterator
 
 import logicsponge.core as ls
 from logicsponge.core import DataItem  # , dashboard
-from logicsponge.processmining.data_utils import handle_keys, probs_prediction
+from logicsponge.processmining.data_utils import handle_keys
 from logicsponge.processmining.models import (
     StreamingMiner,
 )
+from logicsponge.processmining.types import ActivityName, Event
+from logicsponge.processmining.utils import probs_prediction
 
 
 class IteratorStreamer(ls.SourceTerm):
@@ -19,8 +21,11 @@ class IteratorStreamer(ls.SourceTerm):
         self.data_iterator = data_iterator
 
     def run(self):
-        for case_id, action in self.data_iterator:
-            out = DataItem({"case_id": case_id, "action": action})
+        for event in self.data_iterator:
+            case_id = event["case_id"]
+            activity = event["activity"]
+
+            out = DataItem({"case_id": case_id, "activity": activity})
             self.output(out)
 
         # repeatedly sleep if done
@@ -39,8 +44,11 @@ class ListStreamer(ls.SourceTerm):
 
     def run(self):
         if self.remaining > 0:
-            for case_id, action in self.data_list:
-                out = DataItem({"case_id": case_id, "action": action})
+            for event in self.data_list:
+                case_id = event["case_id"]
+                activity = event["activity"]
+
+                out = DataItem({"case_id": case_id, "activity": activity})
                 self.output(out)
                 self.remaining -= 1
         else:
@@ -53,7 +61,7 @@ class AddStartSymbol(ls.FunctionTerm):
     For streaming from list.
     """
 
-    def __init__(self, *args, start_symbol: str, **kwargs):
+    def __init__(self, *args, start_symbol: ActivityName, **kwargs):
         super().__init__(*args, **kwargs)
         self.case_ids = set()
         self.start_symbol = start_symbol
@@ -63,29 +71,31 @@ class AddStartSymbol(ls.FunctionTerm):
         item = ds_view[-1]
         case_id = item["case_id"]
         if case_id not in self.case_ids:
-            out = DataItem({"case_id": case_id, "action": self.start_symbol})
+            out = DataItem({"case_id": case_id, "activity": self.start_symbol})
             self.output(out)
             self.case_ids.add(case_id)
         self.output(item)
 
 
 class DataPreparation(ls.FunctionTerm):
-    def __init__(self, *args, case_keys: list[str | int], action_keys: list[str | int], **kwargs):
+    def __init__(self, *args, case_keys: list[str | int], activity_keys: list[str | int], **kwargs):
         super().__init__(*args, **kwargs)
         self.case_keys = case_keys
-        self.action_keys = action_keys
+        self.activity_keys = activity_keys
 
     def f(self, item: DataItem) -> DataItem:
         """
-        Process the input DataItem to output a new DataItem containing only case and action keys.
+        Process the input DataItem to output a new DataItem containing only case and activity keys.
         - Combines values from case_keys into a single case_id (as a tuple or single value).
-        - Combines values from action_keys into a single action (as a tuple or single value).
+        - Combines values from activity_keys into a single activity (as a tuple or single value).
         """
-        # Construct the new DataItem with case_id and action values
-        return DataItem({"case_id": handle_keys(self.case_keys, item), "action": handle_keys(self.action_keys, item)})
+        # Construct the new DataItem with case_id and activity values
+        return DataItem(
+            {"case_id": handle_keys(self.case_keys, item), "activity": handle_keys(self.activity_keys, item)}
+        )
 
 
-class StreamingActionPredictor(ls.FunctionTerm):
+class StreamingActivityPredictor(ls.FunctionTerm):
     def __init__(self, *args, strategy: StreamingMiner, **kwargs):
         super().__init__(*args, **kwargs)
         self.strategy = strategy
@@ -99,7 +109,10 @@ class StreamingActionPredictor(ls.FunctionTerm):
 
         probs = self.strategy.case_probs(item["case_id"])
         prediction = probs_prediction(probs, self.strategy.config)
-        self.strategy.update(item["case_id"], item["action"])
+
+        event: Event = {"case_id": item["case_id"], "activity": item["activity"]}
+
+        self.strategy.update(event)
 
         end_time = time.time()
         latency = (end_time - start_time) * 1000  # latency in milliseconds (ms)
@@ -107,8 +120,8 @@ class StreamingActionPredictor(ls.FunctionTerm):
         out = DataItem(
             {
                 "case_id": item["case_id"],
-                "action": item["action"],  # actual action
-                "prediction": prediction,  # containing predicted action
+                "activity": item["activity"],  # actual activity
+                "prediction": prediction,  # containing predicted activity
                 "latency": latency,
             }
         )
@@ -116,9 +129,9 @@ class StreamingActionPredictor(ls.FunctionTerm):
 
 
 class Evaluation(ls.FunctionTerm):
-    def __init__(self, *args, top_actions: bool = False, **kwargs):
+    def __init__(self, *args, top_activities: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
-        self.top_actions = top_actions
+        self.top_activities = top_activities
         self.correct_predictions = 0
         self.total_predictions = 0
         self.missing_predictions = 0
@@ -131,10 +144,10 @@ class Evaluation(ls.FunctionTerm):
 
         if item["prediction"] is None:
             self.missing_predictions += 1
-        elif self.top_actions:
-            if item["action"] in item["prediction"]["top_k_actions"]:
+        elif self.top_activities:
+            if item["activity"] in item["prediction"]["top_k_activities"]:
                 self.correct_predictions += 1
-        elif item["action"] == item["prediction"]["action"]:
+        elif item["activity"] == item["prediction"]["activity"]:
             self.correct_predictions += 1
 
         self.total_predictions += 1

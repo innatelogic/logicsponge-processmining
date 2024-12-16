@@ -32,7 +32,7 @@ Let’s walk through the required imports to understand the structure of the lib
 import logicsponge.core as ls
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
 from logicsponge.processmining.models import BasicMiner, SoftVoting
-from logicsponge.processmining.streaming import IteratorStreamer, StreamingActionPredictor
+from logicsponge.processmining.streaming import IteratorStreamer, StreamingActivityPredictor
 from logicsponge.processmining.test_data import dataset
 ```
 
@@ -42,7 +42,7 @@ You will then import models:
 - `BasicMiner` wraps a single algorithm (e.g., an n-gram) to produce a predictor model.
 - `SoftVoting` (and other ensemble methods) takes a list of models and produces a new model that applies soft voting.
 
-Instances of these classes are ready for batch learning. To use them in streaming mode, wrap them with `StreamingActionPredictor`. Below, we define two models:
+Instances of these classes are ready for batch learning. To use them in streaming mode, wrap them with `StreamingActivityPredictor`. Below, we define two models:
 - The first is a 6-gram (look-back window size of 5).
 - The second combines several algorithms using soft voting.
 
@@ -53,11 +53,11 @@ config = {
     "include_stop": False,
 }
 
-model1 = StreamingActionPredictor(
+model1 = StreamingActivityPredictor(
     strategy=BasicMiner(algorithm=NGram(window_length=5), config=config),
 )
 
-model2 = StreamingActionPredictor(
+model2 = StreamingActivityPredictor(
     strategy=SoftVoting(
         models=[
             BasicMiner(algorithm=Bag()),
@@ -81,7 +81,7 @@ streamer = IteratorStreamer(data_iterator=dataset)
 
 sponge = (
     streamer
-    * ls.KeyFilter(keys=["case_id", "action"])
+    * ls.KeyFilter(keys=["case_id", "activity"])
     * model2
     * ls.AddIndex(key="index", index=1)
     * ls.Print()
@@ -91,7 +91,7 @@ sponge = (
 sponge.start()
 ```
 
-A single prediction might look like this. In addition to the actual case_id and action, it provides:
+A single prediction might look like this. In addition to the actual case_id and activity, it provides:
 - The most likely predicted activity.
 - The top-3 activities.
 - The probability distribution over all possible activities.
@@ -99,9 +99,9 @@ A single prediction might look like this. In addition to the actual case_id and 
 ```python
 {
     'case_id': 'FAA',
-    'action': 'Return ER',
+    'activity': 'Return ER',
     'prediction': {
-        'action': 'Return ER',
+        'activity': 'Return ER',
         'top_k_actions': ['Return ER', 'Leucocytes', 'Release E'],
         'probability': 0.9986388006307096,
         'probs': {

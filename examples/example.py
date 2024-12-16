@@ -1,7 +1,7 @@
 import logicsponge.core as ls
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
 from logicsponge.processmining.models import BasicMiner, SoftVoting
-from logicsponge.processmining.streaming import IteratorStreamer, StreamingActionPredictor
+from logicsponge.processmining.streaming import IteratorStreamer, StreamingActivityPredictor
 from logicsponge.processmining.test_data import dataset
 
 # ====================================================
@@ -12,11 +12,11 @@ config = {
     "include_stop": False,
 }
 
-model1 = StreamingActionPredictor(
+model1 = StreamingActivityPredictor(
     strategy=BasicMiner(algorithm=NGram(window_length=5), config=config),
 )
 
-model2 = StreamingActionPredictor(
+model2 = StreamingActivityPredictor(
     strategy=SoftVoting(
         models=[
             BasicMiner(algorithm=Bag()),
@@ -37,7 +37,7 @@ model2 = StreamingActionPredictor(
 
 streamer = IteratorStreamer(data_iterator=dataset)
 
-sponge = streamer * ls.KeyFilter(keys=["case_id", "action"]) * model2 * ls.AddIndex(key="index", index=1) * ls.Print()
+sponge = streamer * ls.KeyFilter(keys=["case_id", "activity"]) * model2 * ls.AddIndex(key="index", index=1) * ls.Print()
 
 
 sponge.start()

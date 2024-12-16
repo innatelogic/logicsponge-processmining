@@ -4,8 +4,9 @@ from collections import deque
 
 from logicsponge.processmining.automata import PDFA, State
 from logicsponge.processmining.types import (
-    ActionName,
+    ActivityName,
     CaseId,
+    Event,
     ProbDistr,
     StateId,
 )
@@ -20,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 class BaseStructure(PDFA, ABC):
     def __init__(self, *args, min_total_visits: int = 1, **kwargs) -> None:
-        # Pass args, config, and kwargs to the parent class
         super().__init__(*args, **kwargs)
 
         self.case_info = {}  # provides state info
@@ -64,14 +64,15 @@ class BaseStructure(PDFA, ABC):
 
         return max_total_visits, avg_total_visits
 
-    def parse_sequence(self, sequence: list[ActionName]) -> StateId | None:
+    def parse_sequence(self, sequence: list[Event]) -> StateId | None:
         current_state = self.initial_state
 
-        # Follow the given sequence of actions through the (P)DFA
-        for action in sequence:
-            if action in self.actions:
-                if current_state in self.transitions and action in self.transitions[current_state]:
-                    current_state = self.transitions[current_state][action]
+        # Follow the given sequence of activities through the (P)DFA
+        for event in sequence:
+            activity = event["activity"]
+            if activity in self.activities:
+                if current_state in self.transitions and activity in self.transitions[current_state]:
+                    current_state = self.transitions[current_state][activity]
                 else:
                     # Sequence diverges, no matching transition
                     return None
@@ -82,28 +83,28 @@ class BaseStructure(PDFA, ABC):
 
     def get_probabilities(self, state_id: StateId) -> ProbDistr:
         total_visits = self.state_info[state_id]["total_visits"]
-        probs = {self.config["stop_symbol"]: 0.0}  # Initialize the probabilities dictionary with STOP action
+        probs = {self.config["stop_symbol"]: 0.0}  # Initialize the probabilities dictionary with STOP activity
 
-        # Update the probability for each action based on visits to successors
-        for action in self.actions:
-            if action in self.state_info[state_id]["action_frequency"] and total_visits > 0:
-                # Compute probability based on action frequency and total visits
-                probs[action] = self.state_info[state_id]["action_frequency"][action] / total_visits
+        # Update the probability for each activity based on visits to successors
+        for activity in self.activities:
+            if activity in self.state_info[state_id]["activity_frequency"] and total_visits > 0:
+                # Compute probability based on activity frequency and total visits
+                probs[activity] = self.state_info[state_id]["activity_frequency"][activity] / total_visits
             else:
-                # If action is not present or there were no visits, set probability to 0
-                probs[action] = 0.0
+                # If activity is not present or there were no visits, set probability to 0
+                probs[activity] = 0.0
 
-        # Sum the probabilities for all actions (excluding STOP)
-        action_sum = sum(prob for action, prob in probs.items() if action != self.config["stop_symbol"])
+        # Sum the probabilities for all activities (excluding STOP)
+        activity_sum = sum(prob for activity, prob in probs.items() if activity != self.config["stop_symbol"])
 
         # Ensure that the probabilities are correctly normalized
-        if action_sum > 1:
-            for action in self.actions:
+        if activity_sum > 1:
+            for activity in self.activities:
                 # Adjust the probability proportionally so that their total sum is 1
-                probs[action] /= action_sum
+                probs[activity] /= activity_sum
 
         # Compute the "STOP" probability as the remainder to ensure all probabilities sum to 1
-        probs[self.config["stop_symbol"]] = max(0.0, 1.0 - action_sum)
+        probs[self.config["stop_symbol"]] = max(0.0, 1.0 - activity_sum)
 
         return probs
 
@@ -119,7 +120,7 @@ class BaseStructure(PDFA, ABC):
         self.state_info[state_id] = {}
         self.state_info[state_id]["object"] = new_state
         self.state_info[state_id]["total_visits"] = 0
-        self.state_info[state_id]["action_frequency"] = {}
+        self.state_info[state_id]["activity_frequency"] = {}
         self.state_info[state_id]["active_visits"] = 0
         self.state_info[state_id]["level"] = 0
         self.state_info[state_id]["access_string"] = None
@@ -129,16 +130,16 @@ class BaseStructure(PDFA, ABC):
         return new_state
 
     @abstractmethod
-    def update(self, case_id: CaseId, action: ActionName) -> None:
+    def update(self, event: Event) -> None:
         """
-        Updates DFA tree structure of the process miner object by adding a new action to case
+        Updates DFA tree structure of the process miner object by adding a new activity to case
         """
 
-    def next_state(self, state: StateId | None, action: ActionName) -> StateId | None:
-        if state is None or state not in self.transitions or action not in self.transitions[state]:
+    def next_state(self, state: StateId | None, activity: ActivityName) -> StateId | None:
+        if state is None or state not in self.transitions or activity not in self.transitions[state]:
             return None
 
-        return self.transitions[state][action]
+        return self.transitions[state][activity]
 
     def state_probs(self, state: StateId | None) -> ProbDistr:
         """
@@ -158,7 +159,7 @@ class BaseStructure(PDFA, ABC):
 
         return self.state_probs(state)
 
-    def sequence_probs(self, sequence: list[ActionName]) -> ProbDistr:
+    def sequence_probs(self, sequence: list[Event]) -> ProbDistr:
         """
         Returns probabilities based on sequence.
         """
@@ -177,11 +178,14 @@ class FrequencyPrefixTree(BaseStructure):
         super().__init__(*args, **kwargs)
         self.last_transition = None
 
-    def update(self, case_id: CaseId, action: ActionName) -> None:
+    def update(self, event: Event) -> None:
         """
-        Updates DFA tree structure of the process miner object by adding a new action to case
+        Updates DFA tree structure of the process miner object by adding a new activity to case
         """
-        self.add_action(action)
+        case_id = event["case_id"]
+        activity = event["activity"]
+
+        self.add_activity(activity)
 
         if case_id not in self.case_info:
             self.initialize_case(case_id)
@@ -191,22 +195,22 @@ class FrequencyPrefixTree(BaseStructure):
         if current_state not in self.transitions:
             self.transitions[current_state] = {}
 
-        if action in self.transitions[current_state]:
-            next_state = self.transitions[current_state][action]
+        if activity in self.transitions[current_state]:
+            next_state = self.transitions[current_state][activity]
         else:
-            self.state_info[current_state]["action_frequency"][action] = 0
+            self.state_info[current_state]["activity_frequency"][activity] = 0
             next_state = self.create_state().state_id
-            self.transitions[current_state][action] = next_state
-            access_string = self.state_info[current_state]["access_string"] + (action,)
+            self.transitions[current_state][activity] = next_state
+            access_string = self.state_info[current_state]["access_string"] + (activity,)
             self.state_info[next_state]["access_string"] = access_string
 
         self.case_info[case_id]["state"] = next_state
         self.state_info[next_state]["total_visits"] += 1
-        self.state_info[current_state]["action_frequency"][action] += 1
+        self.state_info[current_state]["activity_frequency"][activity] += 1
         self.state_info[current_state]["active_visits"] -= 1
         self.state_info[next_state]["active_visits"] += 1
 
-        self.last_transition = (current_state, action, next_state)
+        self.last_transition = (current_state, activity, next_state)
 
 
 # ============================================================
@@ -225,90 +229,93 @@ class NGram(BaseStructure):
         # Maps access string to its state; will be used to do backtracking in inference if transition is not possible.
         self.access_strings = {(): self.initial_state}
 
-    def follow_path(self, sequence: list[ActionName]) -> StateId:
+    def follow_path(self, sequence: list[ActivityName]) -> StateId:
         """
-        Follows the given action_sequence starting from the root (initial state).
+        Follows the given activity_sequence starting from the root (initial state).
         If necessary, creates new states along the path. Does not modify state counts.
 
-        :param sequence: A list of action names representing the path to follow.
+        :param sequence: A list of activity names representing the path to follow.
         :return: The state_id of the final state reached after following the sequence.
         """
         current_state = self.initial_state
 
-        for action in sequence:
+        for activity in sequence:
             # Initialize transitions for the current state if not already present
             if current_state not in self.transitions:
                 self.transitions[current_state] = {}
 
             # Follow existing transitions, or create a new state and transition if necessary
-            if action in self.transitions[current_state]:
-                current_state = self.transitions[current_state][action]
+            if activity in self.transitions[current_state]:
+                current_state = self.transitions[current_state][activity]
             else:
                 next_state = self.create_state().state_id
-                access_string = self.state_info[current_state]["access_string"] + (action,)
+                access_string = self.state_info[current_state]["access_string"] + (activity,)
                 self.state_info[next_state]["access_string"] = access_string
                 self.access_strings[access_string] = next_state
                 self.state_info[next_state]["level"] = self.state_info[current_state]["level"] + 1
-                self.transitions[current_state][action] = next_state
+                self.transitions[current_state][activity] = next_state
                 current_state = next_state
 
         return current_state
 
-    def update(self, case_id: CaseId, action: ActionName):
+    def update(self, event: Event) -> None:
         """
-        Updates DFA tree structure of the process miner object by adding a new action to case
+        Updates DFA tree structure of the process miner object by adding a new activity to case
         """
-        self.add_action(action)
+        case_id = event["case_id"]
+        activity = event["activity"]
+
+        self.add_activity(activity)
 
         if case_id not in self.case_info:
             self.initialize_case(case_id)
             self.case_info[case_id]["suffix"] = deque(maxlen=self.window_length)
 
-        self.case_info[case_id]["suffix"].append(action)
+        self.case_info[case_id]["suffix"].append(activity)
         current_state = self.case_info[case_id]["state"]
         current_state_level = self.state_info[current_state]["level"]
 
         if current_state not in self.transitions:
             self.transitions[current_state] = {}
 
-        if action in self.transitions[current_state]:
-            next_state = self.transitions[current_state][action]
+        if activity in self.transitions[current_state]:
+            next_state = self.transitions[current_state][activity]
         else:
             if current_state_level < self.window_length:
                 next_state = self.create_state().state_id
                 self.state_info[next_state]["level"] = current_state_level + 1
-                access_string = self.state_info[current_state]["access_string"] + (action,)
+                access_string = self.state_info[current_state]["access_string"] + (activity,)
                 self.state_info[next_state]["access_string"] = access_string
                 self.access_strings[access_string] = next_state
             else:
                 next_state = self.follow_path(self.case_info[case_id]["suffix"])
-            self.transitions[current_state][action] = next_state
+            self.transitions[current_state][activity] = next_state
 
         self.case_info[case_id]["state"] = next_state
         self.state_info[next_state]["total_visits"] += 1
-        if action in self.state_info[current_state]["action_frequency"]:
-            self.state_info[current_state]["action_frequency"][action] += 1
+        if activity in self.state_info[current_state]["activity_frequency"]:
+            self.state_info[current_state]["activity_frequency"][activity] += 1
         else:
-            self.state_info[current_state]["action_frequency"][action] = 1
+            self.state_info[current_state]["activity_frequency"][activity] = 1
         self.state_info[current_state]["active_visits"] -= 1
         self.state_info[next_state]["active_visits"] += 1
 
-        self.last_transition = (current_state, action, next_state)
+        self.last_transition = (current_state, activity, next_state)
 
-    def next_state(self, state: StateId | None, action: ActionName) -> StateId | None:
+    def next_state(self, state: StateId | None, activity: ActivityName) -> StateId | None:
         """
         Overwrites next_state from superclass to implement backtracking.
         """
         if state is None:
             return None
 
-        next_state = super().next_state(state, action)
+        next_state = super().next_state(state, activity)
 
         if next_state is not None:
             return next_state
 
         # Trying to recover
-        full_access_string = self.state_info[state]["access_string"] + (action,)
+        full_access_string = self.state_info[state]["access_string"] + (activity,)
 
         for i in self.recover_lengths:
             access_string = () if i == 0 else full_access_string[-i:]
@@ -328,14 +335,17 @@ class Bag(BaseStructure):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         initial_set: frozenset = frozenset()
-        self.state_info[self.initial_state]["action_set"] = frozenset()
-        self.action_sets: dict[frozenset, StateId] = {initial_set: self.initial_state}
+        self.state_info[self.initial_state]["activity_set"] = frozenset()
+        self.activity_sets: dict[frozenset, StateId] = {initial_set: self.initial_state}
 
-    def update(self, case_id: CaseId, action: ActionName) -> None:
+    def update(self, event: Event) -> None:
         """
-        Updates DFA tree structure of the process miner object by adding a new action to case
+        Updates DFA tree structure of the process miner object by adding a new activity to case
         """
-        self.add_action(action)
+        case_id = event["case_id"]
+        activity = event["activity"]
+
+        self.add_activity(activity)
 
         if case_id not in self.case_info:
             self.initialize_case(case_id)
@@ -345,29 +355,29 @@ class Bag(BaseStructure):
         if current_state not in self.transitions:
             self.transitions[current_state] = {}
 
-        if action in self.transitions[current_state]:
-            next_state = self.transitions[current_state][action]
+        if activity in self.transitions[current_state]:
+            next_state = self.transitions[current_state][activity]
         else:
-            self.state_info[current_state]["action_frequency"][action] = 0
+            self.state_info[current_state]["activity_frequency"][activity] = 0
 
-            current_set = self.state_info[current_state]["action_set"]
-            next_set = current_set.union({action})
-            if next_set in self.action_sets:
-                next_state = self.action_sets[next_set]
+            current_set = self.state_info[current_state]["activity_set"]
+            next_set = current_set.union({activity})
+            if next_set in self.activity_sets:
+                next_state = self.activity_sets[next_set]
             else:
                 next_state = self.create_state().state_id
-                self.state_info[next_state]["action_set"] = next_set
-                self.action_sets[next_set] = next_state
+                self.state_info[next_state]["activity_set"] = next_set
+                self.activity_sets[next_set] = next_state
 
-            self.transitions[current_state][action] = next_state
+            self.transitions[current_state][activity] = next_state
 
         self.case_info[case_id]["state"] = next_state
         self.state_info[next_state]["total_visits"] += 1
-        self.state_info[current_state]["action_frequency"][action] += 1
+        self.state_info[current_state]["activity_frequency"][activity] += 1
         self.state_info[current_state]["active_visits"] -= 1
         self.state_info[next_state]["active_visits"] += 1
 
-        self.last_transition = (current_state, action, next_state)
+        self.last_transition = (current_state, activity, next_state)
 
 
 # ============================================================
@@ -378,7 +388,7 @@ class Bag(BaseStructure):
 class Parikh(BaseStructure):
     def __init__(self, *args, upper_bound: int | None = None, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        initial_vector: dict[ActionName, int] = {}
+        initial_vector: dict[ActivityName, int] = {}
         self.state_info[self.initial_state]["parikh_vector"] = {}
         self.parikh_vectors: dict[str, StateId] = {self.parikh_hash(initial_vector): self.initial_state}
         self.upper_bound = upper_bound
@@ -387,11 +397,14 @@ class Parikh(BaseStructure):
     def parikh_hash(d: dict) -> str:
         return str(sorted(d.items()))
 
-    def update(self, case_id: CaseId, action: ActionName) -> None:
+    def update(self, event: Event) -> None:
         """
-        Updates DFA tree structure of the process miner object by adding a new action to case
+        Updates DFA tree structure of the process miner object by adding a new activity to case
         """
-        self.add_action(action)
+        case_id = event["case_id"]
+        activity = event["activity"]
+
+        self.add_activity(activity)
 
         if case_id not in self.case_info:
             self.initialize_case(case_id)
@@ -401,22 +414,22 @@ class Parikh(BaseStructure):
         if current_state not in self.transitions:
             self.transitions[current_state] = {}
 
-        if action in self.transitions[current_state]:
-            next_state = self.transitions[current_state][action]
+        if activity in self.transitions[current_state]:
+            next_state = self.transitions[current_state][activity]
         else:
-            self.state_info[current_state]["action_frequency"][action] = 0
+            self.state_info[current_state]["activity_frequency"][activity] = 0
 
             current_vector = self.state_info[current_state]["parikh_vector"]
             next_vector = current_vector.copy()
-            if action in next_vector:
+            if activity in next_vector:
                 if self.upper_bound is not None:
-                    next_vector[action] = min(next_vector[action] + 1, self.upper_bound)
+                    next_vector[activity] = min(next_vector[activity] + 1, self.upper_bound)
                 else:
-                    next_vector[action] += 1
+                    next_vector[activity] += 1
             elif self.upper_bound is not None:
-                next_vector[action] = min(1, self.upper_bound)
+                next_vector[activity] = min(1, self.upper_bound)
             else:
-                next_vector[action] = 1
+                next_vector[activity] = 1
 
             hashed_next_vector = self.parikh_hash(next_vector)
             if hashed_next_vector in self.parikh_vectors:
@@ -426,12 +439,12 @@ class Parikh(BaseStructure):
                 self.state_info[next_state]["parikh_vector"] = next_vector
                 self.parikh_vectors[hashed_next_vector] = next_state
 
-            self.transitions[current_state][action] = next_state
+            self.transitions[current_state][activity] = next_state
 
         self.case_info[case_id]["state"] = next_state
         self.state_info[next_state]["total_visits"] += 1
-        self.state_info[current_state]["action_frequency"][action] += 1
+        self.state_info[current_state]["activity_frequency"][activity] += 1
         self.state_info[current_state]["active_visits"] -= 1
         self.state_info[next_state]["active_visits"] += 1
 
-        self.last_transition = (current_state, action, next_state)
+        self.last_transition = (current_state, activity, next_state)

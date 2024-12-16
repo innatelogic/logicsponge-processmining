@@ -155,7 +155,7 @@ dmypy.json
 cython_debug/
 
 # Downloaded and synthetic data for process mining
-/benchmarks/data/
+/examples/data/
 
 .vscode/
 data/

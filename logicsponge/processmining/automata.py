@@ -3,7 +3,7 @@ from collections import OrderedDict
 from typing import Any
 
 from logicsponge.processmining.config import update_config
-from logicsponge.processmining.types import ActionName, ProbDistr, StateId
+from logicsponge.processmining.types import ActivityName, Event, ProbDistr, StateId
 
 
 class State:
@@ -15,9 +15,9 @@ class State:
 class Automaton:
     name: str
     state_info: dict[StateId, Any]
-    transitions: dict[StateId, dict[ActionName, Any]]
+    transitions: dict[StateId, dict[ActivityName, Any]]
     initial_state: StateId
-    actions: OrderedDict[ActionName, bool]
+    activities: OrderedDict[ActivityName, bool]
 
     def __init__(self, name: str = "Automaton", config: dict | None = None) -> None:
         self.name = name
@@ -25,15 +25,15 @@ class Automaton:
         self.state_info = {}
         self.transitions = {}
         self.initial_state = 0  # dummy value, will be overwritten when initial state is set
-        self.actions = OrderedDict()  # maps actions (excluding STOP) to dummy value True
+        self.activities = OrderedDict()  # maps activities (excluding STOP) to dummy value True
 
-    def add_action(self, action: ActionName) -> None:
-        if action != self.config["stop_symbol"]:
-            self.actions[action] = True
+    def add_activity(self, activity: ActivityName) -> None:
+        if activity != self.config["stop_symbol"]:
+            self.activities[activity] = True
 
-    def add_actions(self, actions: list[ActionName]) -> None:
-        for action in actions:
-            self.add_action(action)
+    def add_activities(self, activities: list[ActivityName]) -> None:
+        for activity in activities:
+            self.add_activity(activity)
 
     def set_initial_state(self, state_id: StateId) -> None:
         self.initial_state = state_id
@@ -63,7 +63,7 @@ class Automaton:
 
         Parameters:
         - source: The state from which the transition originates.
-        - action: The symbol triggering the transition.
+        - activity: The symbol triggering the transition.
         - target: The state or states to which the transition leads (type varies by subclass).
         """
         raise NotImplementedError
@@ -79,10 +79,10 @@ class PDFA(Automaton):
 
         self.state_info[state]["probs"] = probs
 
-    def simulate(self, n_runs: int) -> list[list[ActionName]]:
+    def simulate(self, n_runs: int) -> list[list[Event]]:
         dataset = []
 
-        for _ in range(n_runs):
+        for i in range(n_runs):
             current_state = self.initial_state
             sequence = []
 
@@ -92,17 +92,18 @@ class PDFA(Automaton):
                 if not probs:
                     break
 
-                # Extract actions and their corresponding probabilities, sorted for consistency
-                actions, probabilities = zip(*probs.items(), strict=True)
+                # Extract activities and their corresponding probabilities, sorted for consistency
+                activities, probabilities = zip(*probs.items(), strict=True)
 
-                action_choice: ActionName = random.choices(actions, weights=probabilities, k=1)[0]  # noqa: S311
+                activity_choice: ActivityName = random.choices(activities, weights=probabilities, k=1)[0]  # noqa: S311
 
-                if action_choice == self.config["stop_symbol"]:
+                if activity_choice == self.config["stop_symbol"]:
                     break
 
-                sequence.append(action_choice)
+                event = {"case_id": str(i), "activity": activity_choice}
+                sequence.append(event)
 
-                current_state = self.transitions[current_state][action_choice]
+                current_state = self.transitions[current_state][activity_choice]
 
             dataset.append(sequence)
 

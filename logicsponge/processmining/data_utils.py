@@ -13,118 +13,18 @@ import pm4py
 import requests
 
 from logicsponge.core import DataItem
-from logicsponge.processmining.config import DEFAULT_CONFIG, update_config
-from logicsponge.processmining.types import ActionName, CaseId, Prediction, ProbDistr
+from logicsponge.processmining.types import ActivityName, Event
 
 logger = logging.getLogger(__name__)
 
 np.random.seed(123)
 
 # ============================================================
-# Probabilities
-# ============================================================
-
-stop_symbol = DEFAULT_CONFIG['stop_symbol']
-
-def probs_prediction(probs: ProbDistr, config: dict[str, Any] | None = None) -> Prediction | None:
-    """
-    Returns the top-k actions based on their probabilities.
-    If stop_symbol has a probability of 1.0 and there are no other actions, return None.
-    If stop_symbol has a probability of 1.0 and there are other actions, give a uniform distribution to these other actions.
-    If stop_symbol is present but with a probability less than 1.0 and include_stop is False, remove it and normalize the rest.
-    """
-    # Set up the final configuration by merging user-provided config with defaults
-    final_config = update_config(config)
-
-    # If there are no probabilities, return None
-    if not probs:
-        return None
-
-    # Create a copy of probs to avoid modifying the original dictionary
-    probs_copy = probs.copy()
-
-    # Handle the case where include_stop is False
-    if not final_config["include_stop"] and stop_symbol in probs_copy:  # stop_symbol will always be a key
-        stop_probability = probs_copy.get(stop_symbol, 0.0)
-
-        # If stop_symbol has a probability of 1 and there are no other actions available, return None
-        if stop_probability >= 1.0 and len(probs_copy) == 1:
-            return None
-
-        # If stop_symbol has a probability of 1 but there are other actions, give a uniform distribution to the other actions
-        if stop_probability >= 1.0 and len(probs_copy) > 1:
-            del probs_copy[stop_symbol]  # Remove stop_symbol from consideration
-
-            # Verify stop_symbol is indeed deleted
-            if stop_symbol in probs_copy:
-                msg = "stop_symbol was not successfully removed from probabilities."
-                raise ValueError(msg)
-
-            # Distribute the remaining probability uniformly among other actions
-            num_actions = len(probs_copy)
-            uniform_prob = 1.0 / num_actions
-            probs_copy = {action: uniform_prob for action in probs_copy}
-
-        # If stop_symbol has less than 1.0 probability, remove it and normalize the rest
-        elif stop_probability < 1.0:
-            del probs_copy[stop_symbol]
-
-            # Verify stop_symbol is indeed deleted
-            if stop_symbol in probs_copy:
-                msg = "stop_symbol was not successfully removed from probabilities."
-                raise ValueError(msg)
-
-            # Normalize the remaining probabilities so that they sum to 1
-            total_prob = sum(probs_copy.values())
-            if total_prob > 0:
-                probs_copy = {action: prob / total_prob for action, prob in probs_copy.items()}
-
-    # If there are no probabilities after filtering, return None
-    if probs_copy == {}:
-        return None
-
-    # Convert dictionary to a sorted list of items (actions and probabilities) for consistency
-    sorted_probs = sorted(probs_copy.items(), key=lambda x: (-x[1], x[0]))
-
-    # Extract actions and probabilities in a consistent way
-    actions, probabilities = zip(*sorted_probs, strict=True)
-
-    # Convert the probabilities to a numpy array
-    probabilities_array = np.array(probabilities)
-
-    # Get the indices of the top-k elements, sorted in descending order
-    top_k_indices = np.argsort(probabilities_array)[-final_config["top_k"] :][::-1]
-
-    # Use the indices to get the top-k actions
-    top_k_actions = [actions[i] for i in top_k_indices]
-
-    # Determine the predicted action
-    if final_config["randomized"]:
-        # Randomly choose an action based on the given probability distribution
-        next_action_idx = np.random.choice(len(probabilities_array), p=probabilities_array / probabilities_array.sum())
-        predicted_action = actions[next_action_idx]
-    else:
-        # Get the most probable action deterministically
-        predicted_action = top_k_actions[0]
-
-    # Get the highest probability corresponding to the predicted action
-    highest_probability = float(probabilities_array[actions.index(predicted_action)])
-
-    # Return the predicted action, top-k actions, and the probability of the predicted action
-    return {
-        "action": predicted_action,
-        "top_k_actions": top_k_actions,
-        "probability": highest_probability,
-        "probs": probs_copy,
-    }
-
-
-# ============================================================
 # Data Transformation
 # ============================================================
 
 
-def interleave_sequences(sequences: list[list[ActionName]], random_index=True) -> list[tuple[CaseId, ActionName]]:  # noqa: FBT002
+def interleave_sequences(sequences: list[list[Event]], random_index=True) -> list[Event]:  # noqa: FBT002
     """
     Takes a list of sequences (list of lists) and returns a shuffled version
     while preserving the order within each sequence.
@@ -143,8 +43,8 @@ def interleave_sequences(sequences: list[list[ActionName]], random_index=True) -
         chosen_index = random.choice(indices) if random_index else indices[0]  # noqa: S311
 
         # Pop the first element from the chosen sequence
-        value = sequences_copy[chosen_index].pop(0)
-        shuffled_dataset.append((str(chosen_index), str(value)))
+        event = sequences_copy[chosen_index].pop(0)
+        shuffled_dataset.append(event)
 
         # If the chosen sequence is now empty, remove its index from consideration
         if not sequences_copy[chosen_index]:
@@ -153,47 +53,57 @@ def interleave_sequences(sequences: list[list[ActionName]], random_index=True) -
     return shuffled_dataset
 
 
-def add_input_symbols_sequence(sequence: list[ActionName], inp: str) -> list[tuple[str, ActionName]]:
-    return [(inp, elem) for elem in sequence]  # Add (inp, elem) for each element
+def add_input_symbols_sequence(sequence: list[Event], inp: str) -> list[tuple[str, ActivityName]]:
+    """
+    For Alergia algorithm
+    """
+    return [(inp, event["activity"]) for event in sequence]
 
 
-def add_input_symbols(data: list[list[ActionName]], inp: str) -> list[list[tuple[str, ActionName]]]:
+def add_input_symbols(data: list[list[Event]], inp: str) -> list[list[tuple[str, ActivityName]]]:
+    """
+    For Alergia algorithm
+    """
     return [add_input_symbols_sequence(sequence, inp) for sequence in data]
 
 
-def add_start_to_sequences(data: list[list[ActionName]], start: ActionName) -> list[list[ActionName]]:
+def add_start_to_sequences(data: list[list[Event]], start_symbol: ActivityName) -> list[list[Event]]:
     """
-    Appends stop symbol to each sequence in the data.
+    Prepends a start event with the case_id of the first event in each sequence.
+    Assumes that each sequence in `data` is non-empty.
     """
-    return [[start, *seq] for seq in data]
+    return [[{"case_id": seq[0]["case_id"], "activity": start_symbol}, *seq] for seq in data]
 
 
-def add_stop_to_sequences(data: list[list[ActionName]], stop: ActionName) -> list[list[ActionName]]:
+def add_stop_to_sequences(data: list[list[Event]], stop_symbol: ActivityName) -> list[list[Event]]:
     """
-    Appends stop symbol to each sequence in the data.
+    Appends a stop event with the case_id of the first event in each sequence.
+    Assumes that each sequence in `data` is non-empty.
     """
-    return [[*seq, stop] for seq in data]
+    return [[*seq, {"case_id": seq[0]["case_id"], "activity": stop_symbol}] for seq in data]
 
 
-def transform_to_seqs(data: Iterator[tuple[CaseId, ActionName]]) -> list[list[ActionName]]:
+def transform_to_seqs(data: Iterator[Event]) -> list[list[Event]]:
     """
-    Transforms list of tuples (case_id, action) into list of sequences.
+    Transforms list of tuples (case_id, activity) into list of sequences.
     """
     grouped_data = {}
-    for case_id, action in data:
+    for event in data:
+        case_id = event["case_id"]
+
         if case_id not in grouped_data:
             grouped_data[case_id] = []
-        grouped_data[case_id].append(action)
+        grouped_data[case_id].append(event)
 
     return list(grouped_data.values())
 
 
 def split_sequence_data(
-    dataset: list[list[ActionName]],
+    dataset: list[list[Event]],
     test_size: float = 0.2,
     random_shuffle: bool = False,  # noqa: FBT001, FBT002
     seed: int | None = None,
-) -> tuple[list[list[ActionName]], list[list[ActionName]]]:
+) -> tuple[list[list[Event]], list[list[Event]]]:
     dataset_copy = dataset.copy()
 
     if random_shuffle:
@@ -219,25 +129,25 @@ def split_sequence_data(
 # ============================================================
 
 
-def data_statistics(data: list[list[ActionName]]) -> None:
+def data_statistics(data: list[list[Event]]) -> None:
     # Calculate total length of sequences and average length
     total_length = sum(len(lst) for lst in data)
     average_length = total_length / len(data) if data else 0
 
-    # Flatten list of sequences and count the occurrences of each action
-    flattened_data = [action for lst in data for action in lst]
-    action_counter = Counter(flattened_data)
+    # Flatten list of sequences and count the occurrences of each activity
+    flattened_data = [event["activity"] for lst in data for event in lst]
+    activity_counter = Counter(flattened_data)
 
-    # Extract unique actions and total number of occurrences
-    unique_actions = list(action_counter.keys())
-    action_occurrences = dict(action_counter)
+    # Extract unique activities and total number of occurrences
+    unique_activities = list(activity_counter.keys())
+    activity_occurrences = dict(activity_counter)
 
     msg = (
         f"Number of cases: {len(data)}\n"
         f"Average length of case: {average_length}\n"
-        f"Number of actions: {len(unique_actions)}\n"
+        f"Number of activities: {len(unique_activities)}\n"
         f"Number of events: {total_length}\n"
-        f"Action occurrences: {action_occurrences}\n"
+        f"Activity occurrences: {activity_occurrences}\n"
     )
     logger.info(msg)
 
@@ -374,8 +284,8 @@ class FileHandler:
 
 def handle_keys(keys: list[str | int], row: DataItem | dict[str | int, Any]) -> str | int | tuple[str | int, ...]:
     """
-    Handles the case and action keys, returning either a single value or a tuple of values.
-    Ensures the return type matches the expected CaseId or ActionName.
+    Handles the case and activity keys, returning either a single value or a tuple of values.
+    Ensures the return type matches the expected CaseId or ActivityName.
     """
     if len(keys) == 1:
         # Return the value directly if there's only one key

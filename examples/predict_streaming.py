@@ -19,7 +19,7 @@ from logicsponge.processmining.models import (
     SoftVoting,
 )
 from logicsponge.processmining.neural_networks import LSTMModel
-from logicsponge.processmining.streaming import AddStartSymbol, Evaluation, IteratorStreamer, StreamingActionPredictor
+from logicsponge.processmining.streaming import AddStartSymbol, Evaluation, IteratorStreamer, StreamingActivityPredictor
 from logicsponge.processmining.test_data import dataset
 
 logger = logging.getLogger(__name__)
@@ -58,50 +58,50 @@ config = {
     "include_stop": False,
 }
 
-start_symbol = DEFAULT_CONFIG['start_symbol']
+start_symbol = DEFAULT_CONFIG["start_symbol"]
 
 
-fpt = StreamingActionPredictor(
+fpt = StreamingActivityPredictor(
     strategy=BasicMiner(algorithm=FrequencyPrefixTree(), config=config),
 )
 
-bag = StreamingActionPredictor(
+bag = StreamingActivityPredictor(
     strategy=BasicMiner(algorithm=Bag(), config=config),
 )
 
-ngram_1 = StreamingActionPredictor(
+ngram_1 = StreamingActivityPredictor(
     strategy=BasicMiner(algorithm=NGram(window_length=0), config=config),
 )
 
-ngram_2 = StreamingActionPredictor(
+ngram_2 = StreamingActivityPredictor(
     strategy=BasicMiner(algorithm=NGram(window_length=1), config=config),
 )
 
-ngram_3 = StreamingActionPredictor(
+ngram_3 = StreamingActivityPredictor(
     strategy=BasicMiner(algorithm=NGram(window_length=2), config=config),
 )
 
-ngram_4 = StreamingActionPredictor(
+ngram_4 = StreamingActivityPredictor(
     strategy=BasicMiner(algorithm=NGram(window_length=3), config=config),
 )
 
-ngram_5 = StreamingActionPredictor(
+ngram_5 = StreamingActivityPredictor(
     strategy=BasicMiner(algorithm=NGram(window_length=4), config=config),
 )
 
-ngram_6 = StreamingActionPredictor(
+ngram_6 = StreamingActivityPredictor(
     strategy=BasicMiner(algorithm=NGram(window_length=5), config=config),
 )
 
-ngram_7 = StreamingActionPredictor(
+ngram_7 = StreamingActivityPredictor(
     strategy=BasicMiner(algorithm=NGram(window_length=6), config=config),
 )
 
-ngram_8 = StreamingActionPredictor(
+ngram_8 = StreamingActivityPredictor(
     strategy=BasicMiner(algorithm=NGram(window_length=7), config=config),
 )
 
-fallback = StreamingActionPredictor(
+fallback = StreamingActivityPredictor(
     strategy=Fallback(
         models=[
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
@@ -111,7 +111,7 @@ fallback = StreamingActionPredictor(
     )
 )
 
-hard_voting = StreamingActionPredictor(
+hard_voting = StreamingActivityPredictor(
     strategy=HardVoting(
         models=[
             BasicMiner(algorithm=Bag()),
@@ -126,7 +126,7 @@ hard_voting = StreamingActionPredictor(
     )
 )
 
-soft_voting = StreamingActionPredictor(
+soft_voting = StreamingActivityPredictor(
     strategy=SoftVoting(
         models=[
             BasicMiner(algorithm=Bag()),
@@ -141,7 +141,7 @@ soft_voting = StreamingActionPredictor(
     )
 )
 
-adaptive_voting = StreamingActionPredictor(
+adaptive_voting = StreamingActivityPredictor(
     strategy=AdaptiveVoting(
         models=[
             BasicMiner(algorithm=Bag()),
@@ -166,7 +166,7 @@ model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, device=devi
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-lstm = StreamingActionPredictor(
+lstm = StreamingActivityPredictor(
     strategy=NeuralNetworkMiner(
         model=model,
         criterion=criterion,
@@ -208,14 +208,14 @@ streamer = IteratorStreamer(data_iterator=dataset)
 
 
 def start_filter(item: DataItem):
-    return item["action"] != start_symbol
+    return item["activity"] != start_symbol
 
 
 len_dataset = 15214
 
 sponge = (
     streamer
-    * ls.KeyFilter(keys=["case_id", "action"])
+    * ls.KeyFilter(keys=["case_id", "activity"])
     * AddStartSymbol(start_symbol=start_symbol)
     * (
         (fpt * DataItemFilter(data_item_filter=start_filter) * Evaluation("fpt"))

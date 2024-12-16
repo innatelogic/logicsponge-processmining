@@ -7,6 +7,8 @@ from torch import nn
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
 
+from logicsponge.processmining.types import Event
+
 logger = logging.getLogger(__name__)
 
 
@@ -119,11 +121,11 @@ class PreprocessData:
             self.current_idx += 1
         return self.activity_to_idx[activity]
 
-    def preprocess_data(self, dataset):
+    def preprocess_data(self, dataset: list[list[Event]]):
         processed_sequences = []
 
         for sequence in dataset:
-            index_sequence = [self.get_activity_index(activity) for activity in sequence]  # Convert to indices
+            index_sequence = [self.get_activity_index(event["activity"]) for event in sequence]  # Convert to indices
             processed_sequences.append(torch.tensor(index_sequence, dtype=torch.long))
 
         # Pad sequences, using 0 as the padding value

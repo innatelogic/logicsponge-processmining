@@ -41,20 +41,20 @@ def generate_cytoscape_elements(pm):
             }
         )
     for from_state, transitions in pm.transitions.items():
-        for action_name, to_state in transitions.items():
+        for activity_name, to_state in transitions.items():
             edge_color = (
                 "#FF0000"
                 if (
                     pm.last_transition
                     and from_state == pm.last_transition[0]
-                    and action_name == pm.last_transition[1]
+                    and activity_name == pm.last_transition[1]
                     and to_state == pm.last_transition[2]
                 )
                 else "#53585F"
             )
             elements.append(
                 {
-                    "data": {"source": str(from_state), "target": str(to_state), "label": action_name},
+                    "data": {"source": str(from_state), "target": str(to_state), "label": activity_name},
                     "style": {"line-color": edge_color},
                 }
             )
@@ -139,13 +139,13 @@ app.layout = html.Div(
 def update_graph(_unused, previous_node_count):
     try:
         # Fetch the next element from the dataset iterator
-        case_id, action_name = next(dataset)
+        event = next(dataset)
     except StopIteration:
         # Stop the interval if the dataset is exhausted
         return dash.no_update, dash.no_update, True, previous_node_count
 
     # Update the process mining object with the new data
-    pm.update(case_id, action_name)
+    pm.update(event)
 
     # Generate updated Cytoscape elements
     elements = generate_cytoscape_elements(pm)

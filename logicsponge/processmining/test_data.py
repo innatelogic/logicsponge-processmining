@@ -8,16 +8,15 @@ import pandas as pd
 from logicsponge.processmining.automata import PDFA
 from logicsponge.processmining.config import DEFAULT_CONFIG
 from logicsponge.processmining.data_utils import FileHandler, handle_keys, interleave_sequences
-from logicsponge.processmining.types import ActionName, CaseId
+from logicsponge.processmining.types import Event
 
 FOLDERNAME = "data"
 file_handler = FileHandler(folder=FOLDERNAME)
 
-stop_symbol = DEFAULT_CONFIG['stop_symbol']
+stop_symbol = DEFAULT_CONFIG["stop_symbol"]
 
 DATA = "file"
 # DATA = "synthetic"
-# DATA = "explicit"
 # DATA = "PDFA"
 
 
@@ -60,7 +59,7 @@ data_collection = {
         "filetype": "xes.gz",
         "target_filename": "BPI_Challenge_2012.csv",
         "case_keys": ["case:concept:name"],
-        "action_keys": ["concept:name"],
+        "activity_keys": ["concept:name"],
         "delimiter": ",",
         "dtypes": None,
     },
@@ -71,7 +70,7 @@ data_collection = {
         "target_filename": "BPI_Challenge_2013.csv",
         "target_foldername": "data",
         "case_keys": ["case:concept:name"],
-        "action_keys": ["lifecycle:transition"],
+        "activity_keys": ["lifecycle:transition"],
         "delimiter": ",",
         "dtypes": None,
     },
@@ -82,7 +81,7 @@ data_collection = {
         "target_filename": "BPI_Challenge_2014.csv",
         "target_foldername": "data",
         "case_keys": ["Incident ID"],
-        "action_keys": ["IncidentActivity_Type"],
+        "activity_keys": ["IncidentActivity_Type"],
         "delimiter": ";",
         "sort_by_time": "DateStamp",
         "dtypes": None,
@@ -94,7 +93,7 @@ data_collection = {
         "target_filename": "BPI_Challenge_2017.csv",
         "target_foldername": "data",
         "case_keys": ["case:concept:name"],
-        "action_keys": ["concept:name"],
+        "activity_keys": ["concept:name"],
         "delimiter": ",",
         "dtypes": None,
     },
@@ -105,7 +104,7 @@ data_collection = {
         "target_filename": "BPI_Challenge_2018.csv",
         "target_foldername": "data",
         "case_keys": ["case:concept:name"],
-        "action_keys": ["concept:name"],
+        "activity_keys": ["concept:name"],
         "delimiter": ",",
         "dtypes": None,
     },
@@ -115,7 +114,7 @@ data_collection = {
         "filetype": "xes",
         "target_filename": "BPI_Challenge_2019.csv",
         "case_keys": ["case:Purchasing Document", "case:Item"],
-        "action_keys": ["concept:name"],
+        "activity_keys": ["concept:name"],
         "delimiter": ",",
         "dtypes": None,
     },
@@ -125,7 +124,7 @@ data_collection = {
         "filetype": "xes.gz",
         "target_filename": "Sepsis_Cases.csv",
         "case_keys": ["case:concept:name"],
-        "action_keys": ["concept:name"],
+        "activity_keys": ["concept:name"],
         "delimiter": ",",
         "dtypes": None,
     },
@@ -166,17 +165,28 @@ if DATA == "file":
     #     else:
     #         raise KeyError(f'Timestamp column "{timestamp_column}" not found in the CSV file.')
 
-    dataset: Iterator[tuple[CaseId, ActionName]]
+    dataset: Iterator[Event]
 
-    def my_iterator() -> Iterator[tuple]:
+    def my_iterator() -> Iterator[Event]:
         for row in row_iterator:
-            yield (
-                handle_keys(mydata["case_keys"], row),  # type: ignore
-                handle_keys(mydata["action_keys"], row),  # type: ignore
-            )
+            # Create the Event dictionary
+            event: Event = {
+                "case_id": handle_keys(mydata["case_keys"], row),  # type: ignore
+                "activity": handle_keys(mydata["activity_keys"], row),  # type: ignore
+            }
+            yield event
 
     dataset = my_iterator()
 
+    # def my_iterator() -> Iterator[Event]:
+    #     for row in row_iterator:
+    #         yield (
+    #             handle_keys(mydata["case_keys"], row),  # type: ignore
+    #             handle_keys(mydata["activity_keys"], row),  # type: ignore
+    #         )
+    #
+    # dataset = my_iterator()
+
 
 # ============================================================
 # Synthetic data sets
@@ -235,47 +245,6 @@ if DATA == "synthetic":
                 sequences.append([*incremented_numbers, stop_symbol])
 
     dataset = iter(interleave_sequences(sequences, random_index=False))
-
-
-# ============================================================
-# Explicit dataset
-# ============================================================
-
-
-if DATA == "explicit":
-    data: list[list[ActionName]] = [
-        ["b"],
-        ["b"],
-        ["b"],
-        ["b"],
-        ["b"],
-        ["b"],
-        ["b"],
-        ["b"],
-        ["b"],
-        ["a", "a", "a"],
-        ["a", "a", "a"],
-        ["a", "a", "a"],
-        ["b", "a"],
-        ["b", "b"],
-        ["b", "b"],
-        ["b", "b"],
-        ["b", "b"],
-        ["b", "b"],
-        ["b", "b", "b"],
-        ["a", "a", "a", "a"],
-        ["a"],
-        ["a"],
-        ["a"],
-        ["a"],
-        ["a"],
-        ["a", "a", "b"],
-        ["a", "a"],
-        ["a", "a"],
-        ["a", "a"],
-        ["b", "b", "a"],
-    ]
-    dataset = iter(interleave_sequences(data))
 
 
 # ============================================================
@@ -286,7 +255,7 @@ if DATA == "explicit":
 if DATA == "PDFA":
     pdfa = PDFA()
 
-    pdfa.add_actions(["init", "a", "b"])
+    pdfa.add_activities(["init", "a", "b"])
 
     pdfa.create_states(2)
     pdfa.set_initial_state(0)
@@ -299,48 +268,3 @@ if DATA == "PDFA":
     pdfa.set_probs(1, {stop_symbol: 0.01, "init": 0.0, "a": 0.495, "b": 0.495})
 
     dataset = iter(interleave_sequences(pdfa.simulate(100000)))
-
-
-# if DATA == "PDFA":
-#     pdfa = PDFA()
-#
-#     pdfa.add_actions(["a", "b"])
-#
-#     pdfa.create_states(3)
-#     pdfa.set_initial_state(0)
-#
-#     pdfa.transitions[0]["a"] = 1
-#     pdfa.transitions[0]["b"] = 2
-#     pdfa.transitions[1]["a"] = 1
-#     pdfa.transitions[1]["b"] = 1
-#     pdfa.transitions[2]["a"] = 2
-#     pdfa.transitions[2]["b"] = 2
-#
-#     pdfa.set_probs(0, {stop_symbol: 0.0, "a": 0.5, "b": 0.5})
-#     pdfa.set_probs(1, {stop_symbol: 0.4, "a": 0.5, "b": 0.1})
-#     pdfa.set_probs(2, {stop_symbol: 0.4, "a": 0.1, "b": 0.5})
-#
-#     dataset = interleave_sequences(pdfa.simulate(100000))
-
-
-# dataset = interleave_sequences(pdfa.simulate(25))
-#
-# from collections import Counter
-#
-# while True:
-#     data = pdfa.simulate(30)
-#
-#     # Example list of lists
-#
-#     # Convert each sublist to a tuple and count the occurrences
-#
-#     if all(len(sublist) <= 4 for sublist in data):
-#         break
-#
-#
-# count = Counter(tuple(sublist) for sublist in data)
-#
-# # Print the result
-# for sublist, freq in count.items():
-#     print(f"Sublist {sublist} occurs {freq} times")
-#

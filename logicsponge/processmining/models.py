@@ -10,15 +10,17 @@ import torch
 from torch.nn.utils.rnn import pad_sequence
 
 from logicsponge.processmining.config import update_config
-from logicsponge.processmining.data_utils import add_input_symbols_sequence, probs_prediction
+from logicsponge.processmining.data_utils import add_input_symbols_sequence
 from logicsponge.processmining.neural_networks import LSTMModel, RNNModel
 from logicsponge.processmining.types import (
-    ActionName,
+    ActivityName,
     CaseId,
     ComposedState,
+    Event,
     Prediction,
     ProbDistr,
 )
+from logicsponge.processmining.utils import probs_prediction
 
 mpl.use("Agg")
 
@@ -56,23 +58,23 @@ class StreamingMiner(ABC):
             "log_loss": 0.0,  # not implemented yet
         }
 
-    def update_stats(self, actual_next_action: ActionName, prediction: Prediction | None) -> None:
+    def update_stats(self, actual_next_activity: ActivityName, prediction: Prediction | None) -> None:
         """
-        Updates the statistics based on the actual action, the prediction, and the top-k predictions.
+        Updates the statistics based on the actual activity, the prediction, and the top-k predictions.
         """
         self.stats["total_predictions"] += 1
 
         if prediction is None:
             self.stats["empty_predictions"] += 1
         else:
-            predicted_action = prediction["action"]
+            predicted_activity = prediction["activity"]
 
-            if actual_next_action == predicted_action:
+            if actual_next_activity == predicted_activity:
                 self.stats["correct_predictions"] += 1
             else:
                 self.stats["wrong_predictions"] += 1
 
-    def evaluate(self, data: list[list[ActionName]], mode: str = "incremental") -> None:
+    def evaluate(self, data: list[list[Event]], mode: str = "incremental") -> None:
         """
         Evaluation in batch mode.
         Evaluates the dataset either incrementally or by full sequence.
@@ -84,12 +86,12 @@ class StreamingMiner(ABC):
 
             for i in range(len(sequence)):
                 if current_state is None:
-                    # If unparseable, count all remaining actions
+                    # If unparseable, count all remaining activities
                     self.stats["empty_predictions"] += len(sequence) - i
                     self.stats["total_predictions"] += len(sequence) - i
                     break
 
-                actual_next_action = sequence[i]
+                actual_next_activity = sequence[i].get("activity")
 
                 if mode == "incremental":
                     # Prediction for incremental mode (step by step)
@@ -101,20 +103,20 @@ class StreamingMiner(ABC):
                     prediction = probs_prediction(probs, self.config)
 
                 # Update statistics based on the prediction
-                self.update_stats(actual_next_action, prediction)
+                self.update_stats(actual_next_activity, prediction)
 
                 # Move to the next state
                 if i < len(sequence) - 1:
-                    current_state = self.next_state(current_state, actual_next_action)
+                    current_state = self.next_state(current_state, actual_next_activity)
 
     @abstractmethod
-    def update(self, case_id: CaseId, action: ActionName) -> None:
+    def update(self, event: Event) -> None:
         """
         Updates Strategy.
         """
 
     @abstractmethod
-    def next_state(self, current_state: ComposedState | None, action: ActionName) -> ComposedState | None:
+    def next_state(self, current_state: ComposedState | None, activity: ActivityName) -> ComposedState | None:
         """
         Takes a transition from the current state.
         """
@@ -132,7 +134,7 @@ class StreamingMiner(ABC):
         """
 
     @abstractmethod
-    def sequence_probs(self, sequence: list[ActionName]) -> ProbDistr:
+    def sequence_probs(self, sequence: list[Event]) -> ProbDistr:
         """
         Returns probability dictionary based on sequence.
         """
@@ -154,11 +156,11 @@ class BasicMiner(StreamingMiner):
 
         self.initial_state = self.algorithm.initial_state
 
-    def update(self, case_id: CaseId, action: ActionName) -> None:
-        self.algorithm.update(case_id, action)
+    def update(self, event: Event) -> None:
+        self.algorithm.update(event)
 
-    def next_state(self, current_state: ComposedState | None, action: ActionName) -> ComposedState | None:
-        return self.algorithm.next_state(current_state, action)
+    def next_state(self, current_state: ComposedState | None, activity: ActivityName) -> ComposedState | None:
+        return self.algorithm.next_state(current_state, activity)
 
     def state_probs(self, state: ComposedState | None) -> ProbDistr:
         return self.algorithm.state_probs(state)
@@ -166,7 +168,7 @@ class BasicMiner(StreamingMiner):
     def case_probs(self, case_id: CaseId) -> ProbDistr:
         return self.algorithm.case_probs(case_id)
 
-    def sequence_probs(self, sequence: list[ActionName]) -> ProbDistr:
+    def sequence_probs(self, sequence: list[Event]) -> ProbDistr:
         return self.algorithm.sequence_probs(sequence)
 
 
@@ -182,16 +184,18 @@ class MultiMiner(StreamingMiner, ABC):
 
         self.initial_state = tuple(model.initial_state for model in self.models)
 
-    def update(self, case_id: CaseId, action: ActionName) -> None:
+    def update(self, event: Event) -> None:
         for model in self.models:
-            model.update(case_id, action)
+            model.update(event)
 
-    def next_state(self, current_state: ComposedState | None, action: ActionName) -> ComposedState | None:
+    def next_state(self, current_state: ComposedState | None, activity: ActivityName) -> ComposedState | None:
         if current_state is None:
             return None
 
         # Unpack the current state for each model
-        next_states = [model.next_state(state, action) for model, state in zip(self.models, current_state, strict=True)]
+        next_states = [
+            model.next_state(state, activity) for model, state in zip(self.models, current_state, strict=True)
+        ]
 
         # If all next states are None, return None
         if all(ns is None for ns in next_states):
@@ -212,9 +216,9 @@ class HardVoting(MultiMiner):
 
     def voting_probs(self, probs_list: list[ProbDistr]) -> ProbDistr:
         """
-        Perform hard voting based on the most frequent action in the predictions and return
-        the winning action as a probability dictionary with a probability of 1.0.
-        If there is a tie, select the action based on the first occurrence in the order of the models.
+        Perform hard voting based on the most frequent activity in the predictions and return
+        the winning activity as a probability dictionary with a probability of 1.0.
+        If there is a tie, select the activity based on the first occurrence in the order of the models.
         """
         # Collect valid predictions
         valid_predictions = []
@@ -226,33 +230,33 @@ class HardVoting(MultiMiner):
         if len(valid_predictions) == 0:
             return {}
 
-        # Extract only the action part of each valid prediction for voting
-        action_predictions = [pred["action"] for pred in valid_predictions]
+        # Extract only the activity part of each valid prediction for voting
+        activity_predictions = [pred["activity"] for pred in valid_predictions]
 
-        # Count the frequency of each action in the valid predictions
-        action_counter = Counter(action_predictions)
+        # Count the frequency of each activity in the valid predictions
+        activity_counter = Counter(activity_predictions)
 
-        # Find the action(s) with the highest count
-        most_common = action_counter.most_common()  # List of (action, count) sorted by frequency
+        # Find the activity(s) with the highest count
+        most_common = activity_counter.most_common()  # List of (activity, count) sorted by frequency
 
         # Get the highest count
         highest_count = most_common[0][1]
-        most_voted_actions = [action for action, count in most_common if count == highest_count]
+        most_voted_activities = [activity for activity, count in most_common if count == highest_count]
 
-        selected_action = self.config["stop_symbol"]
+        selected_activity = self.config["stop_symbol"]
 
-        # If there is only one action with the highest count, select that action
-        if len(most_voted_actions) == 1:
-            selected_action = most_voted_actions[0]
+        # If there is only one activity with the highest count, select that activity
+        if len(most_voted_activities) == 1:
+            selected_activity = most_voted_activities[0]
         else:
             # In case of a tie, choose based on the first occurrence among the models' input
             for pred in valid_predictions:
-                if pred["action"] in most_voted_actions:
-                    selected_action = pred["action"]
+                if pred["activity"] in most_voted_activities:
+                    selected_activity = pred["activity"]
                     break
 
-        # Create a result dictionary with only the selected action
-        return {self.config["stop_symbol"]: 0.0, selected_action: 1.0}  # include STOP as an invariant
+        # Create a result dictionary with only the selected activity
+        return {self.config["stop_symbol"]: 0.0, selected_activity: 1.0}  # include STOP as an invariant
 
     def state_probs(self, state: ComposedState | None) -> ProbDistr:
         """
@@ -273,7 +277,7 @@ class HardVoting(MultiMiner):
 
         return self.voting_probs(probs_list)
 
-    def sequence_probs(self, sequence: list[ActionName]) -> ProbDistr:
+    def sequence_probs(self, sequence: list[Event]) -> ProbDistr:
         """
         Return the majority vote.
         """
@@ -290,14 +294,14 @@ class SoftVoting(MultiMiner):
     def voting_probs(probs_list: list[ProbDistr]) -> ProbDistr:
         combined_probs = {}
 
-        # Iterate over all probability dictionaries and accumulate the probabilities for each action
+        # Iterate over all probability dictionaries and accumulate the probabilities for each activity
         for prob_dict in probs_list:
-            for action, prob in prob_dict.items():
-                if action not in combined_probs:
-                    combined_probs[action] = 0.0
-                combined_probs[action] += prob
+            for activity, prob in prob_dict.items():
+                if activity not in combined_probs:
+                    combined_probs[activity] = 0.0
+                combined_probs[activity] += prob
 
-        # If there are no actions, return an empty dictionary
+        # If there are no activities, return an empty dictionary
         if not combined_probs:
             return {}
 
@@ -306,7 +310,7 @@ class SoftVoting(MultiMiner):
 
         # Ensure we do not divide by zero (though combined_probs being empty is already checked)
         if total_prob > 0:
-            combined_probs = {action: prob / total_prob for action, prob in combined_probs.items()}
+            combined_probs = {activity: prob / total_prob for activity, prob in combined_probs.items()}
 
         # Return the normalized probability dictionary
         return combined_probs
@@ -330,7 +334,7 @@ class SoftVoting(MultiMiner):
 
         return self.voting_probs(probs_list)
 
-    def sequence_probs(self, sequence: list[ActionName]) -> ProbDistr:
+    def sequence_probs(self, sequence: list[Event]) -> ProbDistr:
         """
         Return the majority vote.
         """
@@ -351,18 +355,21 @@ class AdaptiveVoting(MultiMiner):
         self.total_predictions = 0
         self.correct_predictions = [0] * len(self.models)
 
-    def update(self, case_id: CaseId, action: ActionName) -> None:
+    def update(self, event: Event) -> None:
         """
         Overwritten to account for keeping track of accuracies in streaming mode.
         """
+        case_id = event["case_id"]
+        activity = event["activity"]
+
         self.total_predictions += 1
 
         for i, model in enumerate(self.models):
             prediction = probs_prediction(model.case_probs(case_id), config=self.config)
-            if prediction is not None and prediction["action"] == action:
+            if prediction is not None and prediction["activity"] == activity:
                 self.correct_predictions[i] += 1
 
-            model.update(case_id, action)
+            model.update(event)
 
     def get_accuracies(self) -> list[float]:
         """
@@ -403,7 +410,7 @@ class AdaptiveVoting(MultiMiner):
 
         return best_model.case_probs(case_id)
 
-    def sequence_probs(self, sequence: list[ActionName]) -> ProbDistr:
+    def sequence_probs(self, sequence: list[Event]) -> ProbDistr:
         """
         Return the probability distribution from the model with the best accuracy so far.
         """
@@ -452,7 +459,7 @@ class Fallback(MultiMiner):
         # If all models return None
         return {}
 
-    def sequence_probs(self, sequence: list[ActionName]) -> ProbDistr:
+    def sequence_probs(self, sequence: list[Event]) -> ProbDistr:
         """
         Return the first non-{} probabilities from the models for the given sequence,
         cascading through the models in order.
@@ -497,7 +504,7 @@ class Relativize(MultiMiner):
 
         return probs
 
-    def sequence_probs(self, sequence: list[ActionName]) -> ProbDistr:
+    def sequence_probs(self, sequence: list[Event]) -> ProbDistr:
         probs = self.model1.sequence_probs(sequence)
 
         if probs:
@@ -533,7 +540,7 @@ class Alergia(BasicMiner):
         """
         return {}
 
-    def update(self, case_id: CaseId, action: ActionName) -> None:
+    def update(self, event: Event) -> None:
         """
         This method is not used in this subclass.
         """
@@ -541,7 +548,7 @@ class Alergia(BasicMiner):
     def state_probs(self, state: Any) -> ProbDistr:
         return self.get_probability_distribution(state)
 
-    def sequence_probs(self, sequence: list[ActionName]) -> ProbDistr:
+    def sequence_probs(self, sequence: list[Event]) -> ProbDistr:
         transformed_sequence = add_input_symbols_sequence(sequence, "in")
 
         self.algorithm.reset_to_initial()
@@ -552,13 +559,13 @@ class Alergia(BasicMiner):
         # Get probability distribution for the current state
         return self.get_probability_distribution(self.algorithm.current_state)
 
-    def step(self, action):
-        self.algorithm.step_to("in", action)
+    def step(self, activity):
+        self.algorithm.step_to("in", activity)
         self.current_state = self.algorithm.current_state
 
-    def next_state(self, current_state, action):
+    def next_state(self, current_state, activity):
         self.algorithm.current_state = current_state
-        self.algorithm.step_to("in", action)
+        self.algorithm.step_to("in", activity)
         return self.algorithm.current_state
 
 
@@ -577,14 +584,14 @@ class NeuralNetworkMiner(StreamingMiner):
         self.optimizer = optimizer
         self.criterion = criterion
 
-        self.sequences: OrderedDict[CaseId, list[ActionName]] = (
+        self.sequences: OrderedDict[CaseId, list[ActivityName]] = (
             OrderedDict()
         )  # Ordered dictionary to maintain insertion order
         self.rr_index = 0  # Keeps track of the round-robin index
         self.batch_size = batch_size
 
-        self.action_index = {}
-        self.index_action = {}
+        self.activity_index = {}
+        self.index_activity = {}
 
     def get_sequences(self):
         """
@@ -592,31 +599,33 @@ class NeuralNetworkMiner(StreamingMiner):
         """
         return self.sequences
 
-    def get_sequence(self, case_id: CaseId) -> list[ActionName]:
+    def get_sequence(self, case_id: CaseId) -> list[ActivityName]:
         """
         Return the sequence for a specific case_id.
         """
         return self.sequences.get(case_id, [])
 
-    def update(self, case_id: CaseId, action: ActionName) -> None:
+    def update(self, event: Event) -> None:
         """
-        Add an action to the sequence corresponding to the case_id.
-        Dynamically update the activity_to_idx mapping if a new action is encountered.
+        Add an activity to the sequence corresponding to the case_id.
+        Dynamically update the activity_to_idx mapping if a new activity is encountered.
         """
+        case_id = event["case_id"]
+        activity = event["activity"]
 
-        # Dynamically update activity_to_idx if the action is new
-        if action not in self.action_index:
-            current_idx = len(self.action_index) + 1  # Get the next available index
-            self.action_index[action] = current_idx
-            self.index_action[current_idx] = action
+        # Dynamically update activity_to_idx if the activity is new
+        if activity not in self.activity_index:
+            current_idx = len(self.activity_index) + 1  # Get the next available index
+            self.activity_index[activity] = current_idx
+            self.index_activity[current_idx] = activity
 
-        # Convert action to its corresponding index
-        action_idx = self.action_index[action]
+        # Convert activity to its corresponding index
+        activity_idx = self.activity_index[activity]
 
-        # Add the action index to the sequence for the given case_id
+        # Add the activity index to the sequence for the given case_id
         if case_id not in self.sequences:
             self.sequences[case_id] = []  # New case added
-        self.sequences[case_id].append(action_idx)
+        self.sequences[case_id].append(activity_idx)
 
         # Continue with the training step using the updated sequence
         batch = self.select_batch(case_id)
@@ -663,7 +672,7 @@ class NeuralNetworkMiner(StreamingMiner):
 
         return loss.item()
 
-    def select_batch(self, case_id: CaseId) -> list[list[ActionName]]:
+    def select_batch(self, case_id: CaseId) -> list[list[ActivityName]]:
         """
         Select a batch of sequences, using a round-robin approach.
         Only select sequences that have at least two tokens (input + target).
@@ -708,10 +717,10 @@ class NeuralNetworkMiner(StreamingMiner):
 
     def case_probs(self, case_id: CaseId) -> ProbDistr:
         """
-        Predict the next action for a given case_id and return the top-k most likely actions along with the probability
-        of the top action.
+        Predict the next activity for a given case_id and return the top-k most likely activities along with the probability
+        of the top activity.
 
-        Note that, here, a sequence is a sequence of action indices (rather than actions).
+        Note that, here, a sequence is a sequence of activity indices (rather than activities).
         """
 
         # Get the sequence for the case_id
@@ -722,27 +731,28 @@ class NeuralNetworkMiner(StreamingMiner):
 
         return self.idx_sequence_probs(index_sequence)
 
-    def sequence_probs(self, sequence: list[ActionName]) -> ProbDistr:
+    def sequence_probs(self, sequence: list[Event]) -> ProbDistr:
         """
-        Predict the next action for a given sequence of actions and return the top-k most likely actions along with the
-        probability of the top action.
+        Predict the next activity for a given sequence of activities and return the top-k most likely activities along with the
+        probability of the top activity.
         """
         if not sequence or len(sequence) < 1:
             return {}
 
-        # Convert each action name to its corresponding index, return None if any action is unknown
+        # Convert each activity name to its corresponding index, return None if any activity is unknown
         index_sequence = []
-        for action in sequence:
-            action_idx = self.action_index.get(action)
-            if action_idx is None:
-                return {}  # Return None if the action is not found in the index
-            index_sequence.append(action_idx)
+        for event in sequence:
+            activity = event["activity"]
+            activity_idx = self.activity_index.get(activity)
+            if activity_idx is None:
+                return {}  # Return None if the activity is not found in the index
+            index_sequence.append(activity_idx)
 
         return self.idx_sequence_probs(index_sequence)
 
-    def idx_sequence_probs(self, index_sequence: list[ActionName]) -> ProbDistr:
+    def idx_sequence_probs(self, index_sequence: list[ActivityName]) -> ProbDistr:
         """
-        Predict the next action for a given sequence of action indices.
+        Predict the next activity for a given sequence of activity indices.
         """
         # Convert to a tensor and add a batch dimension
         input_sequence = torch.tensor(index_sequence, dtype=torch.long, device=self.device).unsqueeze(
@@ -754,7 +764,7 @@ class NeuralNetworkMiner(StreamingMiner):
         with torch.no_grad():
             output = self.model(input_sequence)
 
-        # Get the logits for the last time step (most recent action in the sequence)
+        # Get the logits for the last time step (most recent activity in the sequence)
         logits = output[:, -1, :]  # Shape [1, vocab_size]
 
         # Apply softmax to get the probabilities
@@ -764,9 +774,9 @@ class NeuralNetworkMiner(StreamingMiner):
         probabilities = probabilities.squeeze(0).tolist()  # Shape [vocab_size]
 
         return {
-            self.index_action[idx]: prob
+            self.index_activity[idx]: prob
             for idx, prob in enumerate(probabilities)
-            if self.index_action.get(idx) is not None
+            if self.index_activity.get(idx) is not None
         }
 
     def next_state(self, *args, **kwargs):

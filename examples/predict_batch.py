@@ -59,11 +59,11 @@ NN_training = True
 
 
 # ============================================================
-# Define start and stop symbols
+# Determine start and stop symbols
 # ============================================================
 
-start_symbol = DEFAULT_CONFIG['start_symbol']
-stop_symbol = DEFAULT_CONFIG['stop_symbol']
+start_symbol = DEFAULT_CONFIG["start_symbol"]
+stop_symbol = DEFAULT_CONFIG["stop_symbol"]
 
 # ============================================================
 # Data preparation
@@ -199,20 +199,20 @@ for iteration in range(n_iterations):
 
     # Train Process Miners
     start_time = time.time()
-    for case_id, action_name in train_set:
-        fpt.update(case_id, action_name)
-        bag.update(case_id, action_name)
-        ngram_1.update(case_id, action_name)
-        ngram_2.update(case_id, action_name)
-        ngram_3.update(case_id, action_name)
-        ngram_4.update(case_id, action_name)
-        ngram_5.update(case_id, action_name)
-        ngram_6.update(case_id, action_name)
-        ngram_7.update(case_id, action_name)
-        ngram_8.update(case_id, action_name)
-        fallback.update(case_id, action_name)
-        hard_voting.update(case_id, action_name)
-        soft_voting.update(case_id, action_name)
+    for event in train_set:
+        fpt.update(event)
+        bag.update(event)
+        ngram_1.update(event)
+        ngram_2.update(event)
+        ngram_3.update(event)
+        ngram_4.update(event)
+        ngram_5.update(event)
+        ngram_6.update(event)
+        ngram_7.update(event)
+        ngram_8.update(event)
+        fallback.update(event)
+        hard_voting.update(event)
+        soft_voting.update(event)
     end_time = time.time()
     elapsed_time = end_time - start_time
     msg = f"Total training time for process miners: {elapsed_time:.4f} seconds"
