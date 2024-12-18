@@ -96,11 +96,11 @@ class StreamingMiner(ABC):
                 if mode == "incremental":
                     # Prediction for incremental mode (step by step)
                     probs = self.state_probs(current_state)
-                    prediction = probs_prediction(probs, self.config)
+                    prediction = probs_prediction(probs, config=self.config)
                 else:
                     # Prediction for sequence mode (whole sequence)
                     probs = self.sequence_probs(sequence[:i])
-                    prediction = probs_prediction(probs, self.config)
+                    prediction = probs_prediction(probs, config=self.config)
 
                 # Update statistics based on the prediction
                 self.update_stats(actual_next_activity, prediction)
@@ -222,8 +222,9 @@ class HardVoting(MultiMiner):
         """
         # Collect valid predictions
         valid_predictions = []
+
         for probs in probs_list:
-            prediction = probs_prediction(probs, self.config)
+            prediction = probs_prediction(probs, config=self.config)
             if prediction is not None:
                 valid_predictions.append(prediction)
 
@@ -308,7 +309,7 @@ class SoftVoting(MultiMiner):
         # Normalize the combined probabilities so that they sum to 1
         total_prob = sum(combined_probs.values())
 
-        # Ensure we do not divide by zero (though combined_probs being empty is already checked)
+        # Ensure we do not divide by zero
         if total_prob > 0:
             combined_probs = {activity: prob / total_prob for activity, prob in combined_probs.items()}
 
@@ -348,6 +349,9 @@ class AdaptiveVoting(MultiMiner):
     To be used only in streaming mode.
     In batch mode, it will stick to the model with the highest training accuracy.
     """
+
+    total_predictions: int
+    correct_predictions: list[int]
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -456,7 +460,7 @@ class Fallback(MultiMiner):
             if probs:
                 return probs
 
-        # If all models return None
+        # If all models return {}
         return {}
 
     def sequence_probs(self, sequence: list[Event]) -> ProbDistr:
@@ -469,7 +473,7 @@ class Fallback(MultiMiner):
             if probs:
                 return probs
 
-        # If all models return None
+        # If all models return {}
         return {}
 
 

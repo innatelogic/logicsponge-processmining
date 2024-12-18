@@ -1,8 +1,9 @@
 import logging
 from abc import ABC, abstractmethod
 from collections import deque
+from typing import Any
 
-from logicsponge.processmining.automata import PDFA, State
+from logicsponge.processmining.automata import PDFA
 from logicsponge.processmining.types import (
     ActivityName,
     CaseId,
@@ -20,21 +21,20 @@ logger = logging.getLogger(__name__)
 
 
 class BaseStructure(PDFA, ABC):
+    case_info: dict[CaseId, Any]
+    last_transition: tuple[StateId, ActivityName, StateId] | None
+
     def __init__(self, *args, min_total_visits: int = 1, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
-        self.case_info = {}  # provides state info
-
+        self.case_info = {}  # provides case info such as current state or last timestamp
         self.last_transition = None
-
         self.min_total_visits = min_total_visits
 
         # create initial state
-        self.initial_state = 0  # initial_state is always a valid StateId in BaseStructure
-        initial_state_object = self.create_state(state_id=self.initial_state)
-        self.set_initial_state(self.initial_state)
-        self.state_info[self.initial_state]["object"] = initial_state_object
+        self.initial_state = self.create_state()
         self.state_info[self.initial_state]["access_string"] = ()
+        self.state_info[self.initial_state]["level"] = 0
 
     @property
     def states(self) -> list[StateId]:
@@ -43,31 +43,14 @@ class BaseStructure(PDFA, ABC):
     def initialize_case(self, case_id: CaseId):
         self.case_info[case_id] = {}
         self.case_info[case_id]["state"] = self.initial_state
+        self.case_info[case_id]["last_timestamp"] = None
         self.state_info[self.initial_state]["total_visits"] += 1
         self.state_info[self.initial_state]["active_visits"] += 1
-
-    def get_visit_statistics(self) -> tuple[int, float]:
-        """
-        Returns the maximum total visits and the average total visits over all states.
-        :return: (max_total_visits, avg_total_visits)
-        """
-        total_visits_values = [state_info["total_visits"] for state_info in self.state_info.values()]
-
-        if not total_visits_values:
-            return 0, 0  # If no states have been visited yet, return 0 for both values
-
-        # Calculate the maximum total visits
-        max_total_visits = max(total_visits_values)
-
-        # Calculate the average total visits
-        avg_total_visits = sum(total_visits_values) / len(total_visits_values)
-
-        return max_total_visits, avg_total_visits
 
     def parse_sequence(self, sequence: list[Event]) -> StateId | None:
         current_state = self.initial_state
 
-        # Follow the given sequence of activities through the (P)DFA
+        # Follow the given sequence of activities through the underlying (P)DFA
         for event in sequence:
             activity = event["activity"]
             if activity in self.activities:
@@ -108,26 +91,25 @@ class BaseStructure(PDFA, ABC):
 
         return probs
 
-    def create_state(self, state_id: StateId | None = None) -> State:
+    def create_state(self, state_id: StateId | None = None) -> StateId:
         """
+        Overwrites Automata method.
         Creates and initializes a new state with the given name and state ID.
         If no state ID is provided, ID is assigned based on current number of states.
         """
         if state_id is None:
             state_id = len(self.state_info)
-        new_state = State(state_id=state_id)
 
         self.state_info[state_id] = {}
-        self.state_info[state_id]["object"] = new_state
         self.state_info[state_id]["total_visits"] = 0
-        self.state_info[state_id]["activity_frequency"] = {}
         self.state_info[state_id]["active_visits"] = 0
-        self.state_info[state_id]["level"] = 0
+        self.state_info[state_id]["activity_frequency"] = {}
         self.state_info[state_id]["access_string"] = None
+        self.state_info[state_id]["level"] = None
 
         self.transitions[state_id] = {}
 
-        return new_state
+        return state_id
 
     @abstractmethod
     def update(self, event: Event) -> None:
@@ -161,7 +143,7 @@ class BaseStructure(PDFA, ABC):
 
     def sequence_probs(self, sequence: list[Event]) -> ProbDistr:
         """
-        Returns probabilities based on sequence.
+        Returns probabilities based on sequence of events.
         """
         state = self.parse_sequence(sequence)
 
@@ -176,7 +158,7 @@ class BaseStructure(PDFA, ABC):
 class FrequencyPrefixTree(BaseStructure):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.last_transition = None
+        self.last_transition = None  # for visualization of frequency prefex tree
 
     def update(self, event: Event) -> None:
         """
@@ -199,7 +181,7 @@ class FrequencyPrefixTree(BaseStructure):
             next_state = self.transitions[current_state][activity]
         else:
             self.state_info[current_state]["activity_frequency"][activity] = 0
-            next_state = self.create_state().state_id
+            next_state = self.create_state()
             self.transitions[current_state][activity] = next_state
             access_string = self.state_info[current_state]["access_string"] + (activity,)
             self.state_info[next_state]["access_string"] = access_string
@@ -210,7 +192,7 @@ class FrequencyPrefixTree(BaseStructure):
         self.state_info[current_state]["active_visits"] -= 1
         self.state_info[next_state]["active_visits"] += 1
 
-        self.last_transition = (current_state, activity, next_state)
+        self.last_transition = (current_state, activity, next_state)  # for visualiztion
 
 
 # ============================================================
@@ -219,6 +201,8 @@ class FrequencyPrefixTree(BaseStructure):
 
 
 class NGram(BaseStructure):
+    access_strings: dict[tuple[str, ...], StateId]
+
     def __init__(self, *args, window_length: int = 1, recover_lengths: list[int] | None = None, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.window_length = window_length
@@ -231,11 +215,12 @@ class NGram(BaseStructure):
 
     def follow_path(self, sequence: list[ActivityName]) -> StateId:
         """
-        Follows the given activity_sequence starting from the root (initial state).
-        If necessary, creates new states along the path. Does not modify state counts.
+        Follows the given activity sequence starting from the root (initial state).
+        If necessary, creates new states along the path. Does not modify state
+        and activity frequency counts.
 
         :param sequence: A list of activity names representing the path to follow.
-        :return: The state_id of the final state reached after following the sequence.
+        :return: The state of the final state reached after following the sequence.
         """
         current_state = self.initial_state
 
@@ -248,19 +233,21 @@ class NGram(BaseStructure):
             if activity in self.transitions[current_state]:
                 current_state = self.transitions[current_state][activity]
             else:
-                next_state = self.create_state().state_id
+                next_state = self.create_state()
                 access_string = self.state_info[current_state]["access_string"] + (activity,)
                 self.state_info[next_state]["access_string"] = access_string
                 self.access_strings[access_string] = next_state
                 self.state_info[next_state]["level"] = self.state_info[current_state]["level"] + 1
                 self.transitions[current_state][activity] = next_state
+                self.state_info[current_state]["activity_frequency"][activity] = 0
+
                 current_state = next_state
 
         return current_state
 
     def update(self, event: Event) -> None:
         """
-        Updates DFA tree structure of the process miner object by adding a new activity to case
+        Updates NGram by adding a new event
         """
         case_id = event["case_id"]
         activity = event["activity"]
@@ -271,9 +258,10 @@ class NGram(BaseStructure):
             self.initialize_case(case_id)
             self.case_info[case_id]["suffix"] = deque(maxlen=self.window_length)
 
-        self.case_info[case_id]["suffix"].append(activity)
         current_state = self.case_info[case_id]["state"]
         current_state_level = self.state_info[current_state]["level"]
+        # self.case_info[case_id]["suffix"] equals self.state_info[current_state]["access_string"]
+        self.case_info[case_id]["suffix"].append(activity)
 
         if current_state not in self.transitions:
             self.transitions[current_state] = {}
@@ -282,21 +270,20 @@ class NGram(BaseStructure):
             next_state = self.transitions[current_state][activity]
         else:
             if current_state_level < self.window_length:
-                next_state = self.create_state().state_id
+                next_state = self.create_state()
                 self.state_info[next_state]["level"] = current_state_level + 1
                 access_string = self.state_info[current_state]["access_string"] + (activity,)
                 self.state_info[next_state]["access_string"] = access_string
                 self.access_strings[access_string] = next_state
             else:
                 next_state = self.follow_path(self.case_info[case_id]["suffix"])
+
             self.transitions[current_state][activity] = next_state
+            self.state_info[current_state]["activity_frequency"][activity] = 0
 
         self.case_info[case_id]["state"] = next_state
         self.state_info[next_state]["total_visits"] += 1
-        if activity in self.state_info[current_state]["activity_frequency"]:
-            self.state_info[current_state]["activity_frequency"][activity] += 1
-        else:
-            self.state_info[current_state]["activity_frequency"][activity] = 1
+        self.state_info[current_state]["activity_frequency"][activity] += 1
         self.state_info[current_state]["active_visits"] -= 1
         self.state_info[next_state]["active_visits"] += 1
 
@@ -332,11 +319,13 @@ class NGram(BaseStructure):
 
 
 class Bag(BaseStructure):
+    activity_sets: dict[frozenset, StateId]
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         initial_set: frozenset = frozenset()
         self.state_info[self.initial_state]["activity_set"] = frozenset()
-        self.activity_sets: dict[frozenset, StateId] = {initial_set: self.initial_state}
+        self.activity_sets = {initial_set: self.initial_state}
 
     def update(self, event: Event) -> None:
         """
@@ -365,7 +354,7 @@ class Bag(BaseStructure):
             if next_set in self.activity_sets:
                 next_state = self.activity_sets[next_set]
             else:
-                next_state = self.create_state().state_id
+                next_state = self.create_state()
                 self.state_info[next_state]["activity_set"] = next_set
                 self.activity_sets[next_set] = next_state
 
@@ -386,11 +375,13 @@ class Bag(BaseStructure):
 
 
 class Parikh(BaseStructure):
+    parikh_vectors: dict[str, StateId]
+
     def __init__(self, *args, upper_bound: int | None = None, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         initial_vector: dict[ActivityName, int] = {}
         self.state_info[self.initial_state]["parikh_vector"] = {}
-        self.parikh_vectors: dict[str, StateId] = {self.parikh_hash(initial_vector): self.initial_state}
+        self.parikh_vectors = {self.parikh_hash(initial_vector): self.initial_state}
         self.upper_bound = upper_bound
 
     @staticmethod
@@ -435,7 +426,7 @@ class Parikh(BaseStructure):
             if hashed_next_vector in self.parikh_vectors:
                 next_state = self.parikh_vectors[hashed_next_vector]
             else:
-                next_state = self.create_state().state_id
+                next_state = self.create_state()
                 self.state_info[next_state]["parikh_vector"] = next_vector
                 self.parikh_vectors[hashed_next_vector] = next_state
 

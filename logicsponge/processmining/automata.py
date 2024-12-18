@@ -6,12 +6,6 @@ from logicsponge.processmining.config import update_config
 from logicsponge.processmining.types import ActivityName, Event, ProbDistr, StateId
 
 
-class State:
-    def __init__(self, state_id: StateId = 0, name: str = "state") -> None:
-        self.state_id = state_id
-        self.name = name
-
-
 class Automaton:
     name: str
     state_info: dict[StateId, Any]
@@ -38,20 +32,19 @@ class Automaton:
     def set_initial_state(self, state_id: StateId) -> None:
         self.initial_state = state_id
 
-    def create_state(self, state_id: StateId | None = None) -> State:
+    def create_state(self, state_id: StateId | None = None) -> StateId:
         """
         Creates and initializes a new state with the given name and state ID.
         If no state ID is provided, ID is assigned based on current number of states.
         """
         if state_id is None:
             state_id = len(self.state_info)
-        new_state = State(state_id=state_id)
 
-        self.state_info[state_id] = {"object": new_state}
+        self.state_info[state_id] = {}
 
         self.transitions[state_id] = {}
 
-        return new_state
+        return state_id
 
     def create_states(self, n_states: int) -> None:
         for _ in range(n_states):
