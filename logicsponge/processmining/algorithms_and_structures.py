@@ -104,6 +104,7 @@ class BaseStructure(PDFA, ABC):
         self.state_info[state_id]["total_visits"] = 0
         self.state_info[state_id]["active_visits"] = 0
         self.state_info[state_id]["activity_frequency"] = {}
+        self.state_info[state_id]["time_delays"] = {}
         self.state_info[state_id]["access_string"] = None
         self.state_info[state_id]["level"] = None
 
@@ -181,6 +182,7 @@ class FrequencyPrefixTree(BaseStructure):
             next_state = self.transitions[current_state][activity]
         else:
             self.state_info[current_state]["activity_frequency"][activity] = 0
+            self.state_info[current_state]["time_delays"][activity] = []
             next_state = self.create_state()
             self.transitions[current_state][activity] = next_state
             access_string = self.state_info[current_state]["access_string"] + (activity,)
@@ -240,6 +242,7 @@ class NGram(BaseStructure):
                 self.state_info[next_state]["level"] = self.state_info[current_state]["level"] + 1
                 self.transitions[current_state][activity] = next_state
                 self.state_info[current_state]["activity_frequency"][activity] = 0
+                self.state_info[current_state]["time_delays"][activity] = []
 
                 current_state = next_state
 
@@ -280,6 +283,7 @@ class NGram(BaseStructure):
 
             self.transitions[current_state][activity] = next_state
             self.state_info[current_state]["activity_frequency"][activity] = 0
+            self.state_info[current_state]["time_delays"][activity] = []
 
         self.case_info[case_id]["state"] = next_state
         self.state_info[next_state]["total_visits"] += 1

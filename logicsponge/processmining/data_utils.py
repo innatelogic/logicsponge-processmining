@@ -3,7 +3,7 @@ import logging
 import os
 import random
 import shutil
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Iterator
 from typing import Any, cast
 
@@ -70,30 +70,35 @@ def add_input_symbols(data: list[list[Event]], inp: str) -> list[list[tuple[str,
 def add_start_to_sequences(data: list[list[Event]], start_symbol: ActivityName) -> list[list[Event]]:
     """
     Prepends a start event with the case_id of the first event in each sequence.
-    Assumes that each sequence in `data` is non-empty.
+    Assumes that each sequence in data is non-empty.
     """
+    if not all(seq for seq in data):
+        msg = "All sequences in data must be non-empty."
+        raise ValueError(msg)
+
     return [[{"case_id": seq[0]["case_id"], "activity": start_symbol}, *seq] for seq in data]
 
 
 def add_stop_to_sequences(data: list[list[Event]], stop_symbol: ActivityName) -> list[list[Event]]:
     """
     Appends a stop event with the case_id of the first event in each sequence.
-    Assumes that each sequence in `data` is non-empty.
+    Assumes that each sequence in data is non-empty.
     """
+    if not all(seq for seq in data):
+        msg = "All sequences in data must be non-empty."
+        raise ValueError(msg)
+
     return [[*seq, {"case_id": seq[0]["case_id"], "activity": stop_symbol}] for seq in data]
 
 
 def transform_to_seqs(data: Iterator[Event]) -> list[list[Event]]:
     """
-    Transforms list of tuples (case_id, activity) into list of sequences.
+    Transforms list of tuples (case_id, activity) into list of sequences grouped by case_id.
     """
-    grouped_data = {}
-    for event in data:
-        case_id = event["case_id"]
+    grouped_data = defaultdict(list)
 
-        if case_id not in grouped_data:
-            grouped_data[case_id] = []
-        grouped_data[case_id].append(event)
+    for event in data:
+        grouped_data[event["case_id"]].append(event)
 
     return list(grouped_data.values())
 

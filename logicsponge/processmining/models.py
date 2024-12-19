@@ -525,7 +525,6 @@ class Relativize(MultiMiner):
 class Alergia(BasicMiner):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.current_state = self.initial_state
 
     @staticmethod
     def get_probability_distribution(state: Any) -> ProbDistr:
@@ -563,10 +562,6 @@ class Alergia(BasicMiner):
         # Get probability distribution for the current state
         return self.get_probability_distribution(self.algorithm.current_state)
 
-    def step(self, activity):
-        self.algorithm.step_to("in", activity)
-        self.current_state = self.algorithm.current_state
-
     def next_state(self, current_state, activity):
         self.algorithm.current_state = current_state
         self.algorithm.step_to("in", activity)
@@ -588,24 +583,16 @@ class NeuralNetworkMiner(StreamingMiner):
         self.optimizer = optimizer
         self.criterion = criterion
 
-        self.sequences: OrderedDict[CaseId, list[ActivityName]] = (
-            OrderedDict()
-        )  # Ordered dictionary to maintain insertion order
+        self.sequences: OrderedDict[CaseId, list[int]] = OrderedDict()  # Ordered dictionary to maintain insertion order
         self.rr_index = 0  # Keeps track of the round-robin index
         self.batch_size = batch_size
 
         self.activity_index = {}
         self.index_activity = {}
 
-    def get_sequences(self):
+    def get_sequence(self, case_id: CaseId) -> list[int]:
         """
-        Return all sequences stored in the state.
-        """
-        return self.sequences
-
-    def get_sequence(self, case_id: CaseId) -> list[ActivityName]:
-        """
-        Return the sequence for a specific case_id.
+        Return the index sequence for a specific case_id.
         """
         return self.sequences.get(case_id, [])
 
@@ -676,7 +663,7 @@ class NeuralNetworkMiner(StreamingMiner):
 
         return loss.item()
 
-    def select_batch(self, case_id: CaseId) -> list[list[ActivityName]]:
+    def select_batch(self, case_id: CaseId) -> list[list[int]]:
         """
         Select a batch of sequences, using a round-robin approach.
         Only select sequences that have at least two tokens (input + target).
@@ -754,7 +741,7 @@ class NeuralNetworkMiner(StreamingMiner):
 
         return self.idx_sequence_probs(index_sequence)
 
-    def idx_sequence_probs(self, index_sequence: list[ActivityName]) -> ProbDistr:
+    def idx_sequence_probs(self, index_sequence: list[int]) -> ProbDistr:
         """
         Predict the next activity for a given sequence of activity indices.
         """
@@ -784,7 +771,7 @@ class NeuralNetworkMiner(StreamingMiner):
         }
 
     def next_state(self, *args, **kwargs):
-        pass  # Or return None, depending on your base class interface
+        pass
 
     def state_probs(self, state: ComposedState | None) -> ProbDistr:  # noqa: ARG002
         return {}

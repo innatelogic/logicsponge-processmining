@@ -184,14 +184,14 @@ lstm = StreamingActivityPredictor(
 models = [
     "fpt",
     "bag",
-    "ngram_1",
-    "ngram_2",
+    # "ngram_1",
+    # "ngram_2",
     "ngram_3",
     "ngram_4",
     "ngram_5",
-    "ngram_6",
-    "ngram_7",
-    "ngram_8",
+    # "ngram_6",
+    # "ngram_7",
+    # "ngram_8",
     "fallback",
     "hard_voting",
     "soft_voting",
@@ -220,14 +220,14 @@ sponge = (
     * (
         (fpt * DataItemFilter(data_item_filter=start_filter) * Evaluation("fpt"))
         | (bag * DataItemFilter(data_item_filter=start_filter) * Evaluation("bag"))
-        | (ngram_1 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_1"))
-        | (ngram_2 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_2"))
+        # | (ngram_1 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_1"))
+        # | (ngram_2 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_2"))
         | (ngram_3 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_3"))
         | (ngram_4 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_4"))
         | (ngram_5 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_5"))
-        | (ngram_6 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_6"))
-        | (ngram_7 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_7"))
-        | (ngram_8 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_8"))
+        # | (ngram_6 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_6"))
+        # | (ngram_7 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_7"))
+        # | (ngram_8 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_8"))
         | (fallback * DataItemFilter(data_item_filter=start_filter) * Evaluation("fallback"))
         | (hard_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("hard_voting"))
         | (soft_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("soft_voting"))

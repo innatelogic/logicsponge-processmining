@@ -125,6 +125,7 @@ data_collection = {
         "target_filename": "Sepsis_Cases.csv",
         "case_keys": ["case:concept:name"],
         "activity_keys": ["concept:name"],
+        "timestamp": None,
         "delimiter": ",",
         "dtypes": None,
     },

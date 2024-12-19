@@ -55,7 +55,7 @@ torch.cuda.manual_seed(123)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-NN_training = False
+NN_training = True
 
 
 # ============================================================
@@ -110,6 +110,7 @@ for iteration in range(n_iterations):
     # ============================================================
     # Data Splitting
     # ============================================================
+
     train_set_transformed, remainder = split_sequence_data(data, 0.3, random_shuffle=True, seed=iteration)
     val_set_transformed, test_set_transformed = split_sequence_data(remainder, 0.5, random_shuffle=True, seed=iteration)
 
