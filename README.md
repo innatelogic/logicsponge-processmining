@@ -3,6 +3,7 @@
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
 [![static analysis workflow](https://github.com/innatelogic/logicsponge-processmining/actions/workflows/static-analysis.yaml/badge.svg)](https://github.com/innatelogic/logicsponge-processmining/actions/workflows/static-analysis.yaml/)
 
+
 **logicsponge-processmining** is a library for process-mining tasks that is built on **logicsponge-core**. Process mining involves a set of tools for modeling, analyzing, and improving business processes.
 
 # In a nutshell
