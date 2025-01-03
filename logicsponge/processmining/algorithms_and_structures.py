@@ -1,15 +1,20 @@
+import copy
 import logging
 from abc import ABC, abstractmethod
 from collections import deque
+from datetime import timedelta
 from typing import Any
 
 from logicsponge.processmining.automata import PDFA
 from logicsponge.processmining.types import (
+    ActivityDelays,
     ActivityName,
     CaseId,
     Event,
+    Metrics,
     ProbDistr,
     StateId,
+    empty_metrics,
 )
 
 logger = logging.getLogger(__name__)
@@ -40,12 +45,47 @@ class BaseStructure(PDFA, ABC):
     def states(self) -> list[StateId]:
         return list(self.state_info.keys())
 
+    def create_state(self, state_id: StateId | None = None) -> StateId:
+        """
+        Overwrites Automata method.
+        Creates and initializes a new state with the given name and state ID.
+        If no state ID is provided, ID is assigned based on current number of states.
+        """
+        if state_id is None:
+            state_id = len(self.state_info)
+
+        self.state_info[state_id] = {}
+        self.state_info[state_id]["total_visits"] = 0
+        self.state_info[state_id]["active_visits"] = 0
+        self.state_info[state_id]["activity_frequency"] = {}
+        self.state_info[state_id]["time_info"] = {
+            "delays": {},  # list of delays (as deque of floats in seconds) for every activity
+            "rolling_sum": {},  # sum of delays for every activity
+            "predicted_delay": {},  # predicted delay for every activity (currently based on mean of delays)
+        }
+        self.state_info[state_id]["access_string"] = None
+        self.state_info[state_id]["level"] = None
+        self.transitions[state_id] = {}
+
+        return state_id
+
     def initialize_case(self, case_id: CaseId):
         self.case_info[case_id] = {}
         self.case_info[case_id]["state"] = self.initial_state
         self.case_info[case_id]["last_timestamp"] = None
         self.state_info[self.initial_state]["total_visits"] += 1
         self.state_info[self.initial_state]["active_visits"] += 1
+
+    def initialize_activity(self, state_id: StateId, activity: ActivityName) -> None:
+        """
+        Initializes activity-specific information for a given state.
+        """
+        # Initialize activity frequency
+        self.state_info[state_id]["activity_frequency"][activity] = 0
+
+        # Initialize timing information
+        self.state_info[state_id]["time_info"]["delays"][activity] = deque(maxlen=self.config.get("maxlen_delays", 500))
+        self.state_info[state_id]["time_info"]["rolling_sum"][activity] = 0
 
     def parse_sequence(self, sequence: list[Event]) -> StateId | None:
         current_state = self.initial_state
@@ -91,26 +131,14 @@ class BaseStructure(PDFA, ABC):
 
         return probs
 
-    def create_state(self, state_id: StateId | None = None) -> StateId:
+    def get_predicted_delays(self, state: StateId) -> ActivityDelays:
+        return copy.deepcopy(self.state_info[state]["time_info"]["predicted_delay"])
+
+    def get_metrics(self, state: StateId) -> Metrics:
         """
-        Overwrites Automata method.
-        Creates and initializes a new state with the given name and state ID.
-        If no state ID is provided, ID is assigned based on current number of states.
+        Combines probabilities and delays for a given state into a single metrics dictionary.
         """
-        if state_id is None:
-            state_id = len(self.state_info)
-
-        self.state_info[state_id] = {}
-        self.state_info[state_id]["total_visits"] = 0
-        self.state_info[state_id]["active_visits"] = 0
-        self.state_info[state_id]["activity_frequency"] = {}
-        self.state_info[state_id]["time_delays"] = {}
-        self.state_info[state_id]["access_string"] = None
-        self.state_info[state_id]["level"] = None
-
-        self.transitions[state_id] = {}
-
-        return state_id
+        return Metrics(probs=self.get_probabilities(state), predicted_delays=self.get_predicted_delays(state))
 
     @abstractmethod
     def update(self, event: Event) -> None:
@@ -124,31 +152,75 @@ class BaseStructure(PDFA, ABC):
 
         return self.transitions[state][activity]
 
-    def state_probs(self, state: StateId | None) -> ProbDistr:
+    def update_info(self, event: Event, current_state: StateId, next_state: StateId):
         """
-        Returns probabilities based on state.
+        Updates state and timing information for a given transition.
+        """
+        case_id = event["case_id"]
+        activity = event["activity"]
+        timestamp = event["timestamp"]
+
+        # Update state information
+        self.case_info[case_id]["state"] = next_state
+        self.state_info[next_state]["total_visits"] += 1
+        self.state_info[current_state]["activity_frequency"][activity] += 1
+        self.state_info[current_state]["active_visits"] -= 1
+        self.state_info[next_state]["active_visits"] += 1
+
+        self.last_transition = (current_state, activity, next_state)  # for visualization
+
+        # Update timing information
+        if self.config["include_time"]:
+            last_timestamp = self.case_info[case_id].get("last_timestamp")
+
+            if timestamp and last_timestamp:
+                delay = (timestamp - last_timestamp).total_seconds()  # Convert timedelta to seconds
+                time_info = self.state_info[current_state]["time_info"]
+
+                # Cache dictionary lookups
+                activity_delays = time_info["delays"][activity]
+                activity_sum = time_info["rolling_sum"][activity]
+
+                # Append delay to the deque and manage rolling sum
+                if len(activity_delays) == activity_delays.maxlen:
+                    activity_sum -= activity_delays[0]
+
+                activity_delays.append(delay)
+                activity_sum += delay
+
+                # Update back into the dictionary
+                time_info["rolling_sum"][activity] = activity_sum
+                time_info["predicted_delay"][activity] = timedelta(seconds=activity_sum / len(activity_delays))
+
+            # Update the last timestamp
+            if timestamp:
+                self.case_info[case_id]["last_timestamp"] = timestamp
+
+    def state_metrics(self, state: StateId | None) -> Metrics:
+        """
+        Returns metrics based on state.
         """
         # Return {} if the current state is invalid or has insufficient visits
         if state is None or self.state_info.get(state, {}).get("total_visits", 0) < self.min_total_visits:
-            return {}
+            return empty_metrics()
 
-        return self.get_probabilities(state)
+        return self.get_metrics(state)
 
-    def case_probs(self, case_id: CaseId) -> ProbDistr:
+    def case_metrics(self, case_id: CaseId) -> Metrics:
         """
-        Returns probabilities based on case.
+        Returns metrics based on case.
         """
         state = self.initial_state if case_id not in self.case_info else self.case_info[case_id].get("state", None)
 
-        return self.state_probs(state)
+        return self.state_metrics(state)
 
-    def sequence_probs(self, sequence: list[Event]) -> ProbDistr:
+    def sequence_metrics(self, sequence: list[Event]) -> Metrics:
         """
         Returns probabilities based on sequence of events.
         """
         state = self.parse_sequence(sequence)
 
-        return self.state_probs(state)
+        return self.state_metrics(state)
 
 
 # ============================================================
@@ -159,7 +231,7 @@ class BaseStructure(PDFA, ABC):
 class FrequencyPrefixTree(BaseStructure):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.last_transition = None  # for visualization of frequency prefex tree
+        self.last_transition = None  # for visualization of frequency prefix tree
 
     def update(self, event: Event) -> None:
         """
@@ -181,20 +253,13 @@ class FrequencyPrefixTree(BaseStructure):
         if activity in self.transitions[current_state]:
             next_state = self.transitions[current_state][activity]
         else:
-            self.state_info[current_state]["activity_frequency"][activity] = 0
-            self.state_info[current_state]["time_delays"][activity] = []
+            self.initialize_activity(current_state, activity)
             next_state = self.create_state()
             self.transitions[current_state][activity] = next_state
             access_string = self.state_info[current_state]["access_string"] + (activity,)
             self.state_info[next_state]["access_string"] = access_string
 
-        self.case_info[case_id]["state"] = next_state
-        self.state_info[next_state]["total_visits"] += 1
-        self.state_info[current_state]["activity_frequency"][activity] += 1
-        self.state_info[current_state]["active_visits"] -= 1
-        self.state_info[next_state]["active_visits"] += 1
-
-        self.last_transition = (current_state, activity, next_state)  # for visualiztion
+        self.update_info(event, current_state, next_state)
 
 
 # ============================================================
@@ -241,8 +306,7 @@ class NGram(BaseStructure):
                 self.access_strings[access_string] = next_state
                 self.state_info[next_state]["level"] = self.state_info[current_state]["level"] + 1
                 self.transitions[current_state][activity] = next_state
-                self.state_info[current_state]["activity_frequency"][activity] = 0
-                self.state_info[current_state]["time_delays"][activity] = []
+                self.initialize_activity(current_state, activity)
 
                 current_state = next_state
 
@@ -263,7 +327,7 @@ class NGram(BaseStructure):
 
         current_state = self.case_info[case_id]["state"]
         current_state_level = self.state_info[current_state]["level"]
-        # self.case_info[case_id]["suffix"] equals self.state_info[current_state]["access_string"]
+        # Note: self.case_info[case_id]["suffix"] equals self.state_info[current_state]["access_string"]
         self.case_info[case_id]["suffix"].append(activity)
 
         if current_state not in self.transitions:
@@ -282,20 +346,13 @@ class NGram(BaseStructure):
                 next_state = self.follow_path(self.case_info[case_id]["suffix"])
 
             self.transitions[current_state][activity] = next_state
-            self.state_info[current_state]["activity_frequency"][activity] = 0
-            self.state_info[current_state]["time_delays"][activity] = []
+            self.initialize_activity(current_state, activity)
 
-        self.case_info[case_id]["state"] = next_state
-        self.state_info[next_state]["total_visits"] += 1
-        self.state_info[current_state]["activity_frequency"][activity] += 1
-        self.state_info[current_state]["active_visits"] -= 1
-        self.state_info[next_state]["active_visits"] += 1
-
-        self.last_transition = (current_state, activity, next_state)
+        self.update_info(event, current_state, next_state)
 
     def next_state(self, state: StateId | None, activity: ActivityName) -> StateId | None:
         """
-        Overwrites next_state from superclass to implement backtracking.
+        Overwrites next_state from superclass to implement backoff (backtracking).
         """
         if state is None:
             return None
@@ -351,7 +408,7 @@ class Bag(BaseStructure):
         if activity in self.transitions[current_state]:
             next_state = self.transitions[current_state][activity]
         else:
-            self.state_info[current_state]["activity_frequency"][activity] = 0
+            self.initialize_activity(current_state, activity)
 
             current_set = self.state_info[current_state]["activity_set"]
             next_set = current_set.union({activity})
@@ -364,13 +421,7 @@ class Bag(BaseStructure):
 
             self.transitions[current_state][activity] = next_state
 
-        self.case_info[case_id]["state"] = next_state
-        self.state_info[next_state]["total_visits"] += 1
-        self.state_info[current_state]["activity_frequency"][activity] += 1
-        self.state_info[current_state]["active_visits"] -= 1
-        self.state_info[next_state]["active_visits"] += 1
-
-        self.last_transition = (current_state, activity, next_state)
+        self.update_info(event, current_state, next_state)
 
 
 # ============================================================
@@ -412,7 +463,7 @@ class Parikh(BaseStructure):
         if activity in self.transitions[current_state]:
             next_state = self.transitions[current_state][activity]
         else:
-            self.state_info[current_state]["activity_frequency"][activity] = 0
+            self.initialize_activity(current_state, activity)
 
             current_vector = self.state_info[current_state]["parikh_vector"]
             next_vector = current_vector.copy()
@@ -436,10 +487,4 @@ class Parikh(BaseStructure):
 
             self.transitions[current_state][activity] = next_state
 
-        self.case_info[case_id]["state"] = next_state
-        self.state_info[next_state]["total_visits"] += 1
-        self.state_info[current_state]["activity_frequency"][activity] += 1
-        self.state_info[current_state]["active_visits"] -= 1
-        self.state_info[next_state]["active_visits"] += 1
-
-        self.last_transition = (current_state, activity, next_state)
+        self.update_info(event, current_state, next_state)

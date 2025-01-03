@@ -2,6 +2,7 @@ import logging
 import random
 from abc import ABC, abstractmethod
 from collections import Counter, OrderedDict
+from datetime import timedelta
 from typing import Any
 
 import matplotlib as mpl
@@ -13,12 +14,15 @@ from logicsponge.processmining.config import update_config
 from logicsponge.processmining.data_utils import add_input_symbols_sequence
 from logicsponge.processmining.neural_networks import LSTMModel, RNNModel
 from logicsponge.processmining.types import (
+    ActivityDelays,
     ActivityName,
     CaseId,
     ComposedState,
     Event,
+    Metrics,
     Prediction,
     ProbDistr,
+    empty_metrics,
 )
 from logicsponge.processmining.utils import probs_prediction
 
@@ -95,11 +99,11 @@ class StreamingMiner(ABC):
 
                 if mode == "incremental":
                     # Prediction for incremental mode (step by step)
-                    probs = self.state_probs(current_state)
+                    probs = self.state_metrics(current_state)["probs"]
                     prediction = probs_prediction(probs, config=self.config)
                 else:
                     # Prediction for sequence mode (whole sequence)
-                    probs = self.sequence_probs(sequence[:i])
+                    probs = self.sequence_metrics(sequence[:i])["probs"]
                     prediction = probs_prediction(probs, config=self.config)
 
                 # Update statistics based on the prediction
@@ -108,6 +112,12 @@ class StreamingMiner(ABC):
                 # Move to the next state
                 if i < len(sequence) - 1:
                     current_state = self.next_state(current_state, actual_next_activity)
+
+    @abstractmethod
+    def propagate_config(self) -> None:
+        """
+        Recursively propagates the config to all nested models.
+        """
 
     @abstractmethod
     def update(self, event: Event) -> None:
@@ -122,21 +132,21 @@ class StreamingMiner(ABC):
         """
 
     @abstractmethod
-    def state_probs(self, state: ComposedState | None) -> ProbDistr:
+    def state_metrics(self, state: ComposedState | None) -> Metrics:
         """
-        Returns probability dictionary based on state.
-        """
-
-    @abstractmethod
-    def case_probs(self, case_id: CaseId) -> ProbDistr:
-        """
-        Returns probability dictionary based on case.
+        Returns metrics dictionary based on state.
         """
 
     @abstractmethod
-    def sequence_probs(self, sequence: list[Event]) -> ProbDistr:
+    def case_metrics(self, case_id: CaseId) -> Metrics:
         """
-        Returns probability dictionary based on sequence.
+        Returns metrics dictionary based on case.
+        """
+
+    @abstractmethod
+    def sequence_metrics(self, sequence: list[Event]) -> Metrics:
+        """
+        Returns metrics dictionary based on sequence.
         """
 
 
@@ -154,7 +164,16 @@ class BasicMiner(StreamingMiner):
             msg = "An algorithm must be specified."
             raise ValueError(msg)
 
+        # Propagate self.config to the algorithm
+        self.propagate_config()
+
         self.initial_state = self.algorithm.initial_state
+
+    def propagate_config(self) -> None:
+        """
+        Recursively propagates the config to all nested models.
+        """
+        self.algorithm.config = self.config
 
     def update(self, event: Event) -> None:
         self.algorithm.update(event)
@@ -162,14 +181,14 @@ class BasicMiner(StreamingMiner):
     def next_state(self, current_state: ComposedState | None, activity: ActivityName) -> ComposedState | None:
         return self.algorithm.next_state(current_state, activity)
 
-    def state_probs(self, state: ComposedState | None) -> ProbDistr:
-        return self.algorithm.state_probs(state)
+    def state_metrics(self, state: ComposedState | None) -> Metrics:
+        return self.algorithm.state_metrics(state)
 
-    def case_probs(self, case_id: CaseId) -> ProbDistr:
-        return self.algorithm.case_probs(case_id)
+    def case_metrics(self, case_id: CaseId) -> Metrics:
+        return self.algorithm.case_metrics(case_id)
 
-    def sequence_probs(self, sequence: list[Event]) -> ProbDistr:
-        return self.algorithm.sequence_probs(sequence)
+    def sequence_metrics(self, sequence: list[Event]) -> Metrics:
+        return self.algorithm.sequence_metrics(sequence)
 
 
 # ============================================================
@@ -178,11 +197,56 @@ class BasicMiner(StreamingMiner):
 
 
 class MultiMiner(StreamingMiner, ABC):
-    def __init__(self, *args, models: list[StreamingMiner], **kwargs) -> None:
+    def __init__(self, *args, models: list[StreamingMiner], delay_weights: list[float] | None = None, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.models = models
 
+        self.propagate_config()
+
         self.initial_state = tuple(model.initial_state for model in self.models)
+
+        num_models = len(self.models)
+
+        if delay_weights is not None:
+            if len(delay_weights) != num_models or any(w < 0 for w in delay_weights):
+                msg = "Delay weights do not meet specification."
+                raise ValueError(msg)
+        else:
+            delay_weights = [1.0] * num_models  # Default to uniform weights
+
+        self.delay_weights = delay_weights
+
+    def propagate_config(self) -> None:
+        """
+        Recursively propagates the config to all nested models.
+        """
+        for model in self.models:
+            model.config = self.config
+            model.propagate_config()
+
+    def voting_delays(self, delays_list: list[ActivityDelays]) -> ActivityDelays:
+        combined_delays = {}
+        weight_sums = {}
+
+        # Accumulate weighted delays
+        for predicted_delays, weight in zip(delays_list, self.delay_weights, strict=True):
+            for activity, delay in predicted_delays.items():
+                if activity not in combined_delays:
+                    combined_delays[activity] = timedelta(0)  # Initialize as timedelta
+                    weight_sums[activity] = 0.0
+                combined_delays[activity] += delay * weight
+                weight_sums[activity] += weight
+
+        # If there are no activities, return an empty dictionary
+        if not combined_delays:
+            return {}
+
+        # Compute the weighted average delay for each activity
+        return {
+            activity: combined_delays[activity] / weight_sums[activity]
+            for activity in combined_delays
+            if weight_sums[activity] > 0
+        }
 
     def update(self, event: Event) -> None:
         for model in self.models:
@@ -206,7 +270,7 @@ class MultiMiner(StreamingMiner, ABC):
 
 
 # ============================================================
-# Ensemble Methods Derived from Multi Streaming Miner
+# Ensemble Methods Derived from MultiMiner
 # ============================================================
 
 
@@ -259,48 +323,76 @@ class HardVoting(MultiMiner):
         # Create a result dictionary with only the selected activity
         return {self.config["stop_symbol"]: 0.0, selected_activity: 1.0}  # include STOP as an invariant
 
-    def state_probs(self, state: ComposedState | None) -> ProbDistr:
+    def state_metrics(self, state: ComposedState | None) -> Metrics:
         """
         Return the majority vote.
         """
         if state is None:
-            return {}
+            return empty_metrics()
 
-        probs_list = [model.state_probs(model_state) for model, model_state in zip(self.models, state, strict=True)]
+        probs_list = [
+            model.state_metrics(model_state)["probs"] for model, model_state in zip(self.models, state, strict=True)
+        ]
+        delays_list = [
+            model.state_metrics(model_state)["predicted_delays"]
+            for model, model_state in zip(self.models, state, strict=True)
+        ]
 
-        return self.voting_probs(probs_list)
+        return Metrics(
+            probs=self.voting_probs(probs_list),
+            predicted_delays=self.voting_delays(delays_list),
+        )
 
-    def case_probs(self, case_id: CaseId) -> ProbDistr:
+    def case_metrics(self, case_id: CaseId) -> Metrics:
         """
         Return the hard voting of predictions from the ensemble.
         """
-        probs_list = [model.case_probs(case_id) for model in self.models]
+        probs_list = [model.case_metrics(case_id)["probs"] for model in self.models]
+        delays_list = [model.case_metrics(case_id)["predicted_delays"] for model in self.models]
 
-        return self.voting_probs(probs_list)
+        return Metrics(
+            probs=self.voting_probs(probs_list),
+            predicted_delays=self.voting_delays(delays_list),
+        )
 
-    def sequence_probs(self, sequence: list[Event]) -> ProbDistr:
+    def sequence_metrics(self, sequence: list[Event]) -> Metrics:
         """
         Return the majority vote.
         """
-        probs_list = [model.sequence_probs(sequence) for model in self.models]
+        probs_list = [model.sequence_metrics(sequence)["probs"] for model in self.models]
+        delays_list = [model.sequence_metrics(sequence)["predicted_delays"] for model in self.models]
 
-        return self.voting_probs(probs_list)
+        return Metrics(
+            probs=self.voting_probs(probs_list),
+            predicted_delays=self.voting_delays(delays_list),
+        )
 
 
 class SoftVoting(MultiMiner):
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args, prob_weights: list[float] | None = None, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
-    @staticmethod
-    def voting_probs(probs_list: list[ProbDistr]) -> ProbDistr:
+        # Validate the lengths of the weights if provided
+        num_models = len(self.models)
+
+        if prob_weights is not None:
+            if len(prob_weights) != num_models or any(w < 0 for w in prob_weights):
+                msg = "Probability weights do not meet specification."
+                raise ValueError(msg)
+        else:
+            prob_weights = [1.0] * num_models  # Default to uniform weights
+
+        self.prob_weights = prob_weights
+
+    def voting_probs(self, probs_list: list[ProbDistr]) -> ProbDistr:
         combined_probs = {}
 
-        # Iterate over all probability dictionaries and accumulate the probabilities for each activity
-        for prob_dict in probs_list:
+        # Accumulate weighted probabilities
+        for prob_dict, weight in zip(probs_list, self.prob_weights, strict=True):
             for activity, prob in prob_dict.items():
                 if activity not in combined_probs:
                     combined_probs[activity] = 0.0
-                combined_probs[activity] += prob
+                combined_probs[activity] += weight * prob
 
         # If there are no activities, return an empty dictionary
         if not combined_probs:
@@ -308,40 +400,54 @@ class SoftVoting(MultiMiner):
 
         # Normalize the combined probabilities so that they sum to 1
         total_prob = sum(combined_probs.values())
-
-        # Ensure we do not divide by zero
         if total_prob > 0:
             combined_probs = {activity: prob / total_prob for activity, prob in combined_probs.items()}
 
-        # Return the normalized probability dictionary
         return combined_probs
 
-    def state_probs(self, state: ComposedState | None) -> ProbDistr:
+    def state_metrics(self, state: ComposedState | None) -> Metrics:
         """
         Return the majority vote.
         """
         if state is None:
-            return {}
+            return empty_metrics()
 
-        probs_list = [model.state_probs(model_state) for model, model_state in zip(self.models, state, strict=True)]
+        probs_list = [
+            model.state_metrics(model_state)["probs"] for model, model_state in zip(self.models, state, strict=True)
+        ]
+        delays_list = [
+            model.state_metrics(model_state)["predicted_delays"]
+            for model, model_state in zip(self.models, state, strict=True)
+        ]
 
-        return self.voting_probs(probs_list)
+        return Metrics(
+            probs=self.voting_probs(probs_list),
+            predicted_delays=self.voting_delays(delays_list),
+        )
 
-    def case_probs(self, case_id: CaseId) -> ProbDistr:
+    def case_metrics(self, case_id: CaseId) -> Metrics:
         """
         Return the hard voting of predictions from the ensemble.
         """
-        probs_list = [model.case_probs(case_id) for model in self.models]
+        probs_list = [model.case_metrics(case_id)["probs"] for model in self.models]
+        delays_list = [model.case_metrics(case_id)["predicted_delays"] for model in self.models]
 
-        return self.voting_probs(probs_list)
+        return Metrics(
+            probs=self.voting_probs(probs_list),
+            predicted_delays=self.voting_delays(delays_list),
+        )
 
-    def sequence_probs(self, sequence: list[Event]) -> ProbDistr:
+    def sequence_metrics(self, sequence: list[Event]) -> Metrics:
         """
         Return the majority vote.
         """
-        probs_list = [model.sequence_probs(sequence) for model in self.models]
+        probs_list = [model.sequence_metrics(sequence)["probs"] for model in self.models]
+        delays_list = [model.sequence_metrics(sequence)["predicted_delays"] for model in self.models]
 
-        return self.voting_probs(probs_list)
+        return Metrics(
+            probs=self.voting_probs(probs_list),
+            predicted_delays=self.voting_delays(delays_list),
+        )
 
 
 class AdaptiveVoting(MultiMiner):
@@ -369,7 +475,7 @@ class AdaptiveVoting(MultiMiner):
         self.total_predictions += 1
 
         for i, model in enumerate(self.models):
-            prediction = probs_prediction(model.case_probs(case_id), config=self.config)
+            prediction = probs_prediction(model.case_metrics(case_id)["probs"], config=self.config)
             if prediction is not None and prediction["activity"] == activity:
                 self.correct_predictions[i] += 1
 
@@ -389,12 +495,12 @@ class AdaptiveVoting(MultiMiner):
         accuracies = self.get_accuracies()
         return accuracies.index(max(accuracies))
 
-    def state_probs(self, state: ComposedState | None) -> ProbDistr:
+    def state_metrics(self, state: ComposedState | None) -> Metrics:
         """
         Return the probability distribution from the model with the best accuracy so far.
         """
         if state is None:
-            return {}
+            return empty_metrics()
 
         # Get the best model
         best_model_index = self.select_best_model()
@@ -402,9 +508,17 @@ class AdaptiveVoting(MultiMiner):
 
         best_model_state = state[best_model_index]
 
-        return best_model.state_probs(best_model_state)
+        delays_list = [
+            model.state_metrics(model_state)["predicted_delays"]
+            for model, model_state in zip(self.models, state, strict=True)
+        ]
 
-    def case_probs(self, case_id: CaseId) -> ProbDistr:
+        return Metrics(
+            probs=best_model.state_metrics(best_model_state)["probs"],
+            predicted_delays=self.voting_delays(delays_list),
+        )
+
+    def case_metrics(self, case_id: CaseId) -> Metrics:
         """
         Return the probability distribution from the model with the best accuracy so far.
         """
@@ -412,9 +526,14 @@ class AdaptiveVoting(MultiMiner):
         best_model_index = self.select_best_model()
         best_model = self.models[best_model_index]
 
-        return best_model.case_probs(case_id)
+        delays_list = [model.case_metrics(case_id)["predicted_delays"] for model in self.models]
 
-    def sequence_probs(self, sequence: list[Event]) -> ProbDistr:
+        return Metrics(
+            probs=best_model.case_metrics(case_id)["probs"],
+            predicted_delays=self.voting_delays(delays_list),
+        )
+
+    def sequence_metrics(self, sequence: list[Event]) -> Metrics:
         """
         Return the probability distribution from the model with the best accuracy so far.
         """
@@ -422,7 +541,12 @@ class AdaptiveVoting(MultiMiner):
         best_model_index = self.select_best_model()
         best_model = self.models[best_model_index]
 
-        return best_model.sequence_probs(sequence)
+        delays_list = [model.sequence_metrics(sequence)["predicted_delays"] for model in self.models]
+
+        return Metrics(
+            probs=best_model.sequence_metrics(sequence)["probs"],
+            predicted_delays=self.voting_delays(delays_list),
+        )
 
 
 # ============================================================
@@ -434,47 +558,67 @@ class Fallback(MultiMiner):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
-    def state_probs(self, state: ComposedState | None) -> ProbDistr:
+    def state_metrics(self, state: ComposedState | None) -> Metrics:
         """
         Return the first non-{} probabilities from the models, cascading through the models in order.
         Each model gets its corresponding state from the ComposedState.
         """
         if state is None:
-            return {}
+            return empty_metrics()
+
+        delays_list = [
+            model.state_metrics(model_state)["predicted_delays"]
+            for model, model_state in zip(self.models, state, strict=True)
+        ]
 
         # Iterate through the models and their corresponding states
         for model, model_state in zip(self.models, state, strict=True):
-            probs = model.state_probs(model_state)
+            probs = model.state_metrics(model_state)["probs"]
             if probs:
-                return probs
+                return Metrics(
+                    probs=probs,
+                    predicted_delays=self.voting_delays(delays_list),
+                )
 
-        # If all models return {}
-        return {}
+        # If all models return empty metrics
+        return empty_metrics()
 
-    def case_probs(self, case_id: CaseId) -> ProbDistr:
+    def case_metrics(self, case_id: CaseId) -> Metrics:
         """
         Return the first non-{} probabilities from the models, cascading through the models in order.
         """
+
+        delays_list = [model.case_metrics(case_id)["predicted_delays"] for model in self.models]
+
         for model in self.models:
-            probs = model.case_probs(case_id)
+            probs = model.case_metrics(case_id)["probs"]
             if probs:
-                return probs
+                return Metrics(
+                    probs=probs,
+                    predicted_delays=self.voting_delays(delays_list),
+                )
 
         # If all models return {}
-        return {}
+        return empty_metrics()
 
-    def sequence_probs(self, sequence: list[Event]) -> ProbDistr:
+    def sequence_metrics(self, sequence: list[Event]) -> Metrics:
         """
         Return the first non-{} probabilities from the models for the given sequence,
         cascading through the models in order.
         """
+
+        delays_list = [model.sequence_metrics(sequence)["predicted_delays"] for model in self.models]
+
         for model in self.models:
-            probs = model.sequence_probs(sequence)
+            probs = model.sequence_metrics(sequence)["probs"]
             if probs:
-                return probs
+                return Metrics(
+                    probs=probs,
+                    predicted_delays=self.voting_delays(delays_list),
+                )
 
         # If all models return {}
-        return {}
+        return empty_metrics()
 
 
 class Relativize(MultiMiner):
@@ -487,34 +631,52 @@ class Relativize(MultiMiner):
         self.model1 = self.models[0]
         self.model2 = self.models[1]
 
-    def state_probs(self, state: ComposedState | None) -> ProbDistr:
+    def state_metrics(self, state: ComposedState | None) -> Metrics:
         if state is None:
-            return {}
+            return empty_metrics()
 
         (state1, state2) = state
 
-        probs = self.model1.state_probs(state1)
+        probs = self.model1.state_metrics(state1)["probs"]
 
         if probs:
-            probs = self.model2.state_probs(state2)
+            probs = self.model2.state_metrics(state2)["probs"]
 
-        return probs
+        delays_list = [
+            model.state_metrics(model_state)["predicted_delays"]
+            for model, model_state in zip(self.models, state, strict=True)
+        ]
 
-    def case_probs(self, case_id: CaseId) -> ProbDistr:
-        probs = self.model1.case_probs(case_id)
+        return Metrics(
+            probs=probs,
+            predicted_delays=self.voting_delays(delays_list),
+        )
+
+    def case_metrics(self, case_id: CaseId) -> Metrics:
+        probs = self.model1.case_metrics(case_id)["probs"]
 
         if probs:
-            probs = self.model2.case_probs(case_id)
+            probs = self.model2.case_metrics(case_id)["probs"]
 
-        return probs
+        delays_list = [model.case_metrics(case_id)["predicted_delays"] for model in self.models]
 
-    def sequence_probs(self, sequence: list[Event]) -> ProbDistr:
-        probs = self.model1.sequence_probs(sequence)
+        return Metrics(
+            probs=probs,
+            predicted_delays=self.voting_delays(delays_list),
+        )
+
+    def sequence_metrics(self, sequence: list[Event]) -> Metrics:
+        probs = self.model1.sequence_metrics(sequence)["probs"]
 
         if probs:
-            probs = self.model2.sequence_probs(sequence)
+            probs = self.model2.sequence_metrics(sequence)["probs"]
 
-        return probs
+        delays_list = [model.sequence_metrics(sequence)["predicted_delays"] for model in self.models]
+
+        return Metrics(
+            probs=probs,
+            predicted_delays=self.voting_delays(delays_list),
+        )
 
 
 # ============================================================
@@ -537,21 +699,24 @@ class Alergia(BasicMiner):
 
         return probability_distribution["in"]
 
-    def case_probs(self, case_id: CaseId) -> ProbDistr:  # noqa: ARG002
-        """
-        This method is not used in this subclass.
-        """
-        return {}
-
     def update(self, event: Event) -> None:
         """
         This method is not used in this subclass.
         """
 
-    def state_probs(self, state: Any) -> ProbDistr:
-        return self.get_probability_distribution(state)
+    def state_metrics(self, state: Any) -> Metrics:
+        return Metrics(
+            probs=self.get_probability_distribution(state),
+            predicted_delays={},
+        )
 
-    def sequence_probs(self, sequence: list[Event]) -> ProbDistr:
+    def case_metrics(self, case_id: CaseId) -> Metrics:  # noqa: ARG002
+        """
+        This method is not used in this subclass.
+        """
+        return empty_metrics()
+
+    def sequence_metrics(self, sequence: list[Event]) -> Metrics:
         transformed_sequence = add_input_symbols_sequence(sequence, "in")
 
         self.algorithm.reset_to_initial()
@@ -560,7 +725,10 @@ class Alergia(BasicMiner):
             self.algorithm.step_to(symbol[0], symbol[1])
 
         # Get probability distribution for the current state
-        return self.get_probability_distribution(self.algorithm.current_state)
+        return Metrics(
+            probs=self.get_probability_distribution(self.algorithm.current_state),
+            predicted_delays={},
+        )
 
     def next_state(self, current_state, activity):
         self.algorithm.current_state = current_state
@@ -706,7 +874,7 @@ class NeuralNetworkMiner(StreamingMiner):
         # Fetch the actual sequences based on the selected case_ids
         return [self.get_sequence(cid) for cid in batch_case_ids]
 
-    def case_probs(self, case_id: CaseId) -> ProbDistr:
+    def case_metrics(self, case_id: CaseId) -> Metrics:
         """
         Predict the next activity for a given case_id and return the top-k most likely activities along with the probability
         of the top activity.
@@ -718,17 +886,20 @@ class NeuralNetworkMiner(StreamingMiner):
         index_sequence = self.get_sequence(case_id)
 
         if not index_sequence or len(index_sequence) < 1:
-            return {}
+            return empty_metrics()
 
-        return self.idx_sequence_probs(index_sequence)
+        return Metrics(
+            probs=self.idx_sequence_probs(index_sequence),
+            predicted_delays={},
+        )
 
-    def sequence_probs(self, sequence: list[Event]) -> ProbDistr:
+    def sequence_metrics(self, sequence: list[Event]) -> Metrics:
         """
         Predict the next activity for a given sequence of activities and return the top-k most likely activities along with the
         probability of the top activity.
         """
         if not sequence or len(sequence) < 1:
-            return {}
+            return empty_metrics()
 
         # Convert each activity name to its corresponding index, return None if any activity is unknown
         index_sequence = []
@@ -736,10 +907,13 @@ class NeuralNetworkMiner(StreamingMiner):
             activity = event["activity"]
             activity_idx = self.activity_index.get(activity)
             if activity_idx is None:
-                return {}  # Return None if the activity is not found in the index
+                return empty_metrics()
             index_sequence.append(activity_idx)
 
-        return self.idx_sequence_probs(index_sequence)
+        return Metrics(
+            probs=self.idx_sequence_probs(index_sequence),
+            predicted_delays={},
+        )
 
     def idx_sequence_probs(self, index_sequence: list[int]) -> ProbDistr:
         """
@@ -773,5 +947,8 @@ class NeuralNetworkMiner(StreamingMiner):
     def next_state(self, *args, **kwargs):
         pass
 
-    def state_probs(self, state: ComposedState | None) -> ProbDistr:  # noqa: ARG002
-        return {}
+    def propagate_config(self) -> None:
+        pass
+
+    def state_metrics(self, state: ComposedState | None) -> Metrics:  # noqa: ARG002
+        return empty_metrics()

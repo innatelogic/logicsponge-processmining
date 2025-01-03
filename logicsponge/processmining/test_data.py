@@ -1,6 +1,8 @@
+import logging
 import os
 from collections import defaultdict
 from collections.abc import Iterator
+from datetime import datetime
 from typing import Any
 
 import pandas as pd
@@ -9,6 +11,8 @@ from logicsponge.processmining.automata import PDFA
 from logicsponge.processmining.config import DEFAULT_CONFIG
 from logicsponge.processmining.data_utils import FileHandler, handle_keys, interleave_sequences
 from logicsponge.processmining.types import Event
+
+logger = logging.getLogger(__name__)
 
 FOLDERNAME = "data"
 file_handler = FileHandler(folder=FOLDERNAME)
@@ -60,6 +64,7 @@ data_collection = {
         "target_filename": "BPI_Challenge_2012.csv",
         "case_keys": ["case:concept:name"],
         "activity_keys": ["concept:name"],
+        "timestamp": "time:timestamp",
         "delimiter": ",",
         "dtypes": None,
     },
@@ -71,6 +76,7 @@ data_collection = {
         "target_foldername": "data",
         "case_keys": ["case:concept:name"],
         "activity_keys": ["lifecycle:transition"],
+        "timestamp": "time:timestamp",
         "delimiter": ",",
         "dtypes": None,
     },
@@ -94,6 +100,7 @@ data_collection = {
         "target_foldername": "data",
         "case_keys": ["case:concept:name"],
         "activity_keys": ["concept:name"],
+        "timestamp": "time:timestamp",
         "delimiter": ",",
         "dtypes": None,
     },
@@ -105,6 +112,7 @@ data_collection = {
         "target_foldername": "data",
         "case_keys": ["case:concept:name"],
         "activity_keys": ["concept:name"],
+        "timestamp": "time:timestamp",
         "delimiter": ",",
         "dtypes": None,
     },
@@ -115,6 +123,7 @@ data_collection = {
         "target_filename": "BPI_Challenge_2019.csv",
         "case_keys": ["case:Purchasing Document", "case:Item"],
         "activity_keys": ["concept:name"],
+        "timestamp": "time:timestamp",
         "delimiter": ",",
         "dtypes": None,
     },
@@ -125,7 +134,7 @@ data_collection = {
         "target_filename": "Sepsis_Cases.csv",
         "case_keys": ["case:concept:name"],
         "activity_keys": ["concept:name"],
-        "timestamp": None,
+        "timestamp": "time:timestamp",
         "delimiter": ",",
         "dtypes": None,
     },
@@ -137,7 +146,7 @@ data_collection = {
 
 if DATA == "file":
     data_name = "Sepsis_Cases"
-    # data_name = "BPI_Challenge_2013"
+    # data_name = "BPI_Challenge_2012"
     mydata = data_collection[data_name]  # type: ignore
     file_path = os.path.join(FOLDERNAME, mydata["target_filename"])
     mydata["file_path"] = file_path
@@ -159,7 +168,7 @@ if DATA == "file":
     #         # Check for any invalid datetime values (NaT) after conversion
     #         if csv_file[timestamp_column].isna().any():
     #             raise ValueError(
-    #                 f"Invalid datetime format in column '{timestamp_column}'. Ensure the format is '%d-%m-%Y %H:%M:%S'.")
+    #                 f"Invalid datetime format in column '{timestamp_column}'. Ensure format '%d-%m-%Y %H:%M:%S'.")
     #
     #         # Sort the DataFrame by the timestamp column
     #         csv_file.sort_values(by=timestamp_column, inplace=True)
@@ -169,24 +178,30 @@ if DATA == "file":
     dataset: Iterator[Event]
 
     def my_iterator() -> Iterator[Event]:
+        timestamp_key = mydata.get("timestamp")  # Check if timestamp key is defined
         for row in row_iterator:
             # Create the Event dictionary
             event: Event = {
-                "case_id": handle_keys(mydata["case_keys"], row),  # type: ignore
-                "activity": handle_keys(mydata["activity_keys"], row),  # type: ignore
+                "case_id": handle_keys(mydata["case_keys"], row),  # Extract case ID
+                "activity": handle_keys(mydata["activity_keys"], row),  # Extract activity
+                "timestamp": None,
             }
+
+            # Handle timestamp if the key is provided
+            if timestamp_key:
+                raw_timestamp = row.get(timestamp_key)
+                if raw_timestamp:
+                    try:
+                        # Parse timestamp; customize format if necessary
+                        parsed_timestamp = datetime.fromisoformat(raw_timestamp)
+                    except ValueError:
+                        # Handle invalid timestamps by assigning a default value
+                        parsed_timestamp = None
+                    event["timestamp"] = parsed_timestamp  # Add timestamp to event
+
             yield event
 
     dataset = my_iterator()
-
-    # def my_iterator() -> Iterator[Event]:
-    #     for row in row_iterator:
-    #         yield (
-    #             handle_keys(mydata["case_keys"], row),  # type: ignore
-    #             handle_keys(mydata["activity_keys"], row),  # type: ignore
-    #         )
-    #
-    # dataset = my_iterator()
 
 
 # ============================================================

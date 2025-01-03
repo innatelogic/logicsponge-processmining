@@ -19,7 +19,13 @@ from logicsponge.processmining.models import (
     SoftVoting,
 )
 from logicsponge.processmining.neural_networks import LSTMModel
-from logicsponge.processmining.streaming import AddStartSymbol, Evaluation, IteratorStreamer, StreamingActivityPredictor
+from logicsponge.processmining.streaming import (
+    AddStartSymbol,
+    Evaluation,
+    IteratorStreamer,
+    PrintEval,
+    StreamingActivityPredictor,
+)
 from logicsponge.processmining.test_data import dataset
 
 logger = logging.getLogger(__name__)
@@ -56,6 +62,7 @@ torch.backends.cudnn.benchmark = False
 
 config = {
     "include_stop": False,
+    "include_time": True,  # True is default
 }
 
 start_symbol = DEFAULT_CONFIG["start_symbol"]
@@ -176,6 +183,7 @@ lstm = StreamingActivityPredictor(
     )
 )
 
+
 # ====================================================
 # Sponge
 # ====================================================
@@ -196,13 +204,22 @@ models = [
     "hard_voting",
     "soft_voting",
     "adaptive_voting",
-    "lstm",
+    # "lstm",
 ]
 
 accuracy_list = [f"{model}.accuracy" for model in models]
 latency_mean_list = [f"{model}.latency_mean" for model in models]
-latency_max_list = [f"{model}.latency_max" for model in models]
-all_attributes = ["index", *accuracy_list, *latency_mean_list]
+
+delay_attributes = [
+    "mean_delay_error",
+    "mean_actual_delay",
+    "mean_normalized_error",
+    "delay_predictions",
+]
+
+delay_list = [f"{model}.{attribute}" for model in models for attribute in delay_attributes]
+
+all_attributes = ["index", *accuracy_list, *latency_mean_list, *delay_list]
 
 streamer = IteratorStreamer(data_iterator=dataset)
 
@@ -212,10 +229,15 @@ def start_filter(item: DataItem):
 
 
 len_dataset = 15214
+# len_dataset = 262200
+# len_dataset = 65000
+# len_dataset = 1202267
+# len_dataset = 2514266
+# len_dataset = 1595923
 
 sponge = (
     streamer
-    * ls.KeyFilter(keys=["case_id", "activity"])
+    * ls.KeyFilter(keys=["case_id", "activity", "timestamp"])
     * AddStartSymbol(start_symbol=start_symbol)
     * (
         (fpt * DataItemFilter(data_item_filter=start_filter) * Evaluation("fpt"))
@@ -232,13 +254,14 @@ sponge = (
         | (hard_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("hard_voting"))
         | (soft_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("soft_voting"))
         | (adaptive_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("adaptive_voting"))
-        | (lstm * DataItemFilter(data_item_filter=start_filter) * Evaluation("lstm"))
+        # | (lstm * DataItemFilter(data_item_filter=start_filter) * Evaluation("lstm"))
     )
     * ls.ToSingleStream(flatten=True)
     * ls.AddIndex(key="index", index=1)
     * ls.KeyFilter(keys=all_attributes)
-    * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 100 == 0 or item["index"] > len_dataset - 10)
-    * ls.Print()
+    * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 1000 == 0 or item["index"] > len_dataset - 10)
+    * PrintEval()
+    # * ls.Print()
     # * (dashboard.Plot("Accuracy (%)", x="index", y=accuracy_list))
     # * (dashboard.Plot("Latency Mean (ms)", x="index", y=latency_mean_list))
 )

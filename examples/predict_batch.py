@@ -55,7 +55,7 @@ torch.cuda.manual_seed(123)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-NN_training = True
+NN_training = False
 
 
 # ============================================================

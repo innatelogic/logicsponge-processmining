@@ -11,6 +11,8 @@ DEFAULT_CONFIG: Config = {
     "randomized": False,
     "top_k": 3,
     "include_stop": True,
+    "include_time": True,
+    "maxlen_delays": 50,
 }
 
 
@@ -20,8 +22,7 @@ def update_config(custom_param: dict[str, Any] | None = None) -> Config:
     :param custom_param: Optional dictionary with configuration overrides.
     :return: Merged configuration as a new dictionary.
     """
-    default_config = DEFAULT_CONFIG
-    updated_config = copy.deepcopy(default_config)  # Create a deep copy of the default config
+    updated_config = copy.deepcopy(DEFAULT_CONFIG)
 
     if custom_param:
         for key, value in custom_param.items():

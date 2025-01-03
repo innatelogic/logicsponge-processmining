@@ -1,7 +1,9 @@
+import copy
+
 import numpy as np
 
 from logicsponge.processmining.config import DEFAULT_CONFIG
-from logicsponge.processmining.types import Config, Event, Prediction, ProbDistr
+from logicsponge.processmining.types import Config, Event, Metrics, Prediction, ProbDistr
 
 
 def extract_event_fields(event: Event) -> Event:
@@ -82,7 +84,7 @@ def probs_prediction(probs: ProbDistr, config: Config) -> Prediction | None:
     top_k_indices = np.argsort(probabilities_array)[-config["top_k"] :][::-1]
 
     # Use the indices to get the top-k activities
-    top_k_activities = [activities[i] for i in top_k_indices]
+    top_k_activities = [activities[i] for i in top_k_indices if probs_copy[activities[i]] > 0]
 
     # Determine the predicted activity
     if config["randomized"]:
@@ -105,3 +107,22 @@ def probs_prediction(probs: ProbDistr, config: Config) -> Prediction | None:
         "probability": highest_probability,
         "probs": probs_copy,
     }
+
+
+def metrics_prediction(metrics: Metrics, config: Config) -> Prediction | None:
+    """
+    Returns prediction including time delays.
+    """
+    probs = metrics["probs"]
+    delays = metrics["predicted_delays"]
+
+    # If there are no probabilities, return None
+    if not probs:
+        return None
+
+    # Generate the probability-based prediction
+    prediction = probs_prediction(probs, config=config)
+    if prediction:
+        prediction["predicted_delays"] = copy.deepcopy(delays)
+
+    return prediction

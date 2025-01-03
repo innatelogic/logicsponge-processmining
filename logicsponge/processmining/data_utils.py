@@ -12,7 +12,6 @@ import pandas as pd
 import pm4py
 import requests
 
-from logicsponge.core import DataItem
 from logicsponge.processmining.types import ActivityName, Event
 
 logger = logging.getLogger(__name__)
@@ -76,7 +75,7 @@ def add_start_to_sequences(data: list[list[Event]], start_symbol: ActivityName) 
         msg = "All sequences in data must be non-empty."
         raise ValueError(msg)
 
-    return [[{"case_id": seq[0]["case_id"], "activity": start_symbol}, *seq] for seq in data]
+    return [[{"case_id": seq[0]["case_id"], "activity": start_symbol, "timestamp": None}, *seq] for seq in data]
 
 
 def add_stop_to_sequences(data: list[list[Event]], stop_symbol: ActivityName) -> list[list[Event]]:
@@ -88,7 +87,7 @@ def add_stop_to_sequences(data: list[list[Event]], stop_symbol: ActivityName) ->
         msg = "All sequences in data must be non-empty."
         raise ValueError(msg)
 
-    return [[*seq, {"case_id": seq[0]["case_id"], "activity": stop_symbol}] for seq in data]
+    return [[*seq, {"case_id": seq[0]["case_id"], "activity": stop_symbol, "timestamp": None}] for seq in data]
 
 
 def transform_to_seqs(data: Iterator[Event]) -> list[list[Event]]:
@@ -287,13 +286,13 @@ class FileHandler:
         raise ValueError(msg)
 
 
-def handle_keys(keys: list[str | int], row: DataItem | dict[str | int, Any]) -> str | int | tuple[str | int, ...]:
+def handle_keys(keys: list[str], row: dict[str, Any]) -> str | tuple[str, ...]:
     """
     Handles the case and activity keys, returning either a single value or a tuple of values.
     Ensures the return type matches the expected CaseId or ActivityName.
     """
     if len(keys) == 1:
         # Return the value directly if there's only one key
-        return cast(str | int, row[keys[0]])
+        return cast(str, row[keys[0]])
 
-    return ", ".join(str(cast(str | int, row[key])) for key in keys)
+    return ", ".join(str(cast(str, row[key])) for key in keys)

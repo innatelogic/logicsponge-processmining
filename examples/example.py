@@ -37,7 +37,13 @@ model2 = StreamingActivityPredictor(
 
 streamer = IteratorStreamer(data_iterator=dataset)
 
-sponge = streamer * ls.KeyFilter(keys=["case_id", "activity"]) * model2 * ls.AddIndex(key="index", index=1) * ls.Print()
+sponge = (
+    streamer
+    * ls.KeyFilter(keys=["case_id", "activity", "timestamp"])
+    * model2
+    * ls.AddIndex(key="index", index=1)
+    * ls.Print()
+)
 
 
 sponge.start()
