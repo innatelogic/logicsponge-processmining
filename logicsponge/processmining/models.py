@@ -24,7 +24,7 @@ from logicsponge.processmining.types import (
     ProbDistr,
     empty_metrics,
 )
-from logicsponge.processmining.utils import probs_prediction
+from logicsponge.processmining.utils import metrics_prediction, probs_prediction
 
 mpl.use("Agg")
 
@@ -59,13 +59,22 @@ class StreamingMiner(ABC):
             "correct_predictions": 0,
             "wrong_predictions": 0,
             "empty_predictions": 0,
-            "log_loss": 0.0,  # not implemented yet
+            # For delay predictions
+            "delay_error_sum": 0,
+            "actual_delay_sum": 0,
+            "normalized_error_sum": 0,
+            "delay_predictions": 0,
+            "last_timestamps": {},  # last recorded timestamp for every case
         }
 
-    def update_stats(self, actual_next_activity: ActivityName, prediction: Prediction | None) -> None:
+    def update_stats(self, event: Event, prediction: Prediction | None) -> None:
         """
         Updates the statistics based on the actual activity, the prediction, and the top-k predictions.
         """
+        case_id = event.get("case_id")
+        actual_next_activity = event.get("activity")
+        timestamp = event.get("timestamp")
+
         self.stats["total_predictions"] += 1
 
         if prediction is None:
@@ -77,6 +86,34 @@ class StreamingMiner(ABC):
                 self.stats["correct_predictions"] += 1
             else:
                 self.stats["wrong_predictions"] += 1
+
+        # Update timing statistics
+        if (
+            prediction
+            and case_id in self.stats["last_timestamps"]
+            and actual_next_activity in prediction["predicted_delays"]
+        ):
+            predicted_delay = prediction["predicted_delays"][actual_next_activity]
+            actual_delay = timestamp - self.stats["last_timestamps"][case_id]
+            delay_error = abs(predicted_delay - actual_delay)
+        else:
+            actual_delay = None
+            delay_error = None
+            predicted_delay = None
+
+        if actual_delay is not None and delay_error is not None and predicted_delay is not None:
+            self.stats["delay_predictions"] += 1
+            self.stats["delay_error_sum"] += delay_error.total_seconds()
+            self.stats["actual_delay_sum"] += actual_delay.total_seconds()
+            if actual_delay.total_seconds() + predicted_delay.total_seconds() == 0:
+                normalized_error = 0
+            else:
+                normalized_error = delay_error.total_seconds() / (
+                    actual_delay.total_seconds() + predicted_delay.total_seconds()
+                )
+            self.stats["normalized_error_sum"] += normalized_error
+
+        self.stats["last_timestamps"][case_id] = timestamp
 
     def evaluate(self, data: list[list[Event]], mode: str = "incremental") -> None:
         """
@@ -95,19 +132,20 @@ class StreamingMiner(ABC):
                     self.stats["total_predictions"] += len(sequence) - i
                     break
 
-                actual_next_activity = sequence[i].get("activity")
+                event = sequence[i]
+                actual_next_activity = event.get("activity")
 
                 if mode == "incremental":
                     # Prediction for incremental mode (step by step)
-                    probs = self.state_metrics(current_state)["probs"]
-                    prediction = probs_prediction(probs, config=self.config)
+                    metrics = self.state_metrics(current_state)
+                    prediction = metrics_prediction(metrics, config=self.config)
                 else:
                     # Prediction for sequence mode (whole sequence)
-                    probs = self.sequence_metrics(sequence[:i])["probs"]
-                    prediction = probs_prediction(probs, config=self.config)
+                    metrics = self.sequence_metrics(sequence[:i])
+                    prediction = metrics_prediction(metrics, config=self.config)
 
                 # Update statistics based on the prediction
-                self.update_stats(actual_next_activity, prediction)
+                self.update_stats(event, prediction)
 
                 # Move to the next state
                 if i < len(sequence) - 1:

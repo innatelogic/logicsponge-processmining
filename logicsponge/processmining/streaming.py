@@ -27,22 +27,23 @@ class IteratorStreamer(ls.SourceTerm):
         self.data_iterator = data_iterator
 
     def run(self):
-        for event in self.data_iterator:
-            case_id = event["case_id"]
-            activity = event["activity"]
-            timestamp = event["timestamp"]
+        while True:
+            for event in self.data_iterator:
+                case_id = event["case_id"]
+                activity = event["activity"]
+                timestamp = event["timestamp"]
 
-            out = DataItem(
-                {
-                    "case_id": case_id,
-                    "activity": activity,
-                    "timestamp": timestamp,
-                }
-            )
-            self.output(out)
+                out = DataItem(
+                    {
+                        "case_id": case_id,
+                        "activity": activity,
+                        "timestamp": timestamp,
+                    }
+                )
+                self.output(out)
 
-        # repeatedly sleep if done
-        time.sleep(10)
+            # repeatedly sleep if done
+            time.sleep(10)
 
 
 class AddStartSymbol(ls.FunctionTerm):
@@ -56,21 +57,21 @@ class AddStartSymbol(ls.FunctionTerm):
         self.start_symbol = start_symbol
 
     def run(self, ds_view: ls.DataStreamView):
-        ds_view.next()
-        item = ds_view[-1]
-        case_id = item["case_id"]
-        timestamp = item["timestamp"]
-        if case_id not in self.case_ids:
-            out = DataItem(
-                {
-                    "case_id": case_id,
-                    "activity": self.start_symbol,
-                    "timestamp": timestamp,
-                }
-            )
-            self.output(out)
-            self.case_ids.add(case_id)
-        self.output(item)
+        while True:
+            ds_view.next()
+            item = ds_view[-1]
+            case_id = item["case_id"]
+            if case_id not in self.case_ids:
+                out = DataItem(
+                    {
+                        "case_id": case_id,
+                        "activity": self.start_symbol,
+                        "timestamp": None,
+                    }
+                )
+                self.output(out)
+                self.case_ids.add(case_id)
+            self.output(item)
 
 
 class DataPreparation(ls.FunctionTerm):
@@ -91,82 +92,6 @@ class DataPreparation(ls.FunctionTerm):
         )
 
 
-# class StreamingActivityPredictor(ls.FunctionTerm):
-#     def __init__(self, *args, strategy: StreamingMiner, **kwargs):
-#         super().__init__(*args, **kwargs)
-#         self.strategy = strategy
-#         self.case_ids = set()
-#
-#     def run(self, ds_view: ls.DataStreamView):
-#         ds_view.next()
-#         item = ds_view[-1]
-#
-#         start_time = time.time()
-#
-#         metrics = self.strategy.case_metrics(item["case_id"])
-#         prediction = copy.deepcopy(metrics_prediction(metrics, self.strategy.config))
-#
-#         event: Event = {
-#             "case_id": item["case_id"],
-#             "activity": item["activity"],
-#             "timestamp": item["timestamp"],
-#         }
-#
-#         self.strategy.update(event)
-#
-#         end_time = time.time()
-#         latency = (end_time - start_time) * 1000  # latency in milliseconds (ms)
-#
-#         out = DataItem(
-#             {
-#                 "case_id": item["case_id"],
-#                 "activity": item["activity"],  # actual activity
-#                 "prediction": prediction,  # containing predicted activity
-#                 "latency": latency,
-#             }
-#         )
-#         self.output(out)
-#
-#
-# class Evaluation(ls.FunctionTerm):
-#     def __init__(self, *args, top_activities: bool = False, **kwargs):
-#         super().__init__(*args, **kwargs)
-#         self.top_activities = top_activities
-#         self.correct_predictions = 0
-#         self.total_predictions = 0
-#         self.missing_predictions = 0
-#         self.latency_sum = 0
-#         self.latency_max = 0
-#
-#     def f(self, item: DataItem) -> DataItem:
-#         self.latency_sum += item["latency"]
-#         self.latency_max = max(item["latency"], self.latency_max)
-#
-#         if item["prediction"] is None:
-#             self.missing_predictions += 1
-#         elif self.top_activities:
-#             if item["activity"] in item["prediction"]["top_k_activities"]:
-#                 self.correct_predictions += 1
-#         elif item["activity"] == item["prediction"]["activity"]:
-#             self.correct_predictions += 1
-#
-#         self.total_predictions += 1
-#
-#         accuracy = self.correct_predictions / self.total_predictions * 100 if self.total_predictions > 0 else 0
-#
-#         return DataItem(
-#             {
-#                 "prediction": item["prediction"],
-#                 "correct_predictions": self.correct_predictions,
-#                 "total_predictions": self.total_predictions,
-#                 "missing_predictions": self.missing_predictions,
-#                 "accuracy": accuracy,
-#                 "latency_mean": self.latency_sum / self.total_predictions,
-#                 "latency_max": self.latency_max,
-#             }
-#         )
-
-
 class StreamingActivityPredictor(ls.FunctionTerm):
     def __init__(self, *args, strategy: StreamingMiner, **kwargs):
         super().__init__(*args, **kwargs)
@@ -175,52 +100,53 @@ class StreamingActivityPredictor(ls.FunctionTerm):
         self.last_timestamps = {}  # records last timestamps
 
     def run(self, ds_view: ls.DataStreamView):
-        ds_view.next()
-        item = ds_view[-1]
+        while True:
+            ds_view.next()
+            item = ds_view[-1]
 
-        start_time = time.time()
+            start_time = time.time()
 
-        metrics = self.strategy.case_metrics(item["case_id"])
-        prediction = metrics_prediction(metrics, self.strategy.config)
+            metrics = self.strategy.case_metrics(item["case_id"])
+            prediction = metrics_prediction(metrics, self.strategy.config)
 
-        event: Event = {
-            "case_id": item["case_id"],
-            "activity": item["activity"],
-            "timestamp": item["timestamp"],
-        }
-
-        self.strategy.update(event)
-
-        end_time = time.time()
-        latency = (end_time - start_time) * 1000  # latency in milliseconds (ms)
-
-        if (
-            prediction
-            and item["case_id"] in self.last_timestamps
-            and item["activity"] in prediction["predicted_delays"]
-        ):
-            predicted_delay = prediction["predicted_delays"][item["activity"]]
-            actual_delay = item["timestamp"] - self.last_timestamps[item["case_id"]]
-            delay_error = abs(predicted_delay - actual_delay)
-        else:
-            actual_delay = None
-            delay_error = None
-            predicted_delay = None
-
-        self.last_timestamps[item["case_id"]] = item["timestamp"]
-
-        out = DataItem(
-            {
+            event: Event = {
                 "case_id": item["case_id"],
-                "activity": item["activity"],  # actual activity
-                "prediction": prediction,  # containing predicted activity
-                "latency": latency,
-                "delay_error": delay_error,
-                "actual_delay": actual_delay,
-                "predicted_delay": predicted_delay,
+                "activity": item["activity"],
+                "timestamp": item["timestamp"],
             }
-        )
-        self.output(out)
+
+            self.strategy.update(event)
+
+            end_time = time.time()
+            latency = (end_time - start_time) * 1000  # latency in milliseconds (ms)
+
+            if (
+                prediction
+                and item["case_id"] in self.last_timestamps
+                and item["activity"] in prediction["predicted_delays"]
+            ):
+                predicted_delay = prediction["predicted_delays"][item["activity"]]
+                actual_delay = item["timestamp"] - self.last_timestamps[item["case_id"]]
+                delay_error = abs(predicted_delay - actual_delay)
+            else:
+                actual_delay = None
+                delay_error = None
+                predicted_delay = None
+
+            self.last_timestamps[item["case_id"]] = item["timestamp"]
+
+            out = DataItem(
+                {
+                    "case_id": item["case_id"],
+                    "activity": item["activity"],  # actual activity
+                    "prediction": prediction,  # containing predicted activity
+                    "latency": latency,
+                    "delay_error": delay_error,
+                    "actual_delay": actual_delay,
+                    "predicted_delay": predicted_delay,
+                }
+            )
+            self.output(out)
 
 
 class Evaluation(ls.FunctionTerm):
@@ -339,7 +265,8 @@ def eval_to_table(data: dict) -> pd.DataFrame:
 
 class PrintEval(ls.FunctionTerm):
     def run(self, ds_view: ls.DataStreamView):
-        ds_view.next()
-        item = ds_view[-1]
-        table = eval_to_table(item)
-        logger.info(table)
+        while True:
+            ds_view.next()
+            item = ds_view[-1]
+            table = eval_to_table(item)
+            logger.info(table)

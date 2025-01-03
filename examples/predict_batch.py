@@ -1,5 +1,6 @@
 import logging
 import time
+from datetime import timedelta
 
 import matplotlib as mpl
 import numpy as np
@@ -82,7 +83,14 @@ n_iterations = 5
 
 # Store metrics across iterations
 all_metrics = {
-    name: {"accuracies": [], "num_states": []}
+    name: {
+        "accuracies": [],
+        "num_states": [],
+        "mean_delay_error": [],
+        "mean_actual_delay": [],
+        "mean_normalized_error": [],
+        "delay_predictions": [],
+    }
     for name in [
         "fpt",
         "bag",
@@ -259,6 +267,10 @@ for iteration in range(n_iterations):
         "Correct (Total)": [],
         "Total Predictions": [],
         "Number of States": [],
+        # "Mean Delay Error": [],
+        # "Mean Actual Delay": [],
+        # "Mean Normalized Error": [],
+        # "Delay Predictions": [],
     }
 
     for strategy_name, (strategy, test_data) in strategies.items():
@@ -281,11 +293,32 @@ for iteration in range(n_iterations):
         iteration_data["Total Predictions"].append(total)
         iteration_data["Number of States"].append(num_states)
 
+        # Timing information
+        delay_count = stats["delay_predictions"]
+        if delay_count > 0:
+            mean_delay_error = stats["delay_error_sum"] / delay_count
+            mean_actual_delay = stats["actual_delay_sum"] / delay_count
+            mean_normalized_error = stats["normalized_error_sum"] / delay_count
+        else:
+            mean_delay_error = None
+            mean_actual_delay = None
+            mean_normalized_error = None
+
+        # iteration_data["Mean Delay Error"].append(mean_delay_error)
+        # iteration_data["Mean Actual Delay"].append(mean_actual_delay)
+        # iteration_data["Mean Normalized Error"].append(mean_normalized_error)
+        # iteration_data["Delay Predictions"].append(delay_count)
+
         # Calculate and append accuracy to all_metrics for final statistics
         accuracy = stats["correct_predictions"] / total if total > 0 else 0
 
         all_metrics[strategy_name]["accuracies"].append(accuracy)
         all_metrics[strategy_name]["num_states"].append(num_states)
+
+        all_metrics[strategy_name]["mean_delay_error"].append(mean_delay_error)
+        all_metrics[strategy_name]["mean_actual_delay"].append(mean_actual_delay)
+        all_metrics[strategy_name]["mean_normalized_error"].append(mean_normalized_error)
+        all_metrics[strategy_name]["delay_predictions"].append(delay_count)
 
     # Create a DataFrame for the iteration and log it
     iteration_df = pd.DataFrame(iteration_data)
@@ -329,8 +362,12 @@ for iteration in range(n_iterations):
 results = {
     "Model": [],
     "Mean Accuracy (%)": [],
-    "Std Dev Accuracy (%)": [],
-    "Mean Number of States": [],
+    "Std": [],
+    "States": [],
+    "Delay Error": [],
+    "Actual Delay": [],
+    "Normalized Error": [],
+    "Delay Predictions": [],
 }
 
 for model_name, stats in all_metrics.items():
@@ -344,14 +381,50 @@ for model_name, stats in all_metrics.items():
         std_acc = None
 
     results["Mean Accuracy (%)"].append(mean_acc)
-    results["Std Dev Accuracy (%)"].append(std_acc)
+    results["Std"].append(std_acc)
 
     if len(stats["num_states"]) > 0 and None not in stats["num_states"]:
         mean_num_states = np.mean(stats["num_states"])
     else:
         mean_num_states = None
 
-    results["Mean Number of States"].append(mean_num_states)
+    results["States"].append(mean_num_states)
+
+    if len(stats["mean_delay_error"]) > 0 and None not in stats["mean_delay_error"]:
+        mean_delay_error = timedelta(seconds=float(np.mean(stats["mean_delay_error"])))
+    else:
+        mean_delay_error = None
+
+    if len(stats["mean_actual_delay"]) > 0 and None not in stats["mean_actual_delay"]:
+        mean_actual_delay = timedelta(seconds=float(np.mean(stats["mean_actual_delay"])))
+    else:
+        mean_actual_delay = None
+
+    if len(stats["mean_normalized_error"]) > 0 and None not in stats["mean_normalized_error"]:
+        mean_normalized_error = np.mean(stats["mean_normalized_error"])
+    else:
+        mean_normalized_error = None
+
+    if len(stats["delay_predictions"]) > 0 and None not in stats["delay_predictions"]:
+        delay_predictions = np.mean(stats["delay_predictions"])
+    else:
+        delay_predictions = None
+
+    def format_timedelta(td: timedelta | None) -> str | None:
+        if td is None:
+            return None
+        days = td.days
+        hours, rem = divmod(td.seconds, 3600)
+        minutes, seconds = divmod(rem, 60)
+        return f"{days}d {hours:02d}h {minutes:02d}m {seconds:02d}s"
+
+    # Assuming mean_delay_error and mean_actual_delay are timedelta objects
+    results["Delay Error"].append(format_timedelta(mean_delay_error))
+    results["Actual Delay"].append(format_timedelta(mean_actual_delay))
+
+    # Normalized Error and Delay Predictions (assuming they are not timedelta)
+    results["Normalized Error"].append(mean_normalized_error)  # Round to two decimals
+    results["Delay Predictions"].append(delay_predictions)  # Keep as-is
 
 # Create a DataFrame and print it
 df = pd.DataFrame(results)
