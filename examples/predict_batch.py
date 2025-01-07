@@ -56,7 +56,7 @@ torch.cuda.manual_seed(123)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-NN_training = False
+NN_training = True
 
 
 # ============================================================
@@ -89,7 +89,7 @@ all_metrics = {
         "mean_delay_error": [],
         "mean_actual_delay": [],
         "mean_normalized_error": [],
-        "delay_predictions": [],
+        "num_delay_predictions": [],
     }
     for name in [
         "fpt",
@@ -294,7 +294,7 @@ for iteration in range(n_iterations):
         iteration_data["Number of States"].append(num_states)
 
         # Timing information
-        delay_count = stats["delay_predictions"]
+        delay_count = stats["num_delay_predictions"]
         if delay_count > 0:
             mean_delay_error = stats["delay_error_sum"] / delay_count
             mean_actual_delay = stats["actual_delay_sum"] / delay_count
@@ -318,7 +318,7 @@ for iteration in range(n_iterations):
         all_metrics[strategy_name]["mean_delay_error"].append(mean_delay_error)
         all_metrics[strategy_name]["mean_actual_delay"].append(mean_actual_delay)
         all_metrics[strategy_name]["mean_normalized_error"].append(mean_normalized_error)
-        all_metrics[strategy_name]["delay_predictions"].append(delay_count)
+        all_metrics[strategy_name]["num_delay_predictions"].append(delay_count)
 
     # Create a DataFrame for the iteration and log it
     iteration_df = pd.DataFrame(iteration_data)
@@ -336,7 +336,7 @@ for iteration in range(n_iterations):
         nn_val_set_transformed = nn_processor.preprocess_data(nn_val_set_transformed)
         nn_test_set_transformed = nn_processor.preprocess_data(nn_test_set_transformed)
 
-        vocab_size = 50  # Assume an upper bound on the number of activities, or adjust dynamically
+        vocab_size = 50  # Assume an upper bound on the number of activities
 
         # Initialize the model, criterion, and optimizer
         embedding_dim = 50
@@ -405,10 +405,10 @@ for model_name, stats in all_metrics.items():
     else:
         mean_normalized_error = None
 
-    if len(stats["delay_predictions"]) > 0 and None not in stats["delay_predictions"]:
-        delay_predictions = np.mean(stats["delay_predictions"])
+    if len(stats["num_delay_predictions"]) > 0 and None not in stats["num_delay_predictions"]:
+        num_delay_predictions = np.mean(stats["num_delay_predictions"])
     else:
-        delay_predictions = None
+        num_delay_predictions = None
 
     def format_timedelta(td: timedelta | None) -> str | None:
         if td is None:
@@ -424,7 +424,7 @@ for model_name, stats in all_metrics.items():
 
     # Normalized Error and Delay Predictions (assuming they are not timedelta)
     results["Normalized Error"].append(mean_normalized_error)  # Round to two decimals
-    results["Delay Predictions"].append(delay_predictions)  # Keep as-is
+    results["Delay Predictions"].append(num_delay_predictions)  # Keep as-is
 
 # Create a DataFrame and print it
 df = pd.DataFrame(results)

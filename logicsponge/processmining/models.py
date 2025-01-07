@@ -63,9 +63,11 @@ class StreamingMiner(ABC):
             "delay_error_sum": 0,
             "actual_delay_sum": 0,
             "normalized_error_sum": 0,
-            "delay_predictions": 0,
+            "num_delay_predictions": 0,
             "last_timestamps": {},  # last recorded timestamp for every case
         }
+
+        self.modified_cases = set()  # Records potentially modified cases (predictions) in last update
 
     def update_stats(self, event: Event, prediction: Prediction | None) -> None:
         """
@@ -102,7 +104,7 @@ class StreamingMiner(ABC):
             predicted_delay = None
 
         if actual_delay is not None and delay_error is not None and predicted_delay is not None:
-            self.stats["delay_predictions"] += 1
+            self.stats["num_delay_predictions"] += 1
             self.stats["delay_error_sum"] += delay_error.total_seconds()
             self.stats["actual_delay_sum"] += actual_delay.total_seconds()
             if actual_delay.total_seconds() + predicted_delay.total_seconds() == 0:
@@ -150,6 +152,13 @@ class StreamingMiner(ABC):
                 # Move to the next state
                 if i < len(sequence) - 1:
                     current_state = self.next_state(current_state, actual_next_activity)
+
+    @abstractmethod
+    def get_modified_cases(self) -> set[CaseId]:
+        """
+        Retrieves, recursively, cases that have potentially been modified and
+        whose prediction needs to be updated.
+        """
 
     @abstractmethod
     def propagate_config(self) -> None:
@@ -207,6 +216,13 @@ class BasicMiner(StreamingMiner):
 
         self.initial_state = self.algorithm.initial_state
 
+    def get_modified_cases(self) -> set[CaseId]:
+        """
+        Retrieves, recursively, cases that have potentially been modified and
+        whose prediction needs to be updated.
+        """
+        return self.algorithm.get_modified_cases()
+
     def propagate_config(self) -> None:
         """
         Recursively propagates the config to all nested models.
@@ -215,6 +231,7 @@ class BasicMiner(StreamingMiner):
 
     def update(self, event: Event) -> None:
         self.algorithm.update(event)
+        self.modified_cases = self.algorithm.get_modified_cases()
 
     def next_state(self, current_state: ComposedState | None, activity: ActivityName) -> ComposedState | None:
         return self.algorithm.next_state(current_state, activity)
@@ -254,6 +271,19 @@ class MultiMiner(StreamingMiner, ABC):
 
         self.delay_weights = delay_weights
 
+    def get_modified_cases(self) -> set[CaseId]:
+        """
+        Retrieves, recursively, cases that have potentially been modified and
+        whose prediction needs to be updated.
+        """
+        modified_cases = set()
+
+        for model in self.models:
+            # Add modified cases from the current model
+            modified_cases.update(model.get_modified_cases())
+
+        return modified_cases
+
     def propagate_config(self) -> None:
         """
         Recursively propagates the config to all nested models.
@@ -287,8 +317,14 @@ class MultiMiner(StreamingMiner, ABC):
         }
 
     def update(self, event: Event) -> None:
+        self.modified_cases = set()
+
         for model in self.models:
             model.update(event)
+
+        self.modified_cases = set()
+        for model in self.models:
+            self.modified_cases.update(model.get_modified_cases())
 
     def next_state(self, current_state: ComposedState | None, activity: ActivityName) -> ComposedState | None:
         if current_state is None:
@@ -519,6 +555,10 @@ class AdaptiveVoting(MultiMiner):
 
             model.update(event)
 
+        self.modified_cases = set()
+        for model in self.models:
+            self.modified_cases.update(model.get_modified_cases())
+
     def get_accuracies(self) -> list[float]:
         """
         Returns the accuracy of each model as a list of floats.
@@ -737,6 +777,12 @@ class Alergia(BasicMiner):
 
         return probability_distribution["in"]
 
+    def get_modified_cases(self) -> set[CaseId]:
+        """
+        Not implemented
+        """
+        return set()
+
     def update(self, event: Event) -> None:
         """
         This method is not used in this subclass.
@@ -801,6 +847,12 @@ class NeuralNetworkMiner(StreamingMiner):
         Return the index sequence for a specific case_id.
         """
         return self.sequences.get(case_id, [])
+
+    def get_modified_cases(self) -> set[CaseId]:
+        """
+        Not implemented
+        """
+        return set()
 
     def update(self, event: Event) -> None:
         """

@@ -36,10 +36,19 @@ class BaseStructure(PDFA, ABC):
         self.last_transition = None
         self.min_total_visits = min_total_visits
 
+        self.modified_cases = set()  # Records potentially modified cases (predictions) in last update
+
         # create initial state
         self.initial_state = self.create_state()
         self.state_info[self.initial_state]["access_string"] = ()
         self.state_info[self.initial_state]["level"] = 0
+
+    def get_modified_cases(self) -> set[CaseId]:
+        """
+        Retrieves, recursively, cases that have potentially been modified and
+        whose prediction needs to be updated.
+        """
+        return self.modified_cases
 
     @property
     def states(self) -> list[StateId]:
@@ -48,7 +57,7 @@ class BaseStructure(PDFA, ABC):
     def create_state(self, state_id: StateId | None = None) -> StateId:
         """
         Overwrites Automata method.
-        Creates and initializes a new state with the given name and state ID.
+        Creates and initializes a new state with the given state ID.
         If no state ID is provided, ID is assigned based on current number of states.
         """
         if state_id is None:
@@ -57,6 +66,7 @@ class BaseStructure(PDFA, ABC):
         self.state_info[state_id] = {}
         self.state_info[state_id]["total_visits"] = 0
         self.state_info[state_id]["active_visits"] = 0
+        self.state_info[state_id]["active_cases"] = set()
         self.state_info[state_id]["activity_frequency"] = {}
         self.state_info[state_id]["time_info"] = {
             "delays": {},  # list of delays (as deque of floats in seconds) for every activity
@@ -75,6 +85,7 @@ class BaseStructure(PDFA, ABC):
         self.case_info[case_id]["last_timestamp"] = None
         self.state_info[self.initial_state]["total_visits"] += 1
         self.state_info[self.initial_state]["active_visits"] += 1
+        self.state_info[self.initial_state]["active_cases"].add(case_id)
 
     def initialize_activity(self, state_id: StateId, activity: ActivityName) -> None:
         """
@@ -166,8 +177,16 @@ class BaseStructure(PDFA, ABC):
         self.state_info[current_state]["activity_frequency"][activity] += 1
         self.state_info[current_state]["active_visits"] -= 1
         self.state_info[next_state]["active_visits"] += 1
+        self.state_info[current_state]["active_cases"].remove(case_id)
+        self.state_info[next_state]["active_cases"].add(case_id)
 
         self.last_transition = (current_state, activity, next_state)  # for visualization
+
+        # Update set of cases potentially modified
+        self.modified_cases = set()
+        for state in (current_state, next_state):
+            for case in self.state_info[state]["active_cases"]:
+                self.modified_cases.add(case)
 
         # Update timing information
         if self.config["include_time"]:

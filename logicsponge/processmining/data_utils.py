@@ -5,6 +5,7 @@ import random
 import shutil
 from collections import Counter, defaultdict
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import numpy as np
@@ -296,3 +297,30 @@ def handle_keys(keys: list[str], row: dict[str, Any]) -> str | tuple[str, ...]:
         return cast(str, row[keys[0]])
 
     return ", ".join(str(cast(str, row[key])) for key in keys)
+
+
+def parse_timestamp(raw_timestamp):
+    """
+    Parse a timestamp string in various formats, handling naive and aware datetimes.
+
+    Parameters:
+        raw_timestamp (str): The raw timestamp string.
+
+    Returns:
+        datetime or None: A timezone-aware datetime object or None if parsing fails.
+    """
+    try:
+        # Try parsing as ISO 8601 format
+        dt = datetime.fromisoformat(raw_timestamp)
+    except ValueError:
+        # Fall back to custom format parsing
+        try:
+            dt = datetime.strptime(raw_timestamp, "%Y/%m/%d %H:%M:%S.%f")  # noqa: DTZ007
+        except ValueError:
+            return None  # Return None if all parsing attempts fail
+
+    # If datetime is naive, attach UTC timezone
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+
+    return dt

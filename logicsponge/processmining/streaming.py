@@ -109,6 +109,8 @@ class StreamingActivityPredictor(ls.FunctionTerm):
             metrics = self.strategy.case_metrics(item["case_id"])
             prediction = metrics_prediction(metrics, self.strategy.config)
 
+            # prediction = self.strategy.case_predictions.get(item["case_id"], None)
+
             event: Event = {
                 "case_id": item["case_id"],
                 "activity": item["activity"],
@@ -122,6 +124,8 @@ class StreamingActivityPredictor(ls.FunctionTerm):
 
             if (
                 prediction
+                and item["timestamp"]
+                and self.last_timestamps.get(item["case_id"], None)
                 and item["case_id"] in self.last_timestamps
                 and item["activity"] in prediction["predicted_delays"]
             ):

@@ -2,14 +2,13 @@ import logging
 import os
 from collections import defaultdict
 from collections.abc import Iterator
-from datetime import datetime
 from typing import Any
 
 import pandas as pd
 
 from logicsponge.processmining.automata import PDFA
 from logicsponge.processmining.config import DEFAULT_CONFIG
-from logicsponge.processmining.data_utils import FileHandler, handle_keys, interleave_sequences
+from logicsponge.processmining.data_utils import FileHandler, handle_keys, interleave_sequences, parse_timestamp
 from logicsponge.processmining.types import Event
 
 logger = logging.getLogger(__name__)
@@ -57,6 +56,17 @@ def csv_row_iterator(
 # ============================================================
 
 data_collection = {
+    "BPI_Challenge_2011": {
+        "url": "https://data.4tu.nl/file/5ea5bb88-feaa-4e6f-a743-6460a755e05b/6f9640f9-0f1e-44d2-9495-ef9d1bd82218",
+        "doi": "10.4121/uuid:d9769f3d-0ab0-4fb8-803b-0d1120ffcf54",
+        "filetype": "xes.gz",
+        "target_filename": "BPI_Challenge_2011.csv",
+        "case_keys": ["case:concept:name"],
+        "activity_keys": ["concept:name"],
+        "timestamp": "time:timestamp",
+        "delimiter": ",",
+        "dtypes": None,
+    },
     "BPI_Challenge_2012": {
         "url": "https://data.4tu.nl/file/533f66a4-8911-4ac7-8612-1235d65d1f37/3276db7f-8bee-4f2b-88ee-92dbffb5a893",
         "doi": "10.4121/uuid:3926db30-f712-4394-aebc-75976070e91f",
@@ -88,8 +98,9 @@ data_collection = {
         "target_foldername": "data",
         "case_keys": ["Incident ID"],
         "activity_keys": ["IncidentActivity_Type"],
-        "delimiter": ";",
+        "timestamp": "DateStamp",
         "sort_by_time": "DateStamp",
+        "delimiter": ";",
         "dtypes": None,
     },
     "BPI_Challenge_2017": {
@@ -138,7 +149,20 @@ data_collection = {
         "delimiter": ",",
         "dtypes": None,
     },
+    "Helpdesk": {
+        "url": "https://data.4tu.nl/file/94ee26c8-78f6-4387-b32b-f028f2103a2c/697ff9af-fca0-4363-bd84-e81735d27e9f",
+        "doi": "10.4121/uuid:0c60edf1-6f83-4e75-9367-4c63b3e9d5bb",
+        "filetype": "csv",
+        "target_filename": "Helpdesk.csv",
+        "case_keys": ["Case ID"],
+        "activity_keys": ["Activity"],
+        "timestamp": "Complete Timestamp",
+        "sort_by_time": "Complete Timestamp",
+        "delimiter": ",",
+        "dtypes": None,
+    },
 }
+
 
 # ============================================================
 # File data loader
@@ -146,6 +170,7 @@ data_collection = {
 
 if DATA == "file":
     data_name = "Sepsis_Cases"
+    # data_name = "Helpdesk"
     # data_name = "BPI_Challenge_2012"
     mydata = data_collection[data_name]  # type: ignore
     file_path = os.path.join(FOLDERNAME, mydata["target_filename"])
@@ -193,7 +218,8 @@ if DATA == "file":
                 if raw_timestamp:
                     try:
                         # Parse timestamp; customize format if necessary
-                        parsed_timestamp = datetime.fromisoformat(raw_timestamp)
+                        # parsed_timestamp = datetime.fromisoformat(raw_timestamp)
+                        parsed_timestamp = parse_timestamp(raw_timestamp)
                     except ValueError:
                         # Handle invalid timestamps by assigning a default value
                         parsed_timestamp = None

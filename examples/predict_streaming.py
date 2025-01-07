@@ -192,7 +192,7 @@ lstm = StreamingActivityPredictor(
 models = [
     "fpt",
     "bag",
-    # "ngram_1",
+    "ngram_1",
     # "ngram_2",
     "ngram_3",
     "ngram_4",
@@ -200,7 +200,7 @@ models = [
     # "ngram_6",
     # "ngram_7",
     # "ngram_8",
-    "fallback",
+    # "fallback",
     "hard_voting",
     "soft_voting",
     "adaptive_voting",
@@ -242,7 +242,7 @@ sponge = (
     * (
         (fpt * DataItemFilter(data_item_filter=start_filter) * Evaluation("fpt"))
         | (bag * DataItemFilter(data_item_filter=start_filter) * Evaluation("bag"))
-        # | (ngram_1 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_1"))
+        | (ngram_1 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_1"))
         # | (ngram_2 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_2"))
         | (ngram_3 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_3"))
         | (ngram_4 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_4"))
@@ -250,7 +250,7 @@ sponge = (
         # | (ngram_6 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_6"))
         # | (ngram_7 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_7"))
         # | (ngram_8 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_8"))
-        | (fallback * DataItemFilter(data_item_filter=start_filter) * Evaluation("fallback"))
+        # | (fallback * DataItemFilter(data_item_filter=start_filter) * Evaluation("fallback"))
         | (hard_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("hard_voting"))
         | (soft_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("soft_voting"))
         | (adaptive_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("adaptive_voting"))
@@ -259,7 +259,7 @@ sponge = (
     * ls.ToSingleStream(flatten=True)
     * ls.AddIndex(key="index", index=1)
     * ls.KeyFilter(keys=all_attributes)
-    * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 1000 == 0 or item["index"] > len_dataset - 10)
+    * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 100 == 0 or item["index"] > len_dataset - 10)
     * PrintEval()
     # * ls.Print()
     # * (dashboard.Plot("Accuracy (%)", x="index", y=accuracy_list))
