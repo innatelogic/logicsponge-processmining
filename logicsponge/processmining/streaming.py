@@ -230,7 +230,7 @@ class Evaluation(ls.FunctionTerm):
 def eval_to_table(data: dict) -> pd.DataFrame:
     # Extract and display the index
     if "index" in data:
-        msg = f"========== {data["index"]} =========="
+        msg = f"========== {data['index']} =========="
         logger.info(msg)
 
     # Initialize a dictionary to hold the tabular data

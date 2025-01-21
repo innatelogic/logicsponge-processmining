@@ -145,7 +145,7 @@ def train_rnn(model, train_sequences, val_sequences, criterion, optimizer, batch
         epoch_loss = 0
 
         # Create progress bar for the training loop
-        with tqdm(total=len(dataloader), desc=f"Epoch {epoch+1}/{epochs}", unit="batch") as pbar:
+        with tqdm(total=len(dataloader), desc=f"Epoch {epoch + 1}/{epochs}", unit="batch") as pbar:
             for batch in dataloader:
                 sequences = batch[0]
 
