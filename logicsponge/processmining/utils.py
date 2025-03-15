@@ -18,8 +18,7 @@ stop_symbol = DEFAULT_CONFIG["stop_symbol"]
 
 
 def probs_prediction(probs: ProbDistr, config: Config) -> Prediction | None:
-    """
-    Returns the top-k activities based on their probabilities.
+    """Returns the top-k activities based on their probabilities.
     If stop_symbol has a probability of 1.0 and there are no other activities, return None.
     If stop_symbol has a probability of 1.0 and there are other activities, give a uniform distribution to these other activities.
     If stop_symbol is present but with a probability less than 1.0 and include_stop is False, remove it and normalize the rest.
@@ -51,7 +50,7 @@ def probs_prediction(probs: ProbDistr, config: Config) -> Prediction | None:
             # Distribute the remaining probability uniformly among other activities
             num_activities = len(probs_copy)
             uniform_prob = 1.0 / num_activities
-            probs_copy = {activity: uniform_prob for activity in probs_copy}
+            probs_copy = dict.fromkeys(probs_copy, uniform_prob)
 
         # If stop_symbol has less than 1.0 probability, remove it and normalize the rest
         elif stop_probability < 1.0:
@@ -110,9 +109,7 @@ def probs_prediction(probs: ProbDistr, config: Config) -> Prediction | None:
 
 
 def metrics_prediction(metrics: Metrics, config: Config) -> Prediction | None:
-    """
-    Returns prediction including time delays.
-    """
+    """Returns prediction including time delays."""
     probs = metrics["probs"]
     delays = metrics["predicted_delays"]
 

@@ -9,6 +9,7 @@ import torch
 from aalpy.learning_algs import run_Alergia
 from torch import nn, optim
 
+# ruff: noqa: E402
 logging.basicConfig(
     level=logging.INFO,
     format="%(message)s",

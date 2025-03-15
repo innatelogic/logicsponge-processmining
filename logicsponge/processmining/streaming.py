@@ -18,9 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class IteratorStreamer(ls.SourceTerm):
-    """
-    For streaming from iterator.
-    """
+    """For streaming from iterator."""
 
     def __init__(self, *args, data_iterator: Iterator, **kwargs):
         super().__init__(*args, **kwargs)
@@ -47,9 +45,7 @@ class IteratorStreamer(ls.SourceTerm):
 
 
 class AddStartSymbol(ls.FunctionTerm):
-    """
-    For streaming from list.
-    """
+    """For streaming from list."""
 
     def __init__(self, *args, start_symbol: ActivityName, **kwargs):
         super().__init__(*args, **kwargs)
@@ -81,8 +77,7 @@ class DataPreparation(ls.FunctionTerm):
         self.activity_keys = activity_keys
 
     def f(self, item: DataItem) -> DataItem:
-        """
-        Process the input DataItem to output a new DataItem containing only case and activity keys.
+        """Process the input DataItem to output a new DataItem containing only case and activity keys.
         - Combines values from case_keys into a single case_id (as a tuple or single value).
         - Combines values from activity_keys into a single activity (as a tuple or single value).
         """

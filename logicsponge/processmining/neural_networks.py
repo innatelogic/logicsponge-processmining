@@ -217,8 +217,7 @@ def train_rnn(model, train_sequences, val_sequences, criterion, optimizer, batch
 
 
 def evaluate_rnn(model, sequences, dataset_type="Validation"):
-    """
-    Evaluate the LSTM model on a dataset (train, test, or validation).
+    """Evaluate the LSTM model on a dataset (train, test, or validation).
     Returns accuracy.
     """
     model.eval()  # Set the model to evaluation mode

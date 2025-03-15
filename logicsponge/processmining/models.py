@@ -42,9 +42,7 @@ random.seed(123)
 
 
 class StreamingMiner(ABC):
-    """
-    The Base Streaming Miner (for both streaming and batch mode)
-    """
+    """The Base Streaming Miner (for both streaming and batch mode)"""
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         # Use CONFIG as a fallback if no specific config is provided
@@ -70,9 +68,7 @@ class StreamingMiner(ABC):
         self.modified_cases = set()  # Records potentially modified cases (predictions) in last update
 
     def update_stats(self, event: Event, prediction: Prediction | None) -> None:
-        """
-        Updates the statistics based on the actual activity, the prediction, and the top-k predictions.
-        """
+        """Updates the statistics based on the actual activity, the prediction, and the top-k predictions."""
         case_id = event.get("case_id")
         actual_next_activity = event.get("activity")
         timestamp = event.get("timestamp")
@@ -118,8 +114,7 @@ class StreamingMiner(ABC):
         self.stats["last_timestamps"][case_id] = timestamp
 
     def evaluate(self, data: list[list[Event]], mode: str = "incremental") -> None:
-        """
-        Evaluation in batch mode.
+        """Evaluation in batch mode.
         Evaluates the dataset either incrementally or by full sequence.
         Modes: 'incremental' or 'sequence'.
         """
@@ -155,46 +150,33 @@ class StreamingMiner(ABC):
 
     @abstractmethod
     def get_modified_cases(self) -> set[CaseId]:
-        """
-        Retrieves, recursively, cases that have potentially been modified and
+        """Retrieves, recursively, cases that have potentially been modified and
         whose prediction needs to be updated.
         """
 
     @abstractmethod
     def propagate_config(self) -> None:
-        """
-        Recursively propagates the config to all nested models.
-        """
+        """Recursively propagates the config to all nested models."""
 
     @abstractmethod
     def update(self, event: Event) -> None:
-        """
-        Updates Strategy.
-        """
+        """Updates Strategy."""
 
     @abstractmethod
     def next_state(self, current_state: ComposedState | None, activity: ActivityName) -> ComposedState | None:
-        """
-        Takes a transition from the current state.
-        """
+        """Takes a transition from the current state."""
 
     @abstractmethod
     def state_metrics(self, state: ComposedState | None) -> Metrics:
-        """
-        Returns metrics dictionary based on state.
-        """
+        """Returns metrics dictionary based on state."""
 
     @abstractmethod
     def case_metrics(self, case_id: CaseId) -> Metrics:
-        """
-        Returns metrics dictionary based on case.
-        """
+        """Returns metrics dictionary based on case."""
 
     @abstractmethod
     def sequence_metrics(self, sequence: list[Event]) -> Metrics:
-        """
-        Returns metrics dictionary based on sequence.
-        """
+        """Returns metrics dictionary based on sequence."""
 
 
 # ============================================================
@@ -220,16 +202,13 @@ class BasicMiner(StreamingMiner):
         return f"BasicMiner({self.algorithm})"
 
     def get_modified_cases(self) -> set[CaseId]:
-        """
-        Retrieves, recursively, cases that have potentially been modified and
+        """Retrieves, recursively, cases that have potentially been modified and
         whose prediction needs to be updated.
         """
         return self.algorithm.get_modified_cases()
 
     def propagate_config(self) -> None:
-        """
-        Recursively propagates the config to all nested models.
-        """
+        """Recursively propagates the config to all nested models."""
         self.algorithm.config = self.config
 
     def update(self, event: Event) -> None:
@@ -275,8 +254,7 @@ class MultiMiner(StreamingMiner, ABC):
         self.delay_weights = delay_weights
 
     def get_modified_cases(self) -> set[CaseId]:
-        """
-        Retrieves, recursively, cases that have potentially been modified and
+        """Retrieves, recursively, cases that have potentially been modified and
         whose prediction needs to be updated.
         """
         modified_cases = set()
@@ -288,9 +266,7 @@ class MultiMiner(StreamingMiner, ABC):
         return modified_cases
 
     def propagate_config(self) -> None:
-        """
-        Recursively propagates the config to all nested models.
-        """
+        """Recursively propagates the config to all nested models."""
         for model in self.models:
             model.config = self.config
             model.propagate_config()
@@ -356,8 +332,7 @@ class HardVoting(MultiMiner):
         super().__init__(*args, **kwargs)
 
     def voting_probs(self, probs_list: list[ProbDistr]) -> ProbDistr:
-        """
-        Perform hard voting based on the most frequent activity in the predictions and return
+        """Perform hard voting based on the most frequent activity in the predictions and return
         the winning activity as a probability dictionary with a probability of 1.0.
         If there is a tie, select the activity based on the first occurrence in the order of the models.
         """
@@ -401,9 +376,7 @@ class HardVoting(MultiMiner):
         return {self.config["stop_symbol"]: 0.0, selected_activity: 1.0}  # include STOP as an invariant
 
     def state_metrics(self, state: ComposedState | None) -> Metrics:
-        """
-        Return the majority vote.
-        """
+        """Return the majority vote."""
         if state is None:
             return empty_metrics()
 
@@ -421,9 +394,7 @@ class HardVoting(MultiMiner):
         )
 
     def case_metrics(self, case_id: CaseId) -> Metrics:
-        """
-        Return the hard voting of predictions from the ensemble.
-        """
+        """Return the hard voting of predictions from the ensemble."""
         probs_list = [model.case_metrics(case_id)["probs"] for model in self.models]
         delays_list = [model.case_metrics(case_id)["predicted_delays"] for model in self.models]
 
@@ -433,9 +404,7 @@ class HardVoting(MultiMiner):
         )
 
     def sequence_metrics(self, sequence: list[Event]) -> Metrics:
-        """
-        Return the majority vote.
-        """
+        """Return the majority vote."""
         probs_list = [model.sequence_metrics(sequence)["probs"] for model in self.models]
         delays_list = [model.sequence_metrics(sequence)["predicted_delays"] for model in self.models]
 
@@ -483,9 +452,7 @@ class SoftVoting(MultiMiner):
         return combined_probs
 
     def state_metrics(self, state: ComposedState | None) -> Metrics:
-        """
-        Return the majority vote.
-        """
+        """Return the majority vote."""
         if state is None:
             return empty_metrics()
 
@@ -503,9 +470,7 @@ class SoftVoting(MultiMiner):
         )
 
     def case_metrics(self, case_id: CaseId) -> Metrics:
-        """
-        Return the hard voting of predictions from the ensemble.
-        """
+        """Return the hard voting of predictions from the ensemble."""
         probs_list = [model.case_metrics(case_id)["probs"] for model in self.models]
         delays_list = [model.case_metrics(case_id)["predicted_delays"] for model in self.models]
 
@@ -515,9 +480,7 @@ class SoftVoting(MultiMiner):
         )
 
     def sequence_metrics(self, sequence: list[Event]) -> Metrics:
-        """
-        Return the majority vote.
-        """
+        """Return the majority vote."""
         probs_list = [model.sequence_metrics(sequence)["probs"] for model in self.models]
         delays_list = [model.sequence_metrics(sequence)["predicted_delays"] for model in self.models]
 
@@ -528,8 +491,7 @@ class SoftVoting(MultiMiner):
 
 
 class AdaptiveVoting(MultiMiner):
-    """
-    To be used only in streaming mode.
+    """To be used only in streaming mode.
     In batch mode, it will stick to the model with the highest training accuracy.
     """
 
@@ -543,9 +505,7 @@ class AdaptiveVoting(MultiMiner):
         self.correct_predictions = [0] * len(self.models)
 
     def update(self, event: Event) -> None:
-        """
-        Overwritten to account for keeping track of accuracies in streaming mode.
-        """
+        """Overwritten to account for keeping track of accuracies in streaming mode."""
         case_id = event["case_id"]
         activity = event["activity"]
 
@@ -563,23 +523,17 @@ class AdaptiveVoting(MultiMiner):
             self.modified_cases.update(model.get_modified_cases())
 
     def get_accuracies(self) -> list[float]:
-        """
-        Returns the accuracy of each model as a list of floats.
-        """
+        """Returns the accuracy of each model as a list of floats."""
         total = self.total_predictions
         return [correct / total if total > 0 else 0.0 for correct in self.correct_predictions]
 
     def select_best_model(self) -> int:
-        """
-        Returns the index of the model with the highest accuracy.
-        """
+        """Returns the index of the model with the highest accuracy."""
         accuracies = self.get_accuracies()
         return accuracies.index(max(accuracies))
 
     def state_metrics(self, state: ComposedState | None) -> Metrics:
-        """
-        Return the probability distribution from the model with the best accuracy so far.
-        """
+        """Return the probability distribution from the model with the best accuracy so far."""
         if state is None:
             return empty_metrics()
 
@@ -600,9 +554,7 @@ class AdaptiveVoting(MultiMiner):
         )
 
     def case_metrics(self, case_id: CaseId) -> Metrics:
-        """
-        Return the probability distribution from the model with the best accuracy so far.
-        """
+        """Return the probability distribution from the model with the best accuracy so far."""
         # Get the best model
         best_model_index = self.select_best_model()
         best_model = self.models[best_model_index]
@@ -615,9 +567,7 @@ class AdaptiveVoting(MultiMiner):
         )
 
     def sequence_metrics(self, sequence: list[Event]) -> Metrics:
-        """
-        Return the probability distribution from the model with the best accuracy so far.
-        """
+        """Return the probability distribution from the model with the best accuracy so far."""
         # Get the best model
         best_model_index = self.select_best_model()
         best_model = self.models[best_model_index]
@@ -640,8 +590,7 @@ class Fallback(MultiMiner):
         super().__init__(*args, **kwargs)
 
     def state_metrics(self, state: ComposedState | None) -> Metrics:
-        """
-        Return the first non-{} probabilities from the models, cascading through the models in order.
+        """Return the first non-{} probabilities from the models, cascading through the models in order.
         Each model gets its corresponding state from the ComposedState.
         """
         if state is None:
@@ -665,10 +614,7 @@ class Fallback(MultiMiner):
         return empty_metrics()
 
     def case_metrics(self, case_id: CaseId) -> Metrics:
-        """
-        Return the first non-{} probabilities from the models, cascading through the models in order.
-        """
-
+        """Return the first non-{} probabilities from the models, cascading through the models in order."""
         delays_list = [model.case_metrics(case_id)["predicted_delays"] for model in self.models]
 
         for model in self.models:
@@ -685,11 +631,9 @@ class Fallback(MultiMiner):
         return empty_metrics()
 
     def sequence_metrics(self, sequence: list[Event]) -> Metrics:
-        """
-        Return the first non-{} probabilities from the models for the given sequence,
+        """Return the first non-{} probabilities from the models for the given sequence,
         cascading through the models in order.
         """
-
         delays_list = [model.sequence_metrics(sequence)["predicted_delays"] for model in self.models]
 
         for model in self.models:
@@ -783,15 +727,11 @@ class Alergia(BasicMiner):
         return probability_distribution["in"]
 
     def get_modified_cases(self) -> set[CaseId]:
-        """
-        Not implemented
-        """
+        """Not implemented"""
         return set()
 
     def update(self, event: Event) -> None:
-        """
-        This method is not used in this subclass.
-        """
+        """This method is not used in this subclass."""
 
     def state_metrics(self, state: Any) -> Metrics:
         return Metrics(
@@ -800,9 +740,7 @@ class Alergia(BasicMiner):
         )
 
     def case_metrics(self, case_id: CaseId) -> Metrics:  # noqa: ARG002
-        """
-        This method is not used in this subclass.
-        """
+        """This method is not used in this subclass."""
         return empty_metrics()
 
     def sequence_metrics(self, sequence: list[Event]) -> Metrics:
@@ -848,20 +786,15 @@ class NeuralNetworkMiner(StreamingMiner):
         self.index_activity = {}
 
     def get_sequence(self, case_id: CaseId) -> list[int]:
-        """
-        Return the index sequence for a specific case_id.
-        """
+        """Return the index sequence for a specific case_id."""
         return self.sequences.get(case_id, [])
 
     def get_modified_cases(self) -> set[CaseId]:
-        """
-        Not implemented
-        """
+        """Not implemented"""
         return set()
 
     def update(self, event: Event) -> None:
-        """
-        Add an activity to the sequence corresponding to the case_id.
+        """Add an activity to the sequence corresponding to the case_id.
         Dynamically update the activity_to_idx mapping if a new activity is encountered.
         """
         case_id = event["case_id"]
@@ -927,11 +860,9 @@ class NeuralNetworkMiner(StreamingMiner):
         return loss.item()
 
     def select_batch(self, case_id: CaseId) -> list[list[int]]:
-        """
-        Select a batch of sequences, using a round-robin approach.
+        """Select a batch of sequences, using a round-robin approach.
         Only select sequences that have at least two tokens (input + target).
         """
-
         valid_case_ids = [cid for cid, sequence in self.sequences.items() if len(sequence) > 1]
 
         if len(valid_case_ids) < self.batch_size:
@@ -970,13 +901,11 @@ class NeuralNetworkMiner(StreamingMiner):
         return [self.get_sequence(cid) for cid in batch_case_ids]
 
     def case_metrics(self, case_id: CaseId) -> Metrics:
-        """
-        Predict the next activity for a given case_id and return the top-k most likely activities along with the probability
+        """Predict the next activity for a given case_id and return the top-k most likely activities along with the probability
         of the top activity.
 
         Note that, here, a sequence is a sequence of activity indices (rather than activities).
         """
-
         # Get the sequence for the case_id
         index_sequence = self.get_sequence(case_id)
 
@@ -989,8 +918,7 @@ class NeuralNetworkMiner(StreamingMiner):
         )
 
     def sequence_metrics(self, sequence: list[Event]) -> Metrics:
-        """
-        Predict the next activity for a given sequence of activities and return the top-k most likely activities along with the
+        """Predict the next activity for a given sequence of activities and return the top-k most likely activities along with the
         probability of the top activity.
         """
         if not sequence or len(sequence) < 1:
@@ -1011,9 +939,7 @@ class NeuralNetworkMiner(StreamingMiner):
         )
 
     def idx_sequence_probs(self, index_sequence: list[int]) -> ProbDistr:
-        """
-        Predict the next activity for a given sequence of activity indices.
-        """
+        """Predict the next activity for a given sequence of activity indices."""
         # Convert to a tensor and add a batch dimension
         input_sequence = torch.tensor(index_sequence, dtype=torch.long, device=self.device).unsqueeze(
             0

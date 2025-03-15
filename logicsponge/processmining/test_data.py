@@ -26,8 +26,7 @@ DATA = "file"
 def csv_row_iterator(
     file_path: str, delimiter: str = ",", chunksize: int = 1000, dtypes: dict[str, str] | None = None
 ) -> Iterator[dict[str, Any]]:
-    """
-    Creates an iterator that yields rows from a large CSV file.
+    """Creates an iterator that yields rows from a large CSV file.
 
     Args:
         file_path (str): Path to the CSV file.
@@ -36,8 +35,8 @@ def csv_row_iterator(
 
     Yields:
         NamedTuple: Each row as a nametuple of column names to values.
-    """
 
+    """
     # by default everything is a str, unless explicitely specified.
     if dtypes is None:
         dtypes = {}

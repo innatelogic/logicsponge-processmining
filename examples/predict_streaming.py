@@ -4,6 +4,7 @@ import logging
 import torch
 from torch import nn, optim
 
+# ruff: noqa: E402
 logging.basicConfig(
     level=logging.INFO,
     format="%(message)s",  # Only log level and message, no date
