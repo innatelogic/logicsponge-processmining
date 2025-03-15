@@ -216,6 +216,9 @@ class BasicMiner(StreamingMiner):
 
         self.initial_state = self.algorithm.initial_state
 
+    def __str__(self):
+        return f"BasicMiner({self.algorithm})"
+
     def get_modified_cases(self) -> set[CaseId]:
         """
         Retrieves, recursively, cases that have potentially been modified and
@@ -671,6 +674,8 @@ class Fallback(MultiMiner):
         for model in self.models:
             probs = model.case_metrics(case_id)["probs"]
             if probs:
+                msg = f"Fallback chooses model {model} with probs {probs}"
+                logger.debug(msg)
                 return Metrics(
                     probs=probs,
                     predicted_delays=self.voting_delays(delays_list),

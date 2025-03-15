@@ -28,13 +28,17 @@ logger = logging.getLogger(__name__)
 class BaseStructure(PDFA, ABC):
     case_info: dict[CaseId, Any]
     last_transition: tuple[StateId, ActivityName, StateId] | None
+    min_total_visits: int
+    min_max_prob: float
+    modified_cases: set[CaseId]
 
-    def __init__(self, *args, min_total_visits: int = 1, **kwargs) -> None:
+    def __init__(self, *args, min_total_visits: int = 1, min_max_prob: float = 0.0, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
         self.case_info = {}  # provides case info such as current state or last timestamp
         self.last_transition = None
         self.min_total_visits = min_total_visits
+        self.min_max_prob = min_max_prob
 
         self.modified_cases = set()  # Records potentially modified cases (predictions) in last update
 
@@ -220,7 +224,11 @@ class BaseStructure(PDFA, ABC):
         Returns metrics based on state.
         """
         # Return {} if the current state is invalid or has insufficient visits
-        if state is None or self.state_info.get(state, {}).get("total_visits", 0) < self.min_total_visits:
+        if (
+            state is None
+            or self.state_info.get(state, {}).get("total_visits", 0) < self.min_total_visits
+            or max(self.get_probabilities(state).values()) < self.min_max_prob
+        ):
             return empty_metrics()
 
         return self.get_metrics(state)
@@ -298,6 +306,9 @@ class NGram(BaseStructure):
 
         # Maps access string to its state; will be used to do backtracking in inference if transition is not possible.
         self.access_strings = {(): self.initial_state}
+
+    def __str__(self):
+        return f"NGram(window_length={self.window_length}, min_total_visits={self.min_total_visits}, min_max_prob={self.min_max_prob})"
 
     def follow_path(self, sequence: list[ActivityName]) -> StateId:
         """

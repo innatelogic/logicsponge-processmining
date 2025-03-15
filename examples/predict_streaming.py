@@ -4,6 +4,11 @@ import logging
 import torch
 from torch import nn, optim
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",  # Only log level and message, no date
+)
+
 import logicsponge.core as ls
 from logicsponge.core import DataItem, DataItemFilter
 
@@ -118,6 +123,23 @@ fallback = StreamingActivityPredictor(
     )
 )
 
+adaptive_ngram = StreamingActivityPredictor(
+    strategy=Fallback(
+        models=[
+            BasicMiner(algorithm=NGram(window_length=9, min_total_visits=10, min_max_prob=0.9)),
+            BasicMiner(algorithm=NGram(window_length=8, min_total_visits=10, min_max_prob=0.9)),
+            BasicMiner(algorithm=NGram(window_length=7, min_total_visits=10, min_max_prob=0.8)),
+            BasicMiner(algorithm=NGram(window_length=6, min_total_visits=10, min_max_prob=0.7)),
+            BasicMiner(algorithm=NGram(window_length=5, min_total_visits=10, min_max_prob=0.6)),
+            BasicMiner(algorithm=NGram(window_length=4, min_total_visits=10, min_max_prob=0.0)),
+            BasicMiner(algorithm=NGram(window_length=3, min_total_visits=10, min_max_prob=0.0)),
+            BasicMiner(algorithm=NGram(window_length=2, min_total_visits=10, min_max_prob=0.0)),
+            BasicMiner(algorithm=NGram(window_length=1)),
+        ],
+        config=config,
+    )
+)
+
 hard_voting = StreamingActivityPredictor(
     strategy=HardVoting(
         models=[
@@ -193,18 +215,19 @@ models = [
     "fpt",
     "bag",
     "ngram_1",
-    # "ngram_2",
+    "ngram_2",
     "ngram_3",
     "ngram_4",
     "ngram_5",
-    # "ngram_6",
-    # "ngram_7",
-    # "ngram_8",
-    # "fallback",
+    "ngram_6",
+    "ngram_7",
+    "ngram_8",
+    "fallback",
+    "adaptive_ngram",
     "hard_voting",
     "soft_voting",
     "adaptive_voting",
-    # "lstm",
+    "lstm",
 ]
 
 accuracy_list = [f"{model}.accuracy" for model in models]
@@ -241,16 +264,17 @@ sponge = (
     * AddStartSymbol(start_symbol=start_symbol)
     * (
         (fpt * DataItemFilter(data_item_filter=start_filter) * Evaluation("fpt"))
-        | (bag * DataItemFilter(data_item_filter=start_filter) * Evaluation("bag"))
-        | (ngram_1 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_1"))
+        # | (bag * DataItemFilter(data_item_filter=start_filter) * Evaluation("bag"))
+        # | (ngram_1 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_1"))
         # | (ngram_2 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_2"))
-        | (ngram_3 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_3"))
-        | (ngram_4 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_4"))
-        | (ngram_5 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_5"))
+        # | (ngram_3 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_3"))
+        # | (ngram_4 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_4"))
+        # | (ngram_5 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_5"))
         # | (ngram_6 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_6"))
         # | (ngram_7 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_7"))
         # | (ngram_8 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_8"))
         # | (fallback * DataItemFilter(data_item_filter=start_filter) * Evaluation("fallback"))
+        | (adaptive_ngram * DataItemFilter(data_item_filter=start_filter) * Evaluation("adaptive_ngram"))
         | (hard_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("hard_voting"))
         | (soft_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("soft_voting"))
         | (adaptive_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("adaptive_voting"))
