@@ -343,7 +343,7 @@ for iteration in range(n_iterations):
         hidden_dim = 128
         output_dim = vocab_size  # Output used to predict the next activity
 
-        model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim)
+        model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, use_one_hot=True)
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.Adam(model.parameters(), lr=0.001)
 

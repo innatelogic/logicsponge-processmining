@@ -4,6 +4,7 @@ import logging
 import torch
 import torch.utils.data
 from torch import nn
+import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
 
@@ -50,25 +51,94 @@ class RNNModel(nn.Module):
         return self.fc(rnn_out)
 
 
+# class LSTMModel(nn.Module):
+#     device: torch.device | None
+#     embedding: nn.Embedding
+#     lstm1: nn.LSTM
+#     lstm2: nn.LSTM
+#     fc: nn.Linear
+#
+#     def __init__(
+#         self, vocab_size: int, embedding_dim: int, hidden_dim: int, output_dim: int, device: torch.device | None = None
+#     ):
+#         super().__init__()
+#         self.device = device
+#         # Use padding_idx=0 to handle padding
+#         self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0, device=device)
+#
+#         # Two LSTM layers
+#         self.lstm1 = nn.LSTM(embedding_dim, hidden_dim, batch_first=True, device=device)
+#         self.lstm2 = nn.LSTM(hidden_dim, hidden_dim, batch_first=True, device=device)
+#         # self.lstm3 = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
+#
+#         self.fc = nn.Linear(hidden_dim, output_dim, device=device)
+#
+#         # Apply custom weight initialization
+#         self.apply(self._init_weights)
+#
+#     def forward(self, x: torch.Tensor) -> torch.Tensor:
+#         x = self.embedding(x)  # Convert activity indices to embeddings
+#
+#         # Pass through LSTM layers
+#         lstm_out, _ = self.lstm1(x)
+#         lstm_out, _ = self.lstm2(lstm_out)
+#         # lstm_out, _ = self.lstm3(lstm_out)
+#
+#         return self.fc(lstm_out)
+#
+#     def _init_weights(self, m: nn.Module) -> None:
+#         if isinstance(m, nn.Linear):
+#             nn.init.xavier_uniform_(m.weight)  # Xavier initialization for linear layers
+#             if m.bias is not None:
+#                 nn.init.constant_(m.bias, 0)  # Initialize biases to zero
+#         elif isinstance(m, nn.LSTM):
+#             for name, param in m.named_parameters():
+#                 if "weight_ih" in name:
+#                     nn.init.xavier_uniform_(param.data)  # Xavier initialization for input-hidden weights
+#                 elif "weight_hh" in name:
+#                     nn.init.orthogonal_(param.data)  # Orthogonal initialization for hidden-hidden weights
+#                 elif "bias" in name:
+#                     nn.init.constant_(param.data, 0)  # Initialize biases to zero
+#         elif isinstance(m, nn.Embedding):
+#             nn.init.uniform_(m.weight, -0.1, 0.1)  # Uniform initialization for embedding weights
+
 class LSTMModel(nn.Module):
     device: torch.device | None
-    embedding: nn.Embedding
+    embedding: nn.Embedding | None
+    use_one_hot: bool
+    vocab_size: int
+    embedding_dim: int
     lstm1: nn.LSTM
     lstm2: nn.LSTM
     fc: nn.Linear
 
     def __init__(
-        self, vocab_size: int, embedding_dim: int, hidden_dim: int, output_dim: int, device: torch.device | None = None
+            self,
+            vocab_size: int,
+            embedding_dim: int,
+            hidden_dim: int,
+            output_dim: int,
+            use_one_hot: bool = False,
+            device: torch.device | None = None
     ):
         super().__init__()
         self.device = device
-        # Use padding_idx=0 to handle padding
-        self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0, device=device)
+        self.use_one_hot = use_one_hot
+        self.vocab_size = vocab_size
+        self.embedding_dim = embedding_dim
 
-        # Two LSTM layers
-        self.lstm1 = nn.LSTM(embedding_dim, hidden_dim, batch_first=True, device=device)
+        # Conditional embedding layer
+        if not use_one_hot:
+            self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0, device=device)
+        else:
+            self.embedding = None
+
+        # Input dimension to LSTM depends on the encoding method
+        input_dim = vocab_size if use_one_hot else embedding_dim
+
+        # LSTM layers
+        self.lstm1 = nn.LSTM(input_dim, hidden_dim, batch_first=True, device=device)
         self.lstm2 = nn.LSTM(hidden_dim, hidden_dim, batch_first=True, device=device)
-        # self.lstm3 = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
 
         self.fc = nn.Linear(hidden_dim, output_dim, device=device)
 
@@ -76,31 +146,35 @@ class LSTMModel(nn.Module):
         self.apply(self._init_weights)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.embedding(x)  # Convert activity indices to embeddings
+        if not self.use_one_hot:
+            # Use embedding layer
+            x = self.embedding(x)
+        else:
+            # Use one-hot encoding
+            # print(f"x shape: {x.shape}, dtype: {x.dtype}, unique values: {torch.unique(x)}")
+            x = F.one_hot(x, num_classes=self.vocab_size).float().to(self.device)
 
         # Pass through LSTM layers
         lstm_out, _ = self.lstm1(x)
         lstm_out, _ = self.lstm2(lstm_out)
-        # lstm_out, _ = self.lstm3(lstm_out)
 
         return self.fc(lstm_out)
 
     def _init_weights(self, m: nn.Module) -> None:
         if isinstance(m, nn.Linear):
-            nn.init.xavier_uniform_(m.weight)  # Xavier initialization for linear layers
+            nn.init.xavier_uniform_(m.weight)
             if m.bias is not None:
-                nn.init.constant_(m.bias, 0)  # Initialize biases to zero
+                nn.init.constant_(m.bias, 0)
         elif isinstance(m, nn.LSTM):
             for name, param in m.named_parameters():
                 if "weight_ih" in name:
-                    nn.init.xavier_uniform_(param.data)  # Xavier initialization for input-hidden weights
+                    nn.init.xavier_uniform_(param.data)
                 elif "weight_hh" in name:
-                    nn.init.orthogonal_(param.data)  # Orthogonal initialization for hidden-hidden weights
+                    nn.init.orthogonal_(param.data)
                 elif "bias" in name:
-                    nn.init.constant_(param.data, 0)  # Initialize biases to zero
-        elif isinstance(m, nn.Embedding):
-            nn.init.uniform_(m.weight, -0.1, 0.1)  # Uniform initialization for embedding weights
-
+                    nn.init.constant_(param.data, 0)
+        elif isinstance(m, nn.Embedding) and m is not None:
+            nn.init.uniform_(m.weight, -0.1, 0.1)
 
 # ============================================================
 # Training and Evaluation

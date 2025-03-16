@@ -62,7 +62,7 @@ torch.backends.cudnn.benchmark = False
 
 config = {
     "include_stop": False,
-    "include_time": True,  # True is default
+    "include_time": False,  # True is default
 }
 
 start_symbol = DEFAULT_CONFIG["start_symbol"]
@@ -118,6 +118,18 @@ fallback = StreamingActivityPredictor(
     )
 )
 
+# fallback = StreamingActivityPredictor(
+#     strategy=Fallback(
+#         models=[
+#             BasicMiner(algorithm=NGram(window_length=4, min_total_visits=10)),
+#             BasicMiner(algorithm=NGram(window_length=3, min_total_visits=10)),
+#             BasicMiner(algorithm=NGram(window_length=2, min_total_visits=10)),
+#             BasicMiner(algorithm=NGram(window_length=1)),
+#         ],
+#         config=config,
+#     )
+# )
+
 hard_voting = StreamingActivityPredictor(
     strategy=HardVoting(
         models=[
@@ -169,7 +181,7 @@ vocab_size = 50  # An upper bound on the number of activities
 embedding_dim = 50
 hidden_dim = 128
 output_dim = vocab_size
-model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, device=device)
+model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, device=device, use_one_hot=True)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
@@ -193,18 +205,18 @@ models = [
     "fpt",
     "bag",
     "ngram_1",
-    # "ngram_2",
+    "ngram_2",
     "ngram_3",
     "ngram_4",
     "ngram_5",
-    # "ngram_6",
-    # "ngram_7",
-    # "ngram_8",
-    # "fallback",
+    "ngram_6",
+    "ngram_7",
+    "ngram_8",
+    "fallback",
     "hard_voting",
     "soft_voting",
     "adaptive_voting",
-    # "lstm",
+    "lstm",
 ]
 
 accuracy_list = [f"{model}.accuracy" for model in models]
@@ -235,26 +247,59 @@ len_dataset = 15214
 # len_dataset = 2514266
 # len_dataset = 1595923
 
+# sponge = (
+#     streamer
+#     * ls.KeyFilter(keys=["case_id", "activity", "timestamp"])
+#     * AddStartSymbol(start_symbol=start_symbol)
+#     * (
+#         (fpt * DataItemFilter(data_item_filter=start_filter) * Evaluation("fpt"))
+#         # | (bag * DataItemFilter(data_item_filter=start_filter) * Evaluation("bag"))
+#         # | (ngram_1 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_1"))
+#         # | (ngram_2 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_2"))
+#         # | (ngram_3 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_3"))
+#         # | (ngram_4 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_4"))
+#         # | (ngram_5 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_5"))
+#         # | (ngram_6 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_6"))
+#         # | (ngram_7 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_7"))
+#         # | (ngram_8 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_8"))
+#         # | (fallback * DataItemFilter(data_item_filter=start_filter) * Evaluation("fallback"))
+#         # | (hard_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("hard_voting"))
+#         # | (soft_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("soft_voting"))
+#         # | (adaptive_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("adaptive_voting"))
+#         | (lstm * DataItemFilter(data_item_filter=start_filter) * Evaluation("lstm"))
+#     )
+#     * ls.ToSingleStream(flatten=True)
+#     * ls.AddIndex(key="index", index=1)
+#     * ls.KeyFilter(keys=all_attributes)
+#     * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 100 == 0 or item["index"] > len_dataset - 10)
+#     * PrintEval()
+#     # * ls.Print()
+#     # * (dashboard.Plot("Accuracy (%)", x="index", y=accuracy_list))
+#     # * (dashboard.Plot("Latency Mean (ms)", x="index", y=latency_mean_list))
+# )
+
+
 sponge = (
     streamer
     * ls.KeyFilter(keys=["case_id", "activity", "timestamp"])
-    * AddStartSymbol(start_symbol=start_symbol)
     * (
-        (fpt * DataItemFilter(data_item_filter=start_filter) * Evaluation("fpt"))
-        | (bag * DataItemFilter(data_item_filter=start_filter) * Evaluation("bag"))
-        | (ngram_1 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_1"))
-        # | (ngram_2 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_2"))
-        | (ngram_3 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_3"))
-        | (ngram_4 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_4"))
-        | (ngram_5 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_5"))
-        # | (ngram_6 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_6"))
-        # | (ngram_7 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_7"))
-        # | (ngram_8 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_8"))
-        # | (fallback * DataItemFilter(data_item_filter=start_filter) * Evaluation("fallback"))
-        | (hard_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("hard_voting"))
-        | (soft_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("soft_voting"))
-        | (adaptive_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("adaptive_voting"))
-        # | (lstm * DataItemFilter(data_item_filter=start_filter) * Evaluation("lstm"))
+        (fpt * Evaluation("fpt"))
+        | (bag * Evaluation("bag"))
+        | (ngram_1 * Evaluation("ngram_1"))
+        | (ngram_2 * Evaluation("ngram_2"))
+        | (ngram_3 * Evaluation("ngram_3"))
+        | (ngram_4 * Evaluation("ngram_4"))
+        | (ngram_5 * Evaluation("ngram_5"))
+        | (ngram_6 * Evaluation("ngram_6"))
+        | (ngram_7 * Evaluation("ngram_7"))
+        | (ngram_8 * Evaluation("ngram_8"))
+        | (fallback * Evaluation("fallback"))
+        | (hard_voting * Evaluation("hard_voting"))
+        | (soft_voting * Evaluation("soft_voting"))
+        | (adaptive_voting * Evaluation("adaptive_voting"))
+        | (AddStartSymbol(start_symbol=start_symbol)
+           * lstm * DataItemFilter(data_item_filter=start_filter)
+           * Evaluation("lstm"))
     )
     * ls.ToSingleStream(flatten=True)
     * ls.AddIndex(key="index", index=1)
@@ -265,6 +310,8 @@ sponge = (
     # * (dashboard.Plot("Accuracy (%)", x="index", y=accuracy_list))
     # * (dashboard.Plot("Latency Mean (ms)", x="index", y=latency_mean_list))
 )
+
+
 
 sponge.start()
 
