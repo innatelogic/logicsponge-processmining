@@ -4,6 +4,12 @@ import logging
 import torch
 from torch import nn, optim
 
+# ruff: noqa: E402
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",  # Only log level and message, no date
+)
+
 import logicsponge.core as ls
 from logicsponge.core import DataItem, DataItemFilter
 
@@ -118,17 +124,22 @@ fallback = StreamingActivityPredictor(
     )
 )
 
-# fallback = StreamingActivityPredictor(
-#     strategy=Fallback(
-#         models=[
-#             BasicMiner(algorithm=NGram(window_length=4, min_total_visits=10)),
-#             BasicMiner(algorithm=NGram(window_length=3, min_total_visits=10)),
-#             BasicMiner(algorithm=NGram(window_length=2, min_total_visits=10)),
-#             BasicMiner(algorithm=NGram(window_length=1)),
-#         ],
-#         config=config,
-#     )
-# )
+adaptive_ngram = StreamingActivityPredictor(
+    strategy=Fallback(
+        models=[
+            BasicMiner(algorithm=NGram(window_length=9, min_total_visits=10, min_max_prob=0.9)),
+            BasicMiner(algorithm=NGram(window_length=8, min_total_visits=10, min_max_prob=0.9)),
+            BasicMiner(algorithm=NGram(window_length=7, min_total_visits=10, min_max_prob=0.8)),
+            BasicMiner(algorithm=NGram(window_length=6, min_total_visits=10, min_max_prob=0.7)),
+            BasicMiner(algorithm=NGram(window_length=5, min_total_visits=10, min_max_prob=0.6)),
+            BasicMiner(algorithm=NGram(window_length=4, min_total_visits=10, min_max_prob=0.0)),
+            BasicMiner(algorithm=NGram(window_length=3, min_total_visits=10, min_max_prob=0.0)),
+            BasicMiner(algorithm=NGram(window_length=2, min_total_visits=10, min_max_prob=0.0)),
+            BasicMiner(algorithm=NGram(window_length=1)),
+        ],
+        config=config,
+    )
+)
 
 hard_voting = StreamingActivityPredictor(
     strategy=HardVoting(
@@ -213,6 +224,7 @@ models = [
     "ngram_7",
     "ngram_8",
     "fallback",
+    "adaptive_ngram",
     "hard_voting",
     "soft_voting",
     "adaptive_voting",
@@ -294,6 +306,7 @@ sponge = (
         | (ngram_7 * Evaluation("ngram_7"))
         | (ngram_8 * Evaluation("ngram_8"))
         | (fallback * Evaluation("fallback"))
+        | (adaptive_ngram * Evaluation("hard_voting"))
         | (hard_voting * Evaluation("hard_voting"))
         | (soft_voting * Evaluation("soft_voting"))
         | (adaptive_voting * Evaluation("adaptive_voting"))
@@ -310,7 +323,6 @@ sponge = (
     # * (dashboard.Plot("Accuracy (%)", x="index", y=accuracy_list))
     # * (dashboard.Plot("Latency Mean (ms)", x="index", y=latency_mean_list))
 )
-
 
 
 sponge.start()

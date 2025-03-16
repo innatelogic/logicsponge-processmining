@@ -28,13 +28,17 @@ logger = logging.getLogger(__name__)
 class BaseStructure(PDFA, ABC):
     case_info: dict[CaseId, Any]
     last_transition: tuple[StateId, ActivityName, StateId] | None
+    min_total_visits: int
+    min_max_prob: float
+    modified_cases: set[CaseId]
 
-    def __init__(self, *args, min_total_visits: int = 1, **kwargs) -> None:
+    def __init__(self, *args, min_total_visits: int = 1, min_max_prob: float = 0.0, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
         self.case_info = {}  # provides case info such as current state or last timestamp
         self.last_transition = None
         self.min_total_visits = min_total_visits
+        self.min_max_prob = min_max_prob
 
         self.modified_cases = set()  # Records potentially modified cases (predictions) in last update
 
@@ -44,8 +48,7 @@ class BaseStructure(PDFA, ABC):
         self.state_info[self.initial_state]["level"] = 0
 
     def get_modified_cases(self) -> set[CaseId]:
-        """
-        Retrieves, recursively, cases that have potentially been modified and
+        """Retrieves, recursively, cases that have potentially been modified and
         whose prediction needs to be updated.
         """
         return self.modified_cases
@@ -55,8 +58,7 @@ class BaseStructure(PDFA, ABC):
         return list(self.state_info.keys())
 
     def create_state(self, state_id: StateId | None = None) -> StateId:
-        """
-        Overwrites Automata method.
+        """Overwrites Automata method.
         Creates and initializes a new state with the given state ID.
         If no state ID is provided, ID is assigned based on current number of states.
         """
@@ -88,9 +90,7 @@ class BaseStructure(PDFA, ABC):
         self.state_info[self.initial_state]["active_cases"].add(case_id)
 
     def initialize_activity(self, state_id: StateId, activity: ActivityName) -> None:
-        """
-        Initializes activity-specific information for a given state.
-        """
+        """Initializes activity-specific information for a given state."""
         # Initialize activity frequency
         self.state_info[state_id]["activity_frequency"][activity] = 0
 
@@ -146,16 +146,12 @@ class BaseStructure(PDFA, ABC):
         return copy.deepcopy(self.state_info[state]["time_info"]["predicted_delay"])
 
     def get_metrics(self, state: StateId) -> Metrics:
-        """
-        Combines probabilities and delays for a given state into a single metrics dictionary.
-        """
+        """Combines probabilities and delays for a given state into a single metrics dictionary."""
         return Metrics(probs=self.get_probabilities(state), predicted_delays=self.get_predicted_delays(state))
 
     @abstractmethod
     def update(self, event: Event) -> None:
-        """
-        Updates DFA tree structure of the process miner object by adding a new activity to case
-        """
+        """Updates DFA tree structure of the process miner object by adding a new activity to case"""
 
     def next_state(self, state: StateId | None, activity: ActivityName) -> StateId | None:
         if state is None or state not in self.transitions or activity not in self.transitions[state]:
@@ -164,9 +160,7 @@ class BaseStructure(PDFA, ABC):
         return self.transitions[state][activity]
 
     def update_info(self, event: Event, current_state: StateId, next_state: StateId):
-        """
-        Updates state and timing information for a given transition.
-        """
+        """Updates state and timing information for a given transition."""
         case_id = event["case_id"]
         activity = event["activity"]
         timestamp = event["timestamp"]
@@ -216,27 +210,25 @@ class BaseStructure(PDFA, ABC):
                 self.case_info[case_id]["last_timestamp"] = timestamp
 
     def state_metrics(self, state: StateId | None) -> Metrics:
-        """
-        Returns metrics based on state.
-        """
+        """Returns metrics based on state."""
         # Return {} if the current state is invalid or has insufficient visits
-        if state is None or self.state_info.get(state, {}).get("total_visits", 0) < self.min_total_visits:
+        if (
+            state is None
+            or self.state_info.get(state, {}).get("total_visits", 0) < self.min_total_visits
+            or max(self.get_probabilities(state).values()) < self.min_max_prob
+        ):
             return empty_metrics()
 
         return self.get_metrics(state)
 
     def case_metrics(self, case_id: CaseId) -> Metrics:
-        """
-        Returns metrics based on case.
-        """
+        """Returns metrics based on case."""
         state = self.initial_state if case_id not in self.case_info else self.case_info[case_id].get("state", None)
 
         return self.state_metrics(state)
 
     def sequence_metrics(self, sequence: list[Event]) -> Metrics:
-        """
-        Returns probabilities based on sequence of events.
-        """
+        """Returns probabilities based on sequence of events."""
         state = self.parse_sequence(sequence)
 
         return self.state_metrics(state)
@@ -253,9 +245,7 @@ class FrequencyPrefixTree(BaseStructure):
         self.last_transition = None  # for visualization of frequency prefix tree
 
     def update(self, event: Event) -> None:
-        """
-        Updates DFA tree structure of the process miner object by adding a new activity to case
-        """
+        """Updates DFA tree structure of the process miner object by adding a new activity to case"""
         case_id = event["case_id"]
         activity = event["activity"]
 
@@ -299,9 +289,11 @@ class NGram(BaseStructure):
         # Maps access string to its state; will be used to do backtracking in inference if transition is not possible.
         self.access_strings = {(): self.initial_state}
 
+    def __str__(self):
+        return f"NGram(window_length={self.window_length}, min_total_visits={self.min_total_visits}, min_max_prob={self.min_max_prob})"
+
     def follow_path(self, sequence: list[ActivityName]) -> StateId:
-        """
-        Follows the given activity sequence starting from the root (initial state).
+        """Follows the given activity sequence starting from the root (initial state).
         If necessary, creates new states along the path. Does not modify state
         and activity frequency counts.
 
@@ -332,9 +324,7 @@ class NGram(BaseStructure):
         return current_state
 
     def update(self, event: Event) -> None:
-        """
-        Updates NGram by adding a new event
-        """
+        """Updates NGram by adding a new event"""
         case_id = event["case_id"]
         activity = event["activity"]
 
@@ -370,9 +360,7 @@ class NGram(BaseStructure):
         self.update_info(event, current_state, next_state)
 
     def next_state(self, state: StateId | None, activity: ActivityName) -> StateId | None:
-        """
-        Overwrites next_state from superclass to implement backoff (backtracking).
-        """
+        """Overwrites next_state from superclass to implement backoff (backtracking)."""
         if state is None:
             return None
 
@@ -408,9 +396,7 @@ class Bag(BaseStructure):
         self.activity_sets = {initial_set: self.initial_state}
 
     def update(self, event: Event) -> None:
-        """
-        Updates DFA tree structure of the process miner object by adding a new activity to case
-        """
+        """Updates DFA tree structure of the process miner object by adding a new activity to case"""
         case_id = event["case_id"]
         activity = event["activity"]
 
@@ -463,9 +449,7 @@ class Parikh(BaseStructure):
         return str(sorted(d.items()))
 
     def update(self, event: Event) -> None:
-        """
-        Updates DFA tree structure of the process miner object by adding a new activity to case
-        """
+        """Updates DFA tree structure of the process miner object by adding a new activity to case"""
         case_id = event["case_id"]
         activity = event["activity"]
 

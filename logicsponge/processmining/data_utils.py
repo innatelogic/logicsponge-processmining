@@ -25,8 +25,7 @@ np.random.seed(123)
 
 
 def interleave_sequences(sequences: list[list[Event]], random_index=True) -> list[Event]:  # noqa: FBT002
-    """
-    Takes a list of sequences (list of lists) and returns a shuffled version
+    """Takes a list of sequences (list of lists) and returns a shuffled version
     while preserving the order within each sequence.
     """
     # Create a copy of sequences to avoid modifying the original list
@@ -54,22 +53,17 @@ def interleave_sequences(sequences: list[list[Event]], random_index=True) -> lis
 
 
 def add_input_symbols_sequence(sequence: list[Event], inp: str) -> list[tuple[str, ActivityName]]:
-    """
-    For Alergia algorithm
-    """
+    """For Alergia algorithm"""
     return [(inp, event["activity"]) for event in sequence]
 
 
 def add_input_symbols(data: list[list[Event]], inp: str) -> list[list[tuple[str, ActivityName]]]:
-    """
-    For Alergia algorithm
-    """
+    """For Alergia algorithm"""
     return [add_input_symbols_sequence(sequence, inp) for sequence in data]
 
 
 def add_start_to_sequences(data: list[list[Event]], start_symbol: ActivityName) -> list[list[Event]]:
-    """
-    Prepends a start event with the case_id of the first event in each sequence.
+    """Prepends a start event with the case_id of the first event in each sequence.
     Assumes that each sequence in data is non-empty.
     """
     if not all(seq for seq in data):
@@ -80,8 +74,7 @@ def add_start_to_sequences(data: list[list[Event]], start_symbol: ActivityName) 
 
 
 def add_stop_to_sequences(data: list[list[Event]], stop_symbol: ActivityName) -> list[list[Event]]:
-    """
-    Appends a stop event with the case_id of the first event in each sequence.
+    """Appends a stop event with the case_id of the first event in each sequence.
     Assumes that each sequence in data is non-empty.
     """
     if not all(seq for seq in data):
@@ -92,9 +85,7 @@ def add_stop_to_sequences(data: list[list[Event]], stop_symbol: ActivityName) ->
 
 
 def transform_to_seqs(data: Iterator[Event]) -> list[list[Event]]:
-    """
-    Transforms list of tuples (case_id, activity) into list of sequences grouped by case_id.
-    """
+    """Transforms list of tuples (case_id, activity) into list of sequences grouped by case_id."""
     grouped_data = defaultdict(list)
 
     for event in data:
@@ -173,9 +164,7 @@ class FileHandler:
             os.makedirs(self.folder)
 
     def download_file(self, url: str, target_filename: str) -> str:
-        """
-        Downloads a file from the given URL and saves it in the specified folder with the target filename.
-        """
+        """Downloads a file from the given URL and saves it in the specified folder with the target filename."""
         file_path = os.path.join(self.folder, target_filename)
         msg = f"Downloading from {url}..."
         logger.info(msg)
@@ -189,9 +178,7 @@ class FileHandler:
         return file_path
 
     def gunzip_file(self, gz_path: str, output_filename: str) -> str:
-        """
-        Decompresses a .gz file and returns the path of the decompressed file.
-        """
+        """Decompresses a .gz file and returns the path of the decompressed file."""
         output_path = os.path.join(self.folder, output_filename)
         msg = f"Decompressing {gz_path}..."
         logger.info(msg)
@@ -202,9 +189,7 @@ class FileHandler:
         return output_path
 
     def process_xes_file(self, xes_path: str, csv_filename: str) -> str:
-        """
-        Converts an .xes file to a CSV file.
-        """
+        """Converts an .xes file to a CSV file."""
         csv_path = os.path.join(self.folder, csv_filename)
         msg = f"Processing XES file: {xes_path}..."
         logger.info(msg)
@@ -224,9 +209,7 @@ class FileHandler:
 
     @staticmethod
     def clean_up(*files: str) -> None:
-        """
-        Deletes the specified files.
-        """
+        """Deletes the specified files."""
         for file in files:
             if os.path.exists(file):
                 os.remove(file)
@@ -234,8 +217,7 @@ class FileHandler:
                 logger.info(msg)
 
     def handle_file(self, file_type: str, url: str, filename: str, doi: str | None = None) -> str:
-        """
-        Main method to handle downloading and processing files based on their type.
+        """Main method to handle downloading and processing files based on their type.
         Handles:
         - CSV: Direct download.
         - XES: Download and process.
@@ -288,26 +270,27 @@ class FileHandler:
 
 
 def handle_keys(keys: list[str], row: dict[str, Any]) -> str | tuple[str, ...]:
-    """
-    Handles the case and activity keys, returning either a single value or a tuple of values.
+    """Handles the case and activity keys, returning either a single value or a tuple of values.
     Ensures the return type matches the expected CaseId or ActivityName.
     """
     if len(keys) == 1:
         # Return the value directly if there's only one key
-        return cast(str, row[keys[0]])
+        return cast("str", row[keys[0]])
 
-    return ", ".join(str(cast(str, row[key])) for key in keys)
+    return ", ".join(str(cast("str", row[key])) for key in keys)
 
 
 def parse_timestamp(raw_timestamp):
-    """
-    Parse a timestamp string in various formats, handling naive and aware datetimes.
+    """Parse a timestamp string in various formats, handling naive and aware datetimes.
 
-    Parameters:
+    Parameters
+    ----------
         raw_timestamp (str): The raw timestamp string.
 
-    Returns:
+    Returns
+    -------
         datetime or None: A timezone-aware datetime object or None if parsing fails.
+
     """
     try:
         # Try parsing as ISO 8601 format

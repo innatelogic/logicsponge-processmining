@@ -85,7 +85,7 @@ streamer = IteratorStreamer(data_iterator=dataset)
 
 sponge = (
     streamer
-    * ls.KeyFilter(keys=["case_id", "activity"])
+    * ls.KeyFilter(keys=["case_id", "activity", "timestamp"])
     * model2
     * ls.AddIndex(key="index", index=1)
     * ls.Print()

@@ -17,8 +17,7 @@ DEFAULT_CONFIG: Config = {
 
 
 def update_config(custom_param: dict[str, Any] | None = None) -> Config:
-    """
-    Merge custom configuration with defaults, returning a new dictionary.
+    """Merge custom configuration with defaults, returning a new dictionary.
     :param custom_param: Optional dictionary with configuration overrides.
     :return: Merged configuration as a new dictionary.
     """

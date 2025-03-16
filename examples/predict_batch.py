@@ -9,6 +9,12 @@ import torch
 from aalpy.learning_algs import run_Alergia
 from torch import nn, optim
 
+# ruff: noqa: E402
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+)
+
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram, Parikh
 from logicsponge.processmining.config import DEFAULT_CONFIG
 from logicsponge.processmining.data_utils import (
@@ -28,11 +34,6 @@ mpl.use("Agg")
 
 pd.set_option("display.max_columns", None)  # Show all columns
 pd.set_option("display.expand_frame_repr", False)  # Prevent line-wrapping
-
-logging.basicConfig(
-    format="%(levelname)s: %(message)s",  # Only log level and message, no date
-    level=logging.INFO,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,7 @@ all_metrics = {
         "ngram_7",
         "ngram_8",
         "fallback fpt->ngram",
+        "adaptive_ngram",
         "hard voting",
         "soft voting",
         "alergia",
@@ -172,6 +174,21 @@ for iteration in range(n_iterations):
         config=config,
     )
 
+    adaptive_ngram = Fallback(
+        models=[
+            BasicMiner(algorithm=NGram(window_length=9, min_total_visits=10, min_max_prob=0.9)),
+            BasicMiner(algorithm=NGram(window_length=8, min_total_visits=10, min_max_prob=0.9)),
+            BasicMiner(algorithm=NGram(window_length=7, min_total_visits=10, min_max_prob=0.8)),
+            BasicMiner(algorithm=NGram(window_length=6, min_total_visits=10, min_max_prob=0.7)),
+            BasicMiner(algorithm=NGram(window_length=5, min_total_visits=10, min_max_prob=0.6)),
+            BasicMiner(algorithm=NGram(window_length=4, min_total_visits=10, min_max_prob=0.0)),
+            BasicMiner(algorithm=NGram(window_length=3, min_total_visits=10, min_max_prob=0.0)),
+            BasicMiner(algorithm=NGram(window_length=2, min_total_visits=10, min_max_prob=0.0)),
+            BasicMiner(algorithm=NGram(window_length=1)),
+        ],
+        config=config,
+    )
+
     hard_voting = HardVoting(
         models=[
             BasicMiner(algorithm=Bag()),
@@ -220,6 +237,7 @@ for iteration in range(n_iterations):
         ngram_7.update(event)
         ngram_8.update(event)
         fallback.update(event)
+        adaptive_ngram.update(event)
         hard_voting.update(event)
         soft_voting.update(event)
     end_time = time.time()
@@ -253,6 +271,7 @@ for iteration in range(n_iterations):
         "ngram_7": (ngram_7, test_set_transformed),
         "ngram_8": (ngram_8, test_set_transformed),
         "fallback fpt->ngram": (fallback, test_set_transformed),
+        "adaptive_ngram": (adaptive_ngram, test_set_transformed),
         "hard voting": (hard_voting, test_set_transformed),
         "soft voting": (soft_voting, test_set_transformed),
         "alergia": (smm, test_set_transformed),
