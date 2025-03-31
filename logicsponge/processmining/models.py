@@ -57,6 +57,7 @@ class StreamingMiner(ABC):
             "correct_predictions": 0,
             "wrong_predictions": 0,
             "empty_predictions": 0,
+            "bayes_correct_predictions": 0,
             # For delay predictions
             "delay_error_sum": 0,
             "actual_delay_sum": 0,
@@ -113,11 +114,78 @@ class StreamingMiner(ABC):
 
         self.stats["last_timestamps"][case_id] = timestamp
 
+    def initialize_bayes_classifier(self, data: list[list[Event]]) -> None:
+        """Evaluation of the dataset using a Bayes classifier."""
+        mem_frequency = {}
+        for sequence in data:
+            prefix = []
+            for i in range(len(sequence)-1): # Exclude the last event (stop event)
+                event = sequence[i]
+                next_event = sequence[i+1]
+                prefix.append(event.get("activity"))
+                actual_next_activity = next_event.get("activity")
+
+                if tuple(prefix) not in mem_frequency:
+                    # Initialize the dictionary for the prefix if it doesn't exist
+                    mem_frequency[tuple(prefix)] = {}
+                if actual_next_activity not in mem_frequency[tuple(prefix)]:
+                    # Initialize the dictionary for the next activity if it doesn't exist
+                    mem_frequency[tuple(prefix)][actual_next_activity] = 0
+
+                # Update the frequency of the next activity
+                mem_frequency[tuple(prefix)][actual_next_activity] += 1
+
+        self.bayes_classifier = mem_frequency
+
+
+    def eval_bayes_classifier(self, data: list[list[Event]]) -> None:
+        """Evaluation of the dataset using a Bayes classifier."""
+        for sequence in data:
+            prefix = []
+            for i in range(len(sequence) - 1):  # Exclude the last event (stop event)
+                event = sequence[i]
+                next_event = sequence[i + 1]
+                prefix.append(event.get("activity"))
+                actual_next_activity = next_event.get("activity")
+
+                bayes_prediction = self._get_bayes_prediction(sequence[:i+1])
+                if bayes_prediction is not None and bayes_prediction == actual_next_activity:
+                    self.stats["bayes_correct_predictions"] += 1
+
+    def _get_bayes_prediction(self, prefix: list[Event]) -> ActivityName | None:
+        """Returns the predicted activity based on the Bayes classifier."""
+        try:
+            self.bayes_classifier
+        except AttributeError:
+            msg = "Bayes classifier not initialized. Call initialize_bayes_classifier first."
+            logger.error(msg)
+            return None
+        
+        prefix_act = []
+        for i in range(len(prefix)):
+            event = prefix[i]
+            prefix_act.append(event.get("activity"))
+        prefix_act = tuple(prefix_act)
+
+        if prefix_act in self.bayes_classifier:
+            # Get the next activity with the highest frequency
+            next_activities = self.bayes_classifier[prefix_act]
+            prediction = max(next_activities, key=next_activities.get)
+            return prediction
+        else:
+            msg = f"No prediction available for prefix {prefix}, {len(prefix)}."
+            logger.warning(msg)
+            return None
+
     def evaluate(self, data: list[list[Event]], mode: str = "incremental") -> None:
         """Evaluation in batch mode.
         Evaluates the dataset either incrementally or by full sequence.
         Modes: 'incremental' or 'sequence'.
         """
+        # Evaluate the dataset using a Bayes classifier
+        self.initialize_bayes_classifier(data)
+        self.eval_bayes_classifier(data)
+
         # Initialize stats
         for sequence in data:
             current_state = self.initial_state
@@ -142,12 +210,13 @@ class StreamingMiner(ABC):
                     prediction = metrics_prediction(metrics, config=self.config)
 
                 # Update statistics based on the prediction
+                
                 self.update_stats(event, prediction)
 
                 # Move to the next state
                 if i < len(sequence) - 1:
                     current_state = self.next_state(current_state, actual_next_activity)
-
+    
     @abstractmethod
     def get_modified_cases(self) -> set[CaseId]:
         """Retrieves, recursively, cases that have potentially been modified and

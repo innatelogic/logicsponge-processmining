@@ -164,12 +164,32 @@ soft_voting = StreamingActivityPredictor(
             BasicMiner(algorithm=NGram(window_length=2)),
             BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
-            # BasicMiner(algorithm=NGram(window_length=5)),
+            BasicMiner(algorithm=NGram(window_length=5)),
             # BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
 )
+
+list_grams = [(2, 3, 6, 8), (2, 3, 5, 6), (2, 3, 5, 8), (2, 3, 4, 6), (2, 3, 6, 7), (2, 3, 7, 8), (2, 3, 6, 8)]
+soft_voting_tests = []
+
+for grams in list_grams:
+    soft_voting_tests.append(
+        StreamingActivityPredictor(
+            strategy=SoftVoting(
+                models=[
+                    BasicMiner(algorithm=Bag()),
+                    BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
+                    BasicMiner(algorithm=NGram(window_length=grams[0])),
+                    BasicMiner(algorithm=NGram(window_length=grams[1])),
+                    BasicMiner(algorithm=NGram(window_length=grams[2])),
+                    BasicMiner(algorithm=NGram(window_length=grams[3])),
+                ],
+                config=config,
+            )
+        )
+    )
 
 adaptive_voting = StreamingActivityPredictor(
     strategy=AdaptiveVoting(
@@ -227,8 +247,15 @@ models = [
     "adaptive_ngram",
     "hard_voting",
     "soft_voting",
+    "soft_voting_test_1",
+    "soft_voting_test_2",
+    "soft_voting_test_3",
+    "soft_voting_test_4",
+    "soft_voting_test_5",
+    "soft_voting_test_6",
+    "soft_voting_test_7",
     "adaptive_voting",
-    "lstm",
+    "lstm"
 ]
 
 accuracy_list = [f"{model}.accuracy" for model in models]
@@ -309,6 +336,13 @@ sponge = (
         | (adaptive_ngram * Evaluation("adaptive_ngram"))
         | (hard_voting * Evaluation("hard_voting"))
         | (soft_voting * Evaluation("soft_voting"))
+        | (soft_voting_tests[0] * Evaluation("soft_voting_test_1"))
+        | (soft_voting_tests[1] * Evaluation("soft_voting_test_2"))
+        | (soft_voting_tests[2] * Evaluation("soft_voting_test_3"))
+        | (soft_voting_tests[3] * Evaluation("soft_voting_test_4"))
+        | (soft_voting_tests[4] * Evaluation("soft_voting_test_5"))
+        | (soft_voting_tests[5] * Evaluation("soft_voting_test_6"))
+        | (soft_voting_tests[6] * Evaluation("soft_voting_test_7"))
         | (adaptive_voting * Evaluation("adaptive_voting"))
         | (
             AddStartSymbol(start_symbol=start_symbol)

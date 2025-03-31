@@ -162,4 +162,4 @@ def update_graph(_unused, previous_node_count):
 
 
 if __name__ == "__main__":
-    app.run_server(debug=True)
+    app.run(debug=True)

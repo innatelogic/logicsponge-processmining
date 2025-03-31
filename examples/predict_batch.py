@@ -27,7 +27,7 @@ from logicsponge.processmining.data_utils import (
     transform_to_seqs,
 )
 from logicsponge.processmining.models import Alergia, BasicMiner, Fallback, HardVoting, Relativize, SoftVoting
-from logicsponge.processmining.neural_networks import LSTMModel, PreprocessData, evaluate_rnn, train_rnn
+from logicsponge.processmining.neural_networks import LSTMModel, LSTMModelBis, PreprocessData, evaluate_rnn, train_rnn
 from logicsponge.processmining.test_data import dataset
 
 mpl.use("Agg")
@@ -86,6 +86,7 @@ n_iterations = 5
 all_metrics = {
     name: {
         "accuracies": [],
+        "bayes_accuracies": [],
         "num_states": [],
         "mean_delay_error": [],
         "mean_actual_delay": [],
@@ -109,6 +110,8 @@ all_metrics = {
         "soft voting",
         "alergia",
         "LSTM",
+        "LSTM bis",
+        "bayesian training",
     ]
 }
 
@@ -275,11 +278,13 @@ for iteration in range(n_iterations):
         "hard voting": (hard_voting, test_set_transformed),
         "soft voting": (soft_voting, test_set_transformed),
         "alergia": (smm, test_set_transformed),
+        "bayesian training": (soft_voting, train_set_transformed + test_set_transformed),
     }
 
     # Store the statistics for each iteration and also print them out
     iteration_data = {
         "Model": [],
+        "Bayes Acc (%)": [],
         "Correct (%)": [],
         "Wrong (%)": [],
         "Empty (%)": [],
@@ -297,6 +302,7 @@ for iteration in range(n_iterations):
         stats = strategy.stats
 
         total = stats["total_predictions"]
+        bayes_accuracy = (stats["bayes_correct_predictions"] / total * 100) if total > 0 else 0
         correct_percentage = (stats["correct_predictions"] / total * 100) if total > 0 else 0
         wrong_percentage = (stats["wrong_predictions"] / total * 100) if total > 0 else 0
         empty_percentage = (stats["empty_predictions"] / total * 100) if total > 0 else 0
@@ -305,6 +311,7 @@ for iteration in range(n_iterations):
 
         # Append data to the iteration data dictionary
         iteration_data["Model"].append(strategy_name)
+        iteration_data["Bayes Acc (%)"].append(bayes_accuracy)
         iteration_data["Correct (%)"].append(correct_percentage)
         iteration_data["Wrong (%)"].append(wrong_percentage)
         iteration_data["Empty (%)"].append(empty_percentage)
@@ -330,8 +337,10 @@ for iteration in range(n_iterations):
 
         # Calculate and append accuracy to all_metrics for final statistics
         accuracy = stats["correct_predictions"] / total if total > 0 else 0
+        bayes_accuracy = stats["bayes_correct_predictions"] / total if total > 0 else 0
 
         all_metrics[strategy_name]["accuracies"].append(accuracy)
+        all_metrics[strategy_name]["bayes_accuracies"].append(bayes_accuracy)
         all_metrics[strategy_name]["num_states"].append(num_states)
 
         all_metrics[strategy_name]["mean_delay_error"].append(mean_delay_error)
@@ -374,12 +383,25 @@ for iteration in range(n_iterations):
         lstm_accuracy = evaluate_rnn(model, nn_test_set_transformed, dataset_type="Test")
         all_metrics["LSTM"]["accuracies"].append(lstm_accuracy)
 
+        # LSTM bis Evaluation
+        model_bis = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, use_one_hot=True)
+        criterion = nn.CrossEntropyLoss()
+        optimizer = optim.Adam(model_bis.parameters(), lr=0.001)
+
+        # Train the LSTM on the train set with batch size and sequence-to-sequence targets
+        model_bs = train_rnn(
+            model_bis, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=20
+        )
+
+        lstm_bis_accuracy = evaluate_rnn(model_bis, nn_test_set_transformed, dataset_type="Test")
+        all_metrics["LSTM bis"]["accuracies"].append(lstm_bis_accuracy)
 # ============================================================
 # Calculate and Show Final Results
 # ============================================================
 
 results = {
     "Model": [],
+    "Bayes Acc (%)": [],
     "Mean Accuracy (%)": [],
     "Std": [],
     "States": [],
@@ -401,6 +423,15 @@ for model_name, stats in all_metrics.items():
 
     results["Mean Accuracy (%)"].append(mean_acc)
     results["Std"].append(std_acc)
+
+    if len(stats["bayes_accuracies"]) > 0:
+        bayes_mean_acc = np.mean(stats["bayes_accuracies"]) * 100
+        bayes_std_acc = np.std(stats["bayes_accuracies"]) * 100
+    else:
+        bayes_mean_acc = None
+        bayes_std_acc = None
+
+    results["Bayes Acc (%)"].append(bayes_mean_acc)
 
     if len(stats["num_states"]) > 0 and None not in stats["num_states"]:
         mean_num_states = np.mean(stats["num_states"])
