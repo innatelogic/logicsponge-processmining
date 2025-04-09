@@ -1,4 +1,4 @@
-import logging
+import logging  # noqa: D100
 import time
 from collections.abc import Iterator
 from datetime import timedelta
@@ -21,6 +21,7 @@ class IteratorStreamer(ls.SourceTerm):
     """For streaming from iterator."""
 
     def __init__(self, *args, data_iterator: Iterator, **kwargs):
+        """Create an IteratorStreamer."""
         super().__init__(*args, **kwargs)
         self.data_iterator = data_iterator
 
