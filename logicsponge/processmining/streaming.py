@@ -222,7 +222,8 @@ class Evaluation(ls.FunctionTerm):
         )
 
 
-def eval_to_table(data: dict) -> pd.DataFrame:
+def eval_to_table(data: dict | ls.DataItem) -> pd.DataFrame:
+    """Evaluate and add to table."""
     # Extract and display the index
     if "index" in data:
         msg = f"========== {data['index']} =========="
@@ -263,9 +264,8 @@ def eval_to_table(data: dict) -> pd.DataFrame:
 
 
 class PrintEval(ls.FunctionTerm):
-    def run(self, ds_view: ls.DataStreamView):
-        while True:
-            ds_view.next()
-            item = ds_view[-1]
-            table = eval_to_table(item)
-            logger.info(table)
+    """Add to table and show the table."""
+
+    def f(self, item: ls.DataItem):
+        table = eval_to_table(item)
+        logger.info(table)
