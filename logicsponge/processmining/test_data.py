@@ -168,9 +168,9 @@ data_collection = {
 # ============================================================
 
 if DATA == "file":
-    data_name = "Sepsis_Cases"
+    # data_name = "Sepsis_Cases"
     # data_name = "Helpdesk"
-    # data_name = "BPI_Challenge_2013"
+    data_name = "BPI_Challenge_2013"
     mydata = data_collection[data_name]  # type: ignore
     file_path = os.path.join(FOLDERNAME, mydata["target_filename"])
     mydata["file_path"] = file_path
