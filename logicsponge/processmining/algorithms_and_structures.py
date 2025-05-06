@@ -1,5 +1,6 @@
 import copy
 import logging
+import math
 from abc import ABC, abstractmethod
 from collections import deque
 from datetime import timedelta
@@ -16,9 +17,192 @@ from logicsponge.processmining.types import (
     StateId,
     empty_metrics,
 )
+from logicsponge.processmining.utils import compute_perplexity_stats
 
 logger = logging.getLogger(__name__)
 
+
+# ============================================================
+# Bayesian Classifier
+# ============================================================
+
+
+class BayesianClassifier:
+    """Bayesian Classifier for predicting the next activity in a sequence of events.
+    This class implements a simple Bayesian classifier that uses the frequency of
+    activity sequences to predict the next activity. It is designed to work with
+    event logs, where each event has an associated activity name.
+    """
+
+    def __init__(self, single_occurence_allowed: bool = True, config: dict = {}) -> None:
+        """Initialize the BayesianClassifier with the given configuration."""
+        self.memory: dict[tuple[ActivityName, ...], dict[ActivityName, int]] = {}
+               
+        self.config = config if config else {
+            "top_k": 1,
+        }
+
+        # Statistics for batch mode
+        self.stats = {
+            "total_predictions": 0,
+            "correct_predictions": 0,
+            "wrong_predictions": 0,
+            "empty_predictions": 0,
+
+            "top_k_correct_preds": [0] * self.config["top_k"],
+
+            # For perplexity
+            "pp_arithmetic_mean": None,
+            "pp_harmonic_mean": None,
+            "pp_median": None,
+            "pp_q1": None,
+            "pp_q3": None,      
+
+            # For delay predictions
+            "delay_error_sum": 0,
+            "actual_delay_sum": 0,
+            "normalized_error_sum": 0,
+            "num_delay_predictions": 0,
+            "last_timestamps": {},  # last recorded timestamp for every case
+        }
+
+        self.single_occurence_allowed = single_occurence_allowed
+
+    def initialize_memory(self, data: list[list[Event]]) -> None:
+        """Evaluation of the dataset using a Bayes classifier."""
+        mem_frequency: dict[tuple[ActivityName, ...], dict[ActivityName, int]] = {}
+        for sequence in data:
+            prefix = []
+            for i in range(len(sequence)):
+                event = sequence[i]
+                activity = event.get("activity")
+
+                if tuple(prefix) not in mem_frequency:
+                    # Initialize the dictionary for the prefix if it doesn't exist
+                    mem_frequency[tuple(prefix)] = {}
+                if activity not in mem_frequency[tuple(prefix)]:
+                    # Initialize the dictionary for the next activity if it doesn't exist
+                    mem_frequency[tuple(prefix)][activity] = 0
+
+                # Update the frequency of the next activity
+                mem_frequency[tuple(prefix)][activity] += 1
+                prefix.append(activity)
+
+        self.memory = mem_frequency
+
+
+    def evaluate(
+            self,
+            data: list[list[Event]],
+            mode: str = "",
+            *,
+            log_likelihood: bool = False,
+            debug: bool = False,
+        ) -> None:
+        """Evaluation of the dataset using a Bayes classifier."""
+        perplexities = []
+
+        for sequence in data:
+
+            prefix = []
+            likelihood = 0.0 if log_likelihood else 1.0
+
+            for i in range(len(sequence)): 
+                event = sequence[i]
+
+                actual_activity = event.get("activity")
+                
+                bayes_prediction = self._get_bayes_prediction(prefix)
+
+                if log_likelihood:
+                    likelihood += math.log(self._get_conditional_likelihood(prefix, actual_activity))
+                else:
+                    likelihood *= self._get_conditional_likelihood(prefix, actual_activity)
+                
+                if bayes_prediction is None:
+                    self.stats["empty_predictions"] += 1
+                elif bayes_prediction[0] == actual_activity:
+                    self.stats["correct_predictions"] += 1
+                    for indices_top_k in range(len(self.stats["top_k_correct_preds"])):
+                        self.stats["top_k_correct_preds"][indices_top_k] += 1
+                else:
+                    self.stats["wrong_predictions"] += 1
+
+                    for k in range (len(bayes_prediction)):
+                        if actual_activity == bayes_prediction[k]:
+                            for indices_top_k in range(k, len(self.stats["top_k_correct_preds"])):
+                                self.stats["top_k_correct_preds"][indices_top_k] += 1
+                            break
+            
+                self.stats["total_predictions"] += 1
+                prefix.append(actual_activity)
+            
+            # Normalize by the length of the sequence
+            if log_likelihood:
+                normalized_likelihood = likelihood / len(sequence) if len(sequence) > 0 else likelihood
+            else:
+                normalized_likelihood = likelihood ** (1 / len(sequence)) if len(sequence) > 0 else likelihood
+
+            if normalized_likelihood is not None and normalized_likelihood > 0:
+                seq_perplexity = math.exp(-normalized_likelihood) if log_likelihood else 1.0 / normalized_likelihood
+            else:
+                seq_perplexity = float("inf")
+
+            perplexities.append(seq_perplexity)
+        
+        perplexity_stats = compute_perplexity_stats(perplexities)
+        logger.debug("Perplexity stats: %s", perplexity_stats)
+
+        for key, value in perplexity_stats.items():
+            self.stats[key] = value
+
+    def _get_conditional_likelihood(self, prefix: list[ActivityName], activity: ActivityName) -> float:
+        """Returns the predicted activity based on the Bayes classifier."""
+        try:
+            self.memory
+        except AttributeError:
+            raise ValueError("Memory not initialized. Please call initialize_memory() first.")
+
+        prefix_act = tuple(prefix)
+        if prefix_act in self.memory:
+            if (not self.single_occurence_allowed) and (sum(self.memory[prefix_act].values()) == 1):
+                return 0.0
+                
+            # Get the next activity with the highest frequency
+            next_activities = self.memory[prefix_act]
+            if activity not in next_activities:
+                # If the activity is not in the next activities, return 0.0
+                return 0.0
+
+            # Calculate the conditional likelihood
+            total_count = sum(next_activities.values())
+            activity_count = next_activities[activity]
+
+            return float(activity_count) / total_count
+
+        return 0.0
+        
+    def _get_bayes_prediction(self, prefix: list[ActivityName]) -> list[ActivityName] | None:
+        """Returns the predicted activity based on the Bayes classifier."""
+        try:
+            self.memory
+        except AttributeError:
+            raise ValueError("Memory not initialized. Please call initialize_memory() first.")
+
+        prefix_act = tuple(prefix)
+        if prefix_act in self.memory:
+            if (not self.single_occurence_allowed) and (sum(self.memory[prefix_act].values()) == 1):
+                # If the priefix has only one occurrence, return None (no prediction)
+                logger.debug("Prefix %s has only one occurrence. No prediction available (not allowed on single prefix).", prefix)
+                return None
+                
+            # Get the next activity with the highest frequency
+            next_activities = self.memory[prefix_act]
+            sorted_activities: list[ActivityName] = sorted(next_activities, key=lambda activity: next_activities[activity], reverse=True)
+            return sorted_activities[:self.config.get("top_k", 1)]
+
+        logger.debug("No prediction available for prefix %s, %s.", prefix, len(prefix))
+        return None
 
 # ============================================================
 # Base Structure

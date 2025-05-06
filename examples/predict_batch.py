@@ -11,7 +11,6 @@ import numpy as np
 import pandas as pd
 import torch
 from aalpy.learning_algs import run_Alergia
-from aalpy.learning_algs.deterministic.BayesianClassifier import BayesianClassifier
 from torch import nn, optim
 
 # ruff: noqa: E402
@@ -20,7 +19,13 @@ logging.basicConfig(
     format="%(message)s",
 )
 
-from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram, Parikh
+from logicsponge.processmining.algorithms_and_structures import (
+    Bag,
+    BayesianClassifier,
+    FrequencyPrefixTree,
+    NGram,
+    Parikh,
+)
 from logicsponge.processmining.config import DEFAULT_CONFIG
 from logicsponge.processmining.data_utils import (
     add_input_symbols,
