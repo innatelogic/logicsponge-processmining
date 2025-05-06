@@ -743,7 +743,7 @@ for iteration in range(n_iterations):
     # Create a DataFrame for the iteration and log it
     iteration_df = pd.DataFrame(iteration_data).round(2)
 
-    iteration_df = iteration_df.drop(columns=["PP Median", "PP Q1", "PP Q3"])
+    # iteration_df = iteration_df.drop(columns=["PP Median", "PP Q1", "PP Q3"])
 
     msg = f"\nIteration {iteration + 1} stats:\n{iteration_df}"
     logger.info(msg)
