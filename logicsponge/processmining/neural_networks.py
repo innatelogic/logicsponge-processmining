@@ -102,6 +102,7 @@ class RNNModel(nn.Module):
 #         elif isinstance(m, nn.Embedding):
 #             nn.init.uniform_(m.weight, -0.1, 0.1)  # Uniform initialization for embedding weights
 
+
 class LSTMModel(nn.Module):
     device: torch.device | None
     embedding: nn.Embedding | None
@@ -113,13 +114,13 @@ class LSTMModel(nn.Module):
     fc: nn.Linear
 
     def __init__(
-            self,
-            vocab_size: int,
-            embedding_dim: int,
-            hidden_dim: int,
-            output_dim: int,
-            use_one_hot: bool = False,
-            device: torch.device | None = None
+        self,
+        vocab_size: int,
+        embedding_dim: int,
+        hidden_dim: int,
+        output_dim: int,
+        use_one_hot: bool = False,
+        device: torch.device | None = None,
     ):
         super().__init__()
         self.device = device
@@ -176,80 +177,6 @@ class LSTMModel(nn.Module):
         elif isinstance(m, nn.Embedding) and m is not None:
             nn.init.uniform_(m.weight, -0.1, 0.1)
 
-
-class LSTMModelBis(nn.Module):
-    device: torch.device | None
-    embedding: nn.Embedding | None
-    use_one_hot: bool
-    vocab_size: int
-    embedding_dim: int
-    lstm1: nn.LSTM
-    lstm2: nn.LSTM
-    fc: nn.Linear
-
-    def __init__(
-            self,
-            vocab_size: int,
-            embedding_dim: int,
-            hidden_dim: int,
-            output_dim: int,
-            use_one_hot: bool = False,
-            device: torch.device | None = None
-    ):
-        super().__init__()
-        self.device = device
-        self.use_one_hot = use_one_hot
-        self.vocab_size = vocab_size
-        self.embedding_dim = embedding_dim
-
-        # Conditional embedding layer
-        if not use_one_hot:
-            self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0, device=device)
-        else:
-            self.embedding = None
-
-        # Input dimension to LSTM depends on the encoding method
-        input_dim = vocab_size if use_one_hot else embedding_dim
-
-        # LSTM layers
-        self.lstm1 = nn.LSTM(input_dim, hidden_dim, num_layers=2, batch_first=True, dropout=0.5, device=device)
-        self.lstm2 = nn.LSTM(hidden_dim, hidden_dim, batch_first=True, device=device)
-
-        self.fc = nn.Linear(hidden_dim, output_dim, device=device)
-
-        # Apply custom weight initialization
-        self.apply(self._init_weights)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if not self.use_one_hot and self.embedding is not None:
-            # Use embedding layer
-            x = self.embedding(x)
-        else:
-            # Use one-hot encoding
-            # print(f"x shape: {x.shape}, dtype: {x.dtype}, unique values: {torch.unique(x)}")
-            x = F.one_hot(x, num_classes=self.vocab_size).float().to(self.device)
-
-        # Pass through LSTM layers
-        lstm_out, _ = self.lstm1(x)
-        lstm_out, _ = self.lstm2(lstm_out)
-
-        return self.fc(lstm_out)
-
-    def _init_weights(self, m: nn.Module) -> None:
-        if isinstance(m, nn.Linear):
-            nn.init.xavier_uniform_(m.weight)
-            if m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LSTM):
-            for name, param in m.named_parameters():
-                if "weight_ih" in name:
-                    nn.init.xavier_uniform_(param.data)
-                elif "weight_hh" in name:
-                    nn.init.orthogonal_(param.data)
-                elif "bias" in name:
-                    nn.init.constant_(param.data, 0)
-        elif isinstance(m, nn.Embedding) and m is not None:
-            nn.init.uniform_(m.weight, -0.1, 0.1)
 
 # ============================================================
 # Training and Evaluation
@@ -334,7 +261,8 @@ def train_rnn(model, train_sequences, val_sequences, criterion, optimizer, batch
         # Evaluate on validation set after each epoch
         msg = "Evaluating on validation set..."
         logger.info(msg)
-        val_accuracy = evaluate_rnn(model, val_sequences)
+        stats, _ = evaluate_rnn(model, val_sequences)
+        val_accuracy = stats["accuracy"]
 
         # Check if current validation accuracy is better than the best recorded accuracy
         if val_accuracy > best_val_accuracy:
@@ -365,13 +293,24 @@ def train_rnn(model, train_sequences, val_sequences, criterion, optimizer, batch
     return model
 
 
-def evaluate_rnn(model, sequences, dataset_type="Validation"):
+def evaluate_rnn(
+    model,
+    sequences: torch.Tensor,
+    dataset_type: str = "Validation",
+    *,
+    per_sequence_perplexity: bool = True,
+) -> tuple[dict[str, float], list[float]]:
     """Evaluate the LSTM model on a dataset (train, test, or validation).
+
     Returns accuracy.
     """
     model.eval()  # Set the model to evaluation mode
     correct_predictions = 0
     total_predictions = 0
+
+    total_nll = 0.0  # Accumulate negative log-likelihood
+    token_count = 0
+    perplexities = []
 
     with torch.no_grad():
         for sequence in sequences:
@@ -380,22 +319,51 @@ def evaluate_rnn(model, sequences, dataset_type="Validation"):
             y_target = sequence[1:].unsqueeze(0)  # Shifted by one as target
 
             outputs = model(x_input)
+            log_probs = F.log_softmax(outputs, dim=-1)  # Log probabilities
             predicted_indices = torch.argmax(outputs, dim=-1)
 
             # Flatten for comparison
             predicted_indices = predicted_indices.view(-1)
             y_target = y_target.view(-1)
+            log_probs = log_probs.view(-1, log_probs.shape[-1])
 
             # Create a mask to ignore padding
             mask = y_target != 0  # Mask for non-padding targets
+            masked_targets = y_target[mask]
+            masked_log_probs = log_probs[mask]
 
             # Apply the mask and count correct predictions
-            correct_predictions += (predicted_indices[mask] == y_target[mask]).sum().item()
+            correct_predictions += (predicted_indices[mask] == masked_targets).sum().item()
             total_predictions += mask.sum().item()  # Count non-padding tokens
+
+            # NLL for perplexity
+            token_log_probs = masked_log_probs[torch.arange(len(masked_targets)), masked_targets]
+
+            # Non-classical way (to match ngrams)
+            sequence_nll = -token_log_probs.sum().item()  # Negative log likelihood
+            sequence_length = masked_targets.size(0)
+
+            if per_sequence_perplexity:
+                # Calculate perplexity for the sequence
+                sequence_perplexity = (
+                    torch.exp(torch.tensor(sequence_nll / sequence_length)).item()
+                    if sequence_length > 0
+                    else float("inf")
+                )
+                perplexities.append(sequence_perplexity)
+
+            total_nll += sequence_nll
+            token_count += sequence_length
 
     accuracy = correct_predictions / total_predictions if total_predictions > 0 else 0
 
-    msg = f"{dataset_type} accuracy: {accuracy * 100:.4f}%"
-    logger.info(msg)
+    if not per_sequence_perplexity:
+        perplexities.append(
+            torch.exp(torch.tensor(total_nll / token_count)).item() if token_count > 0 else float("inf")
+        )
 
-    return accuracy
+    logger.debug("Perplexity: %s", perplexities[-1])
+
+    stats = {"accuracy": accuracy, "total_predictions": total_predictions, "correct_predictions": correct_predictions}
+
+    return stats, perplexities

@@ -1,3 +1,11 @@
+"""Example of a simple process mining pipeline using LogicSponge.
+
+This example demonstrates how to use LogicSponge to create a process mining pipeline
+that predicts the next activity in a process based on historical data.
+It uses a streaming approach to process the data in real-time and applies different algorithms
+to predict the next activity.
+"""
+
 import logicsponge.core as ls
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
 from logicsponge.processmining.models import BasicMiner, SoftVoting

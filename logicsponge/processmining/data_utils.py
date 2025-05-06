@@ -120,12 +120,28 @@ def split_sequence_data(
     return train_set, test_set
 
 
+def retain_sequences_of_length_x_than(
+    data: list[list[Event]], min_length: int, mode: str = "greater"
+) -> list[list[Event]]:
+    """Retains only those sequences in the dataset that have a length greater than the specified minimum length."""
+    if mode == "greater":
+        res = [seq for seq in data if len(seq) > min_length]
+    elif mode == "lower":
+        res = [seq for seq in data if len(seq) < min_length]
+    elif mode == "equal":
+        res = [seq for seq in data if len(seq) == min_length]
+    else:
+        raise ValueError("Invalid mode. Use 'greater', 'less', or 'equal'.")
+    print(f"Retained {len(res)} sequences out of {len(data)} with length greater than {min_length}.")
+    return res
+
+
 # ============================================================
 # Statistics
 # ============================================================
 
 
-def data_statistics(data: list[list[Event]]) -> None:
+def data_statistics(data: list[list[Event]]) -> int:
     # Calculate total length of sequences and average length
     total_length = sum(len(lst) for lst in data)
     average_length = total_length / len(data) if data else 0
@@ -146,6 +162,7 @@ def data_statistics(data: list[list[Event]]) -> None:
         f"Activity occurrences: {activity_occurrences}\n"
     )
     logger.info(msg)
+    return len(unique_activities)
 
 
 # ============================================================

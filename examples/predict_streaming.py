@@ -1,3 +1,5 @@
+"""Streaming prediction example for process mining using LogicSponge."""
+
 import gc
 import logging
 
@@ -172,24 +174,22 @@ soft_voting = StreamingActivityPredictor(
 )
 
 list_grams = [(2, 3, 6, 8), (2, 3, 5, 6), (2, 3, 5, 8), (2, 3, 4, 6), (2, 3, 6, 7), (2, 3, 7, 8), (2, 3, 6, 8)]
-soft_voting_tests = []
-
-for grams in list_grams:
-    soft_voting_tests.append(
-        StreamingActivityPredictor(
-            strategy=SoftVoting(
-                models=[
-                    BasicMiner(algorithm=Bag()),
-                    BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-                    BasicMiner(algorithm=NGram(window_length=grams[0])),
-                    BasicMiner(algorithm=NGram(window_length=grams[1])),
-                    BasicMiner(algorithm=NGram(window_length=grams[2])),
-                    BasicMiner(algorithm=NGram(window_length=grams[3])),
-                ],
-                config=config,
-            )
+soft_voting_tests = [
+    StreamingActivityPredictor(
+        strategy=SoftVoting(
+            models=[
+                BasicMiner(algorithm=Bag()),
+                BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
+                BasicMiner(algorithm=NGram(window_length=grams[0])),
+                BasicMiner(algorithm=NGram(window_length=grams[1])),
+                BasicMiner(algorithm=NGram(window_length=grams[2])),
+                BasicMiner(algorithm=NGram(window_length=grams[3])),
+            ],
+            config=config,
         )
     )
+    for grams in list_grams
+]
 
 adaptive_voting = StreamingActivityPredictor(
     strategy=AdaptiveVoting(
@@ -255,7 +255,7 @@ models = [
     "soft_voting_test_6",
     "soft_voting_test_7",
     "adaptive_voting",
-    "lstm"
+    "lstm",
 ]
 
 accuracy_list = [f"{model}.accuracy" for model in models]
@@ -275,7 +275,8 @@ all_attributes = ["index", *accuracy_list, *latency_mean_list, *delay_list]
 streamer = IteratorStreamer(data_iterator=dataset)
 
 
-def start_filter(item: DataItem):
+def start_filter(item: DataItem) -> bool:
+    """Filter function to check if the activity is not the start symbol."""
     return item["activity"] != start_symbol
 
 

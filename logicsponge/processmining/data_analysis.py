@@ -24,6 +24,7 @@ phase_counts = df.groupby(["case:concept:name", "concept:name"]).size().unstack(
 phase_counts_description = phase_counts.describe()
 print("Phase Counts Description:\n", phase_counts_description)
 
+
 # Consecutive Phase Repetitions in Cases
 def max_consecutive_repeats(phase_list):
     max_repeats = {}
@@ -48,6 +49,7 @@ def max_consecutive_repeats(phase_list):
 
     return max_repeats
 
+
 # Apply the function to each case
 continuous_repeats = df.groupby("case:concept:name")["concept:name"].agg(lambda x: max_consecutive_repeats(x.tolist()))
 
@@ -56,17 +58,19 @@ continuous_repeats_df = continuous_repeats.apply(pd.Series).fillna(0)
 continuous_repeats_description = continuous_repeats_df.describe()
 print("Continuous Repeats Description:\n", continuous_repeats_description)
 
-summary_df = pd.DataFrame({
-    "num_events": case_sizes,
-    "case_duration": case_durations.dt.total_seconds(),
-    "max_continuous_phase": continuous_repeats_df.max(axis=1)
-})
+summary_df = pd.DataFrame(
+    {
+        "num_events": case_sizes,
+        "case_duration": case_durations.dt.total_seconds(),
+        "max_continuous_phase": continuous_repeats_df.max(axis=1),
+    }
+)
 summary_df_description = summary_df.describe()
 print("Summary DataFrame Description:\n", summary_df_description)
 
 # Save descriptions to a CSV file
 output_path = Path(__file__).resolve().parent / "../../data/description_output.csv"
-with open(output_path, 'w') as f:
+with open(output_path, "w") as f:
     f.write("Case Sizes Description:\n")
     case_sizes_description.to_csv(f)
     f.write("\nCase Durations Description:\n")

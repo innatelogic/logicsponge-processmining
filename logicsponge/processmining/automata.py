@@ -33,7 +33,8 @@ class Automaton:
         self.initial_state = state_id
 
     def create_state(self, state_id: StateId | None = None) -> StateId:
-        """Creates and initializes a new state with the given name and state ID.
+        """Create and initializes a new state with the given name and state ID.
+
         If no state ID is provided, ID is assigned based on current number of states.
         """
         if state_id is None:
@@ -46,6 +47,7 @@ class Automaton:
         return state_id
 
     def create_states(self, n_states: int) -> None:
+        """Create and initializes a number of new states."""
         for _ in range(n_states):
             self.create_state()
 
