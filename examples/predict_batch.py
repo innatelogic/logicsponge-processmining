@@ -144,6 +144,8 @@ all_metrics = {
         "pp_median": [],
         "pp_q1": [],
         "pp_q3": [],
+        "top-2": [],
+        "top-3": [],
         "num_states": [],
         "mean_delay_error": [],
         "mean_actual_delay": [],
@@ -559,8 +561,8 @@ for iteration in range(n_iterations):
     #     iteration_data[f"Top-{k+1}"] = []
 
     for strategy_name, (strategy, test_data) in strategies.items():
-        # if "hard" in strategy_name:
-        #     continue
+        if "hard" in strategy_name:
+            continue
         # if not strategy_name.startswith("ngram_"):
         #     continue
 
@@ -662,6 +664,8 @@ for iteration in range(n_iterations):
         all_metrics[strategy_name]["pp_median"].append(stats["pp_median"])
         all_metrics[strategy_name]["pp_q1"].append(stats["pp_q1"])
         all_metrics[strategy_name]["pp_q3"].append(stats["pp_q3"])
+        for k in range(1, config["top_k"]):
+            all_metrics[strategy_name][f"top-{k+1}"].append(top_k_accuracies[k])
         all_metrics[strategy_name]["num_states"].append(num_states)
         all_metrics[strategy_name]["mean_delay_error"].append(mean_delay_error)
         all_metrics[strategy_name]["mean_actual_delay"].append(mean_actual_delay)
@@ -695,7 +699,12 @@ for iteration in range(n_iterations):
             model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=20
         )
 
-        lstm_stats, lstm_perplexities = evaluate_rnn(model, nn_test_set_transformed, dataset_type="Test")
+        lstm_stats, lstm_perplexities = evaluate_rnn(
+            model,
+            nn_test_set_transformed,
+            dataset_type="Test",
+            max_k=config["top_k"]
+        )
         lstm_perplexity_stats = compute_perplexity_stats(lstm_perplexities)
 
         # if SHOW_DELAYS:
@@ -705,6 +714,14 @@ for iteration in range(n_iterations):
         #     all_metrics["LSTM"]["mean_normalized_error"].append(mean_normalized_error)
         #     all_metrics["LSTM"]["num_delay_predictions"].append(delay_count)
 
+
+        if (
+            not isinstance(lstm_stats["top_k_correct_preds"], list)
+            or not isinstance(lstm_stats["total_predictions"], int)
+            or not isinstance(lstm_stats["accuracy"], float)
+        ):
+            msg = "LSTM stats are not in the expected format."
+            raise TypeError(msg)
         # Append data to the iteration data dictionary
         iteration_data["Model"].append("LSTM")
 
@@ -717,6 +734,11 @@ for iteration in range(n_iterations):
         iteration_data["Correct (%)"].append(lstm_stats["accuracy"] * 100)
         iteration_data["Wrong (%)"].append(100 - lstm_stats["accuracy"] * 100)
         iteration_data["Empty (%)"].append(0.0)
+
+        for k in range(1, config["top_k"]):
+            iteration_data[f"Top-{k+1}"].append(
+                lstm_stats["top_k_correct_preds"][k] / lstm_stats["total_predictions"] * 100
+            )
 
         iteration_data["Good Preds"].append(lstm_stats["correct_predictions"])
         iteration_data["Tot Preds"].append(lstm_stats["total_predictions"])
@@ -734,6 +756,8 @@ for iteration in range(n_iterations):
         all_metrics["LSTM"]["pp_median"].append(lstm_perplexity_stats["pp_median"])
         all_metrics["LSTM"]["pp_q1"].append(lstm_perplexity_stats["pp_q1"])
         all_metrics["LSTM"]["pp_q3"].append(lstm_perplexity_stats["pp_q3"])
+        for k in range(1, config["top_k"]):
+            all_metrics["LSTM"][f"top-{k+1}"].append(iteration_data[f"Top-{k+1}"][-1])
         all_metrics["LSTM"]["num_states"].append(0)
         all_metrics["LSTM"]["mean_delay_error"].append(None)
         all_metrics["LSTM"]["mean_actual_delay"].append(None)
@@ -781,6 +805,8 @@ for model_name, stats in all_metrics.items():
         "PP Median": "pp_median",
         "PP Q1": "pp_q1",
         "PP Q3": "pp_q3",
+        "Top-2": "top-2",
+        "Top-3": "top-3",
     }
 
     for label, key_name in key_labels.items():
