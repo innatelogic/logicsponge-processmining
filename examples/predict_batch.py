@@ -147,6 +147,8 @@ all_metrics = {
         "top-2": [],
         "top-3": [],
         "num_states": [],
+        "train_time": [],
+        "pred_time": [],
         "mean_delay_error": [],
         "mean_actual_delay": [],
         "mean_normalized_error": [],
@@ -166,6 +168,8 @@ all_metrics = {
         "adaptive_ngram",
         "hard voting",
         "soft voting",
+        # "soft voting B",
+        # "soft voting C",
         *[f"soft voting {grams}" for grams in SOFT_VOTING_NGRAMS],
         "alergia",
         "LSTM",
@@ -401,6 +405,25 @@ for iteration in range(n_iterations):
         config=config,
     )
 
+    # soft_voting_B = SoftVoting(
+    #     models=[
+    #         BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
+    #         BasicMiner(algorithm=NGram(window_length=2, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+    #         BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+    #         BasicMiner(algorithm=NGram(window_length=4, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+    #     ],
+    #     config=config,
+    # )
+
+    # soft_voting_C = SoftVoting(
+    #     models=[
+    #         BasicMiner(algorithm=NGram(window_length=2, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+    #         BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+    #         BasicMiner(algorithm=NGram(window_length=4, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+    #     ],
+    #     config=config,
+    # )
+
     soft_voting_tests = [
         SoftVoting(
             models=[
@@ -424,71 +447,43 @@ for iteration in range(n_iterations):
         config=config,
     )
 
-    # Train Process Miners
-    start_time = time.time()
-    for event in train_set:
-        fpt.update(event)
-        bag.update(event)
+    # ============================================================
+    BAYESIAN_MODELS = {
+        "bayesian train": BayesianClassifier(config=config),
+        "bayesian test": BayesianClassifier(config=config),
+        "bayesian t+t": BayesianClassifier(config=config),
+        "bayesian test nonsingle": BayesianClassifier(single_occurence_allowed=False, config=config),
+        "bayesian t+t nonsingle": BayesianClassifier(single_occurence_allowed=False, config=config)
+    }
+    # bayesian_classifier_train = BayesianClassifier(config=config)
+    # bayesian_classifier_train.initialize_memory(train_set_transformed)
 
-        for ngram_model in NGRAM_MODELS.values():
-            ngram_model.update(event)
+    # bayesian_classifier_test = BayesianClassifier(config=config)
+    # bayesian_classifier_test.initialize_memory(test_set_transformed)
 
-        fallback.update(event)
-        fallback_ngram8to2.update(event)
-        fallback_ngram8to3.update(event)
-        fallback_ngram8to4.update(event)
+    # bayesian_classifier_train_test = BayesianClassifier(config=config)
+    # bayesian_classifier_train_test.initialize_memory(train_set_transformed + test_set_transformed)
 
-        fallback_ngram10to2.update(event)
-        fallback_ngram13to2.update(event)
-        fallback_ngram8to_ooo.update(event)
+    # bayesian_classifier_test_nonsingle = BayesianClassifier(single_occurence_allowed=False, config=config)
+    # bayesian_classifier_test_nonsingle.initialize_memory(test_set_transformed)
 
-        adaptive_ngram.update(event)
-        hard_voting.update(event)
-        soft_voting.update(event)
+    # bayesian_classifier_train_test_nonsingle = BayesianClassifier(single_occurence_allowed=False, config=config)
+    # bayesian_classifier_train_test_nonsingle.initialize_memory(train_set_transformed + test_set_transformed)
 
-        for soft_voting_test in soft_voting_tests:
-            soft_voting_test.update(event)
 
-    end_time = time.time()
-    elapsed_time = end_time - start_time
-    msg = f"Total training time for process miners: {elapsed_time:.4f} seconds"
-    logger.info(msg)
 
-    # Train Bayesian Classifier
-    start_time = time.time()
+    # ============= Train Alergia
+    alergia_start_time = time.time()
 
-    bayesian_classifier_train = BayesianClassifier(config=config)
-    bayesian_classifier_train.initialize_memory(train_set_transformed)
-
-    bayesian_classifier_test = BayesianClassifier(config=config)
-    bayesian_classifier_test.initialize_memory(test_set_transformed)
-
-    bayesian_classifier_train_test = BayesianClassifier(config=config)
-    bayesian_classifier_train_test.initialize_memory(train_set_transformed + test_set_transformed)
-
-    bayesian_classifier_test_nonsingle = BayesianClassifier(single_occurence_allowed=False, config=config)
-    bayesian_classifier_test_nonsingle.initialize_memory(test_set_transformed)
-
-    bayesian_classifier_train_test_nonsingle = BayesianClassifier(single_occurence_allowed=False, config=config)
-    bayesian_classifier_train_test_nonsingle.initialize_memory(train_set_transformed + test_set_transformed)
-
-    end_time = time.time()
-    elapsed_time = end_time - start_time
-    msg = f"Training time for Bayesian Classifiers: {elapsed_time:.4f} seconds"
-    logger.info(msg)
-
-    # Train Alergia
-    start_time = time.time()
     algorithm = run_Alergia(alergia_train_set_transformed, automaton_type="smm", eps=0.5, print_info=True)
     smm = Alergia(algorithm=algorithm)
-    end_time = time.time()
-    elapsed_time = end_time - start_time
-    msg = f"Training time for Alergia: {elapsed_time:.4f} seconds"
+
+    alergia_end_time = time.time()
+    alergia_elapsed_time = alergia_end_time - alergia_start_time
+    msg = f"Training time for Alergia: {alergia_elapsed_time:.4f} seconds"
     logger.info(msg)
 
-    # ============================================================
-    # Evaluation
-    # ============================================================
+
 
     # All strategies (without LSTM)
     ngram_strategies = {
@@ -503,6 +498,10 @@ for iteration in range(n_iterations):
     soft_voting_strategies = {
         f"soft voting {grams}": (soft_voting_test, test_set_transformed)
         for grams, soft_voting_test in zip(SOFT_VOTING_NGRAMS, soft_voting_tests, strict=False)
+    }
+    bayesian_strategies = {
+        model_name: (model, test_set_transformed)
+        for model_name, model in BAYESIAN_MODELS.items()
     }
     strategies = {
         "fpt": (fpt, test_set_transformed),
@@ -521,14 +520,89 @@ for iteration in range(n_iterations):
         "adaptive_ngram": (adaptive_ngram, test_set_transformed),
         "hard voting": (hard_voting, test_set_transformed),
         "soft voting": (soft_voting, test_set_transformed),
+        # "soft voting B": (soft_voting_B, test_set_transformed),
+        # "soft voting C": (soft_voting_C, test_set_transformed),
         **soft_voting_strategies,
         "alergia": (smm, test_set_transformed),
-        "bayesian train": (bayesian_classifier_train, test_set_transformed),
-        "bayesian test": (bayesian_classifier_test, test_set_transformed),
-        "bayesian t+t": (bayesian_classifier_train_test, test_set_transformed),
-        "bayesian test nonsingle": (bayesian_classifier_test_nonsingle, test_set_transformed),
-        "bayesian t+t nonsingle": (bayesian_classifier_train_test_nonsingle, test_set_transformed),
+        **bayesian_strategies
     }
+
+
+
+    training_times = dict.fromkeys(strategies, 0.0)
+    training_times["alergia"] = alergia_elapsed_time
+
+
+    # ================= Train Process Miners
+    miners_start_time = time.time()
+
+    for event in train_set:
+        for strategy_name, (strategy, _) in strategies.items():
+            if "alergia" in strategy_name or "bayesian" in strategy_name:
+                continue
+            start_time = time.time()
+            strategy.update(event)
+            end_time = time.time()
+            training_times[strategy_name] += end_time - start_time
+
+        # fpt.update(event)
+        # bag.update(event)
+
+        # for ngram_model in NGRAM_MODELS.values():
+        #     ngram_model.update(event)
+
+        # fallback.update(event)
+        # fallback_ngram8to2.update(event)
+        # fallback_ngram8to3.update(event)
+        # fallback_ngram8to4.update(event)
+
+        # fallback_ngram10to2.update(event)
+        # fallback_ngram13to2.update(event)
+        # fallback_ngram8to_ooo.update(event)
+
+        # adaptive_ngram.update(event)
+        # hard_voting.update(event)
+        # soft_voting.update(event)
+
+        # for soft_voting_test in soft_voting_tests:
+        #     soft_voting_test.update(event)
+
+    miners_end_time = time.time()
+    elapsed_time = miners_end_time - miners_start_time
+    msg = f"Total training time for process miners: {elapsed_time:.4f} seconds"
+    logger.info(msg)
+
+
+    # ================= Train Bayesian Classifiers
+    bayesian_start_time = time.time()
+
+    for model_name, model in BAYESIAN_MODELS.items():
+        if "train" in model_name:
+            start_time = time.time()
+            model.initialize_memory(train_set_transformed)
+            end_time = time.time()
+            training_times[model_name] = end_time - start_time
+        elif "test" in model_name:
+            start_time = time.time()
+            model.initialize_memory(test_set_transformed)
+            end_time = time.time()
+            training_times[model_name] = end_time - start_time
+        elif "t+t" in model_name:
+            start_time = time.time()
+            model.initialize_memory(train_set_transformed + test_set_transformed)
+            end_time = time.time()
+            training_times[model_name] = end_time - start_time
+
+    bayesian_end_time = time.time()
+    elapsed_time = bayesian_end_time - bayesian_start_time
+    msg = f"Training time for Bayesian Classifiers: {elapsed_time:.4f} seconds"
+    logger.info(msg)
+
+
+
+    # ============================================================
+    # Evaluation
+    # ============================================================
 
     # Store the statistics for each iteration and also print them out
     iteration_data = {
@@ -543,12 +617,9 @@ for iteration in range(n_iterations):
         "Empty (%)": [],
         "Top-2": [],
         "Top-3": [],
-        # "Vst/Correct": [],  # Avg
-        # "Vst/Wrong": [],  # Avg
-        # "Vst/Empty": [],  # Avg
-        # "Wrong/S": [],
-        # "Correct/S": [],
-        # "Empty/S": [],
+
+        "Pred Time": [],
+
         "Good Preds": [],
         "Tot Preds": [],
         "Nb States": [],
@@ -561,14 +632,19 @@ for iteration in range(n_iterations):
     #     iteration_data[f"Top-{k+1}"] = []
 
     for strategy_name, (strategy, test_data) in strategies.items():
-        if "hard" in strategy_name:
-            continue
+        # if "hard" in strategy_name:
+        #     continue
         # if not strategy_name.startswith("ngram_"):
         #     continue
 
         msg = f"Evaluating {strategy_name}..."
         logger.info(msg)
+
+        start_time = time.time()
         strategy.evaluate(test_data, mode="incremental", debug=(data_name == "Synthetic_Train"))
+        end_time = time.time()
+        evaluation_time = end_time - start_time
+
         stats = strategy.stats
 
         total = stats["total_predictions"]
@@ -613,9 +689,13 @@ for iteration in range(n_iterations):
         for k in range(1, config["top_k"]):
             iteration_data[f"Top-{k+1}"].append(top_k_accuracies[k])
 
+        iteration_data["Pred Time"].append(evaluation_time)
+
         iteration_data["Good Preds"].append(stats["correct_predictions"])
         iteration_data["Tot Preds"].append(total)
         iteration_data["Nb States"].append(num_states)
+
+
 
         # Get the mean of a dictionary
         def weighted_mean_of_dict(stat_dict: dict) -> float:
@@ -667,6 +747,9 @@ for iteration in range(n_iterations):
         for k in range(1, config["top_k"]):
             all_metrics[strategy_name][f"top-{k+1}"].append(top_k_accuracies[k])
         all_metrics[strategy_name]["num_states"].append(num_states)
+        all_metrics[strategy_name]["pred_time"].append(evaluation_time)
+        all_metrics[strategy_name]["train_time"].append(training_times[strategy_name])
+
         all_metrics[strategy_name]["mean_delay_error"].append(mean_delay_error)
         all_metrics[strategy_name]["mean_actual_delay"].append(mean_actual_delay)
         all_metrics[strategy_name]["mean_normalized_error"].append(mean_normalized_error)
@@ -695,16 +778,22 @@ for iteration in range(n_iterations):
         optimizer = optim.Adam(model.parameters(), lr=0.001)
 
         # Train the LSTM on the train set with batch size and sequence-to-sequence targets
+        start_time = time.time()
         model = train_rnn(
             model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=20
         )
+        end_time = time.time()
+        training_time = end_time - start_time
 
+        start_time = time.time()
         lstm_stats, lstm_perplexities = evaluate_rnn(
             model,
             nn_test_set_transformed,
             dataset_type="Test",
             max_k=config["top_k"]
         )
+        end_time = time.time()
+        evaluation_time = end_time - start_time
         lstm_perplexity_stats = compute_perplexity_stats(lstm_perplexities)
 
         # if SHOW_DELAYS:
@@ -740,6 +829,8 @@ for iteration in range(n_iterations):
                 lstm_stats["top_k_correct_preds"][k] / lstm_stats["total_predictions"] * 100
             )
 
+        iteration_data["Pred Time"].append(evaluation_time)
+
         iteration_data["Good Preds"].append(lstm_stats["correct_predictions"])
         iteration_data["Tot Preds"].append(lstm_stats["total_predictions"])
         iteration_data["Nb States"].append(None)
@@ -752,6 +843,10 @@ for iteration in range(n_iterations):
         all_metrics["LSTM"]["pp_q3"].append(lstm_perplexity_stats["pp_q3"])
         for k in range(1, config["top_k"]):
             all_metrics["LSTM"][f"top-{k+1}"].append(iteration_data[f"Top-{k+1}"][-1])
+
+        all_metrics["LSTM"]["pred_time"].append(evaluation_time)
+        all_metrics["LSTM"]["train_time"].append(training_time)
+
         all_metrics["LSTM"]["num_states"].append(0)
         all_metrics["LSTM"]["mean_delay_error"].append(None)
         all_metrics["LSTM"]["mean_actual_delay"].append(None)
@@ -786,6 +881,8 @@ results = {
     "PP Q1": [],
     "PP Q3": [],
     "States": [],
+    "Pred Time": [],
+    "Train Time": [],
     "Delay Error": [],
     "Actual Delay": [],
     "Normalized Error": [],
@@ -803,6 +900,8 @@ for model_name, stats in all_metrics.items():
         "PP Q3": "pp_q3",
         "Top-2 (%)": "top-2",
         "Top-3 (%)": "top-3",
+        "Pred Time": "pred_time",
+        "Train Time": "train_time",
     }
 
     for label, key_name in key_labels.items():
