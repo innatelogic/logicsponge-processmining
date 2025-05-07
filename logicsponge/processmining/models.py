@@ -12,6 +12,7 @@ import random
 from abc import ABC, abstractmethod
 from collections import Counter, OrderedDict
 from datetime import timedelta
+import time
 from typing import Any
 
 import matplotlib as mpl
@@ -245,9 +246,8 @@ class StreamingMiner(ABC):
         data: list[list[Event]],
         mode: str = "incremental",
         *,
-        log_likelihood: bool = False,
-        debug: bool = False,
-    ) -> None:
+        log_likelihood: bool = False
+        ) -> float:
         """Evaluate in batch mode.
 
         Evaluate the dataset either incrementally or by full sequence.
@@ -260,15 +260,22 @@ class StreamingMiner(ABC):
 
         # Initialize stats
         perplexities = []
+
+        eval_start_time = time.time()
+        pause_time = 0.0
+
         for sequence in tqdm(data, desc="Processing sequences"):
+
+            pause_start_time = time.time()
+
             logger.debug(">>>>> Start Evaluating Sequence <<<<<")
-
-
             event_sequence = ""
             predicted_sequence = ""
             for event in sequence:
                 event_sequence += event["activity"].__str__()
             logger.debug("Event sequence: %s", event_sequence.replace(self.config["stop_symbol"].__str__(), "S"))
+
+            pause_time += time.time() - pause_start_time
 
             current_state = self.initial_state
             metrics = empty_metrics()
@@ -296,6 +303,10 @@ class StreamingMiner(ABC):
 
                 # Prediction for incremental mode (step by step)
                 metrics = self.state_metrics(current_state)
+                prediction = metrics_prediction(metrics, config=self.config)
+                predicted_sequence += prediction["activity"].__str__() if prediction else "-"
+
+                pause_start_time = time.time()
 
                 logger.debug("      [Before] Likelihood: %s", likelihood)
                 if log_likelihood:
@@ -309,8 +320,6 @@ class StreamingMiner(ABC):
                 #     if metrics["likelihood"] is not None
                 #     else 0.0
                 # )
-                prediction = metrics_prediction(metrics, config=self.config)
-                predicted_sequence += prediction["activity"].__str__() if prediction else "-"
 
                 logger.debug("State: %s", current_state)
                 logger.debug("Actual next activity: %s", actual_next_activity)
@@ -320,10 +329,13 @@ class StreamingMiner(ABC):
                 # Update statistics based on the prediction
                 self.update_stats(event, prediction, current_state)
 
+                pause_time += time.time() - pause_start_time
+
                 # Move to the next state
                 if i < len(sequence) - 1:
                     current_state = self.next_state(current_state, actual_next_activity)
                     logger.debug("Next state: %s", current_state)
+
 
             # Normalize by the length of the sequence
             if log_likelihood:
@@ -348,6 +360,9 @@ class StreamingMiner(ABC):
 
         for key, value in perplexity_stats.items():
             self.stats[key] = value
+
+        return time.time() - eval_start_time - pause_time
+
 
     @abstractmethod
     def get_state_info(self, state_id: StateId) -> ComposedState | None:

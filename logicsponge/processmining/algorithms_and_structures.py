@@ -4,6 +4,7 @@ import math
 from abc import ABC, abstractmethod
 from collections import deque
 from datetime import timedelta
+import time
 from typing import Any
 
 from logicsponge.processmining.automata import PDFA
@@ -98,9 +99,12 @@ class BayesianClassifier:
             *,
             log_likelihood: bool = False,
             debug: bool = False,
-        ) -> None:
+        ) -> float:
         """Evaluation of the dataset using a Bayes classifier."""
         perplexities = []
+
+        eval_start_time = time.time()
+        pause_time = 0.0
 
         for sequence in data:
 
@@ -108,12 +112,14 @@ class BayesianClassifier:
             likelihood = 0.0 if log_likelihood else 1.0
 
             for i in range(len(sequence)): 
+
                 event = sequence[i]
 
                 actual_activity = event.get("activity")
                 
                 bayes_prediction = self._get_bayes_prediction(prefix)
 
+                pause_start_time = time.time()
                 if log_likelihood:
                     likelihood += math.log(self._get_conditional_likelihood(prefix, actual_activity))
                 else:
@@ -133,10 +139,13 @@ class BayesianClassifier:
                             for indices_top_k in range(k, len(self.stats["top_k_correct_preds"])):
                                 self.stats["top_k_correct_preds"][indices_top_k] += 1
                             break
-            
+                
+                pause_time += time.time() - pause_start_time
+
                 self.stats["total_predictions"] += 1
                 prefix.append(actual_activity)
             
+            pause_start_time = time.time()
             # Normalize by the length of the sequence
             if log_likelihood:
                 normalized_likelihood = likelihood / len(sequence) if len(sequence) > 0 else likelihood
@@ -149,12 +158,17 @@ class BayesianClassifier:
                 seq_perplexity = float("inf")
 
             perplexities.append(seq_perplexity)
+            pause_time += time.time() - pause_start_time
         
+        eval_time = time.time() - eval_start_time - pause_time
+
         perplexity_stats = compute_perplexity_stats(perplexities)
         logger.debug("Perplexity stats: %s", perplexity_stats)
 
         for key, value in perplexity_stats.items():
             self.stats[key] = value
+
+        return eval_time
 
     def _get_conditional_likelihood(self, prefix: list[ActivityName], activity: ActivityName) -> float:
         """Returns the predicted activity based on the Bayes classifier."""

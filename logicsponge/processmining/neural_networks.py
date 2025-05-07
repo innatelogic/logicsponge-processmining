@@ -1,10 +1,11 @@
 import copy
 import logging
+import time
 
 import torch
+import torch.nn.functional as F
 import torch.utils.data
 from torch import nn
-import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
 
@@ -261,7 +262,7 @@ def train_rnn(model, train_sequences, val_sequences, criterion, optimizer, batch
         # Evaluate on validation set after each epoch
         msg = "Evaluating on validation set..."
         logger.info(msg)
-        stats, _ = evaluate_rnn(model, val_sequences)
+        stats, _, _ = evaluate_rnn(model, val_sequences)
         val_accuracy = stats["accuracy"]
 
         if not isinstance(val_accuracy, float):
@@ -305,11 +306,14 @@ def evaluate_rnn(
     *,
     per_sequence_perplexity: bool = True,
     max_k: int = 3,
-) -> tuple[dict[str, float | list[int]], list[float]]:
+) -> tuple[dict[str, float | list[int]], list[float], float]:
     """Evaluate the LSTM model on a dataset (train, test, or validation).
 
     Returns accuracy.
     """
+    eval_start_time = time.time()
+    pause_time = 0.0
+
     model.eval()  # Set the model to evaluation mode
     correct_predictions = 0
     total_predictions = 0
@@ -328,32 +332,37 @@ def evaluate_rnn(
             y_target = sequence[1:].unsqueeze(0)  # Shifted by one as target
 
             outputs = model(x_input)
-            log_probs = F.log_softmax(outputs, dim=-1)  # Log probabilities
-
-            # Get top-k predictions for each position
-            # Shape: [batch_size, seq_len, k]
-            _, top_k_indices = torch.topk(outputs, k=max_k, dim=-1)
 
             # Flatten for comparison
             predicted_indices = torch.argmax(outputs, dim=-1)
             predicted_indices = predicted_indices.view(-1)
             y_target = y_target.view(-1)
-            log_probs = log_probs.view(-1, log_probs.shape[-1])
-
-            # Reshape top_k_indices to [batch_size*seq_len, k]
-            top_k_indices = top_k_indices.view(-1, max_k)
 
             # Create a mask to ignore padding
             mask = y_target != 0  # Mask for non-padding targets
             masked_targets = y_target[mask]
-            masked_log_probs = log_probs[mask]
-
-            # Apply mask to top-k predictions
-            masked_top_k = top_k_indices[mask]
 
             # Apply the mask and count correct predictions
             correct_predictions += (predicted_indices[mask] == masked_targets).sum().item()
             total_predictions += mask.sum().item()  # Count non-padding tokens
+
+
+            pause_start_time = time.time()
+
+            # ================ Start for metrics ================
+
+            # Get top-k predictions for each position
+            # Shape: [batch_size, seq_len, k]
+            _, top_k_indices = torch.topk(outputs, k=max_k, dim=-1)
+
+            # Reshape top_k_indices to [batch_size*seq_len, k]
+            top_k_indices = top_k_indices.view(-1, max_k)
+            log_probs = F.log_softmax(outputs, dim=-1)  # Log probabilities
+            log_probs = log_probs.view(-1, log_probs.shape[-1])
+            masked_log_probs = log_probs[mask]
+
+            # Apply mask to top-k predictions
+            masked_top_k = top_k_indices[mask]
 
             # Count correct predictions for each k
             for k in range(max_k):
@@ -368,7 +377,6 @@ def evaluate_rnn(
                 # Count positions where the true label appears in the top-k predictions
                 top_k_correct = (top_k_preds == expanded_targets).any(dim=1).sum().item()
                 top_k_correct_preds[k] += int(top_k_correct)
-
 
             # NLL for perplexity
             token_log_probs = masked_log_probs[torch.arange(len(masked_targets)), masked_targets]
@@ -389,8 +397,14 @@ def evaluate_rnn(
             total_nll += sequence_nll
             token_count += sequence_length
 
+            # ================= End for metrics =================
+            pause_time += time.time() - pause_start_time
+
+
+
     accuracy = correct_predictions / total_predictions if total_predictions > 0 else 0
 
+    pause_start_time = time.time()
     if not per_sequence_perplexity:
         perplexities.append(
             torch.exp(torch.tensor(total_nll / token_count)).item() if token_count > 0 else float("inf")
@@ -405,4 +419,8 @@ def evaluate_rnn(
         "top_k_correct_preds": top_k_correct_preds,
     }
 
-    return stats, perplexities
+    pause_time += time.time() - pause_start_time
+
+    eval_time = time.time() - eval_start_time - pause_time
+
+    return stats, perplexities, eval_time

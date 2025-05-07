@@ -640,10 +640,7 @@ for iteration in range(n_iterations):
         msg = f"Evaluating {strategy_name}..."
         logger.info(msg)
 
-        start_time = time.time()
-        strategy.evaluate(test_data, mode="incremental", debug=(data_name == "Synthetic_Train"))
-        end_time = time.time()
-        evaluation_time = end_time - start_time
+        evaluation_time = strategy.evaluate(test_data, mode="incremental", debug=(data_name == "Synthetic_Train"))
 
         stats = strategy.stats
 
@@ -785,15 +782,12 @@ for iteration in range(n_iterations):
         end_time = time.time()
         training_time = end_time - start_time
 
-        start_time = time.time()
-        lstm_stats, lstm_perplexities = evaluate_rnn(
+        lstm_stats, lstm_perplexities, lstm_eval_time = evaluate_rnn(
             model,
             nn_test_set_transformed,
             dataset_type="Test",
             max_k=config["top_k"]
         )
-        end_time = time.time()
-        evaluation_time = end_time - start_time
         lstm_perplexity_stats = compute_perplexity_stats(lstm_perplexities)
 
         # if SHOW_DELAYS:
@@ -829,7 +823,7 @@ for iteration in range(n_iterations):
                 lstm_stats["top_k_correct_preds"][k] / lstm_stats["total_predictions"] * 100
             )
 
-        iteration_data["Pred Time"].append(evaluation_time)
+        iteration_data["Pred Time"].append(lstm_eval_time)
 
         iteration_data["Good Preds"].append(lstm_stats["correct_predictions"])
         iteration_data["Tot Preds"].append(lstm_stats["total_predictions"])
@@ -844,7 +838,7 @@ for iteration in range(n_iterations):
         for k in range(1, config["top_k"]):
             all_metrics["LSTM"][f"top-{k+1}"].append(iteration_data[f"Top-{k+1}"][-1])
 
-        all_metrics["LSTM"]["pred_time"].append(evaluation_time)
+        all_metrics["LSTM"]["pred_time"].append(lstm_eval_time)
         all_metrics["LSTM"]["train_time"].append(training_time)
 
         all_metrics["LSTM"]["num_states"].append(0)
