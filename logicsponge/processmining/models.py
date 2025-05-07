@@ -246,8 +246,9 @@ class StreamingMiner(ABC):
         data: list[list[Event]],
         mode: str = "incremental",
         *,
-        log_likelihood: bool = False
-        ) -> float:
+        log_likelihood: bool = False,
+        debug: bool = False,
+    ) -> float:
         """Evaluate in batch mode.
 
         Evaluate the dataset either incrementally or by full sequence.
