@@ -744,12 +744,6 @@ for iteration in range(n_iterations):
         iteration_data["Tot Preds"].append(lstm_stats["total_predictions"])
         iteration_data["Nb States"].append(None)
 
-        for k in range(1, config["top_k"]):
-            iteration_data[f"Top-{k+1}"].append(None)
-            # iteration_data[f"Top-{k+1}"].append(
-            # lstm_stats["top_k_correct_preds"][k] / lstm_stats["total_predictions"] * 100
-            # )
-
         all_metrics["LSTM"]["accuracies"].append(lstm_stats["accuracy"])
         all_metrics["LSTM"]["pp_arithmetic_mean"].append(lstm_perplexity_stats["pp_arithmetic_mean"])
         all_metrics["LSTM"]["pp_harmonic_mean"].append(lstm_perplexity_stats["pp_harmonic_mean"])
