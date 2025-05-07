@@ -777,12 +777,14 @@ with stats_file_path.open("w") as f:
 results = {
     "Model": [],
     "Mean Accuracy (%)": [],
+    "Std": [],
+    "Top-2 (%)": [],
+    "Top-3 (%)": [],
     "PP Arithm": [],
     "PP Harmo": [],
     "PP Median": [],
     "PP Q1": [],
     "PP Q3": [],
-    "Std": [],
     "States": [],
     "Delay Error": [],
     "Actual Delay": [],
@@ -799,8 +801,8 @@ for model_name, stats in all_metrics.items():
         "PP Median": "pp_median",
         "PP Q1": "pp_q1",
         "PP Q3": "pp_q3",
-        "Top-2": "top-2",
-        "Top-3": "top-3",
+        "Top-2 (%)": "top-2",
+        "Top-3 (%)": "top-3",
     }
 
     for label, key_name in key_labels.items():
