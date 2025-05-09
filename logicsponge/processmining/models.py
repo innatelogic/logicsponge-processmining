@@ -241,7 +241,14 @@ class StreamingMiner(ABC):
             return math.exp(-normalized_likelihood) if log_likelihood else 1.0 / normalized_likelihood
         return float("inf")
 
-    def evaluate(self, data: list[list[Event]], mode: str = "incremental", *, log_likelihood: bool = False) -> float:
+    def evaluate(
+        self,
+        data: list[list[Event]],
+        mode: str = "incremental",
+        *,
+        log_likelihood: bool = False,
+        debug: bool = False, # noqa: ARG002
+    ) -> float:
         """Evaluate in batch mode.
 
         Evaluate the dataset either incrementally or by full sequence.

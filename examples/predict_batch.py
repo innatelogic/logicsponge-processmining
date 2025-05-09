@@ -133,7 +133,7 @@ data_test = transform_to_seqs(dataset_test)
 # ============================================================
 
 # n_iterations = 5
-n_iterations = 5
+n_iterations = 2
 
 # Store metrics across iterations
 all_metrics = {
@@ -599,8 +599,8 @@ for iteration in range(n_iterations):
     #     iteration_data[f"Top-{k+1}"] = []
 
     for strategy_name, (strategy, test_data) in strategies.items():
-        # if "hard" in strategy_name:
-        #     continue
+        if "hard" in strategy_name:
+            continue
         # if not strategy_name.startswith("ngram_"):
         #     continue
 
