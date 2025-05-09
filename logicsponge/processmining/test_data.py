@@ -207,6 +207,7 @@ if DATA == "file":
 
     mydata = data_collection[data_name]
     file_path = Path(FOLDERNAME) / mydata["target_filename"]
+
     mydata["file_path"] = file_path
     if mydata["url"] is not None:
         file_handler.handle_file(
