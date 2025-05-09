@@ -1,7 +1,9 @@
+"""Test data for process mining."""
+
 import logging
-import os
 from collections import defaultdict
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -26,12 +28,13 @@ DATA = "file"
 def csv_row_iterator(
     file_path: str, delimiter: str = ",", chunksize: int = 1000, dtypes: dict[str, str] | None = None
 ) -> Iterator[dict[str, Any]]:
-    """Creates an iterator that yields rows from a large CSV file.
+    """Create an iterator that yields rows from a large CSV file.
 
     Args:
         file_path (str): Path to the CSV file.
         delimiter (str): The delimiter.
         chunksize (int): Number of rows to read at a time.
+        dtypes (dict[str, str] | None): Dictionary of column names and their data types.
 
     Yields:
         NamedTuple: Each row as a nametuple of column names to values.
@@ -148,6 +151,28 @@ data_collection = {
         "delimiter": ",",
         "dtypes": None,
     },
+    "Synthetic_Train": {
+        "url": None,
+        "doi": None,
+        "filetype": None,
+        "target_filename": "Synthetic_Train.csv",
+        "case_keys": ["case:concept:name"],
+        "activity_keys": ["concept:name"],
+        "timestamp": "time:timestamp",
+        "delimiter": ",",
+        "dtypes": None,
+    },
+    "Synthetic_Test": {
+        "url": None,
+        "doi": None,
+        "filetype": None,
+        "target_filename": "Synthetic_Test.csv",
+        "case_keys": ["case:concept:name"],
+        "activity_keys": ["concept:name"],
+        "timestamp": "time:timestamp",
+        "delimiter": ",",
+        "dtypes": None,
+    },
     "Helpdesk": {
         "url": "https://data.4tu.nl/file/94ee26c8-78f6-4387-b32b-f028f2103a2c/697ff9af-fca0-4363-bd84-e81735d27e9f",
         "doi": "10.4121/uuid:0c60edf1-6f83-4e75-9367-4c63b3e9d5bb",
@@ -168,17 +193,40 @@ data_collection = {
 # ============================================================
 
 if DATA == "file":
-    # data_name = "Sepsis_Cases"
+    # data_name = "Synthetic_Train"
+
+    data_name = "Sepsis_Cases"
+
     # data_name = "Helpdesk"
-    data_name = "BPI_Challenge_2013"
-    mydata = data_collection[data_name]  # type: ignore
-    file_path = os.path.join(FOLDERNAME, mydata["target_filename"])
+    # data_name = "BPI_Challenge_2013" # 2014 2017
+    # data_name = "BPI_Challenge_2017"
+
+    # =========================================================
+    # DEFAULT DATA (= train set, when synthetic)
+    # =========================================================
+
+    mydata = data_collection[data_name]
+    file_path = Path(FOLDERNAME) / mydata["target_filename"]
+
     mydata["file_path"] = file_path
-    file_handler.handle_file(
-        file_type=mydata["filetype"], url=mydata["url"], filename=mydata["target_filename"], doi=mydata["doi"]
-    )
+    if mydata["url"] is not None:
+        file_handler.handle_file(
+            file_type=mydata["filetype"], url=mydata["url"], filename=mydata["target_filename"], doi=mydata["doi"]
+        )
     row_iterator = csv_row_iterator(
         file_path=mydata["file_path"], delimiter=mydata["delimiter"], dtypes=mydata["dtypes"]
+    )
+
+    # =========================================================
+    # ADDITIONAL DATA (= test set, when synthetic)
+    # =========================================================
+
+    data_name_test = data_name.replace("Train", "Test")
+    mydata_test = data_collection[data_name_test]
+    file_path = Path(FOLDERNAME) / mydata_test["target_filename"]
+    mydata_test["file_path"] = file_path
+    row_iterator_test = csv_row_iterator(
+        file_path=mydata_test["file_path"], delimiter=mydata_test["delimiter"], dtypes=mydata_test["dtypes"]
     )
 
     # Sort by timestamp if "sort_by_time" is defined
@@ -200,14 +248,16 @@ if DATA == "file":
     #         raise KeyError(f'Timestamp column "{timestamp_column}" not found in the CSV file.')
 
     dataset: Iterator[Event]
+    dataset_test: Iterator[Event]
 
-    def my_iterator() -> Iterator[Event]:
-        timestamp_key = mydata.get("timestamp")  # Check if timestamp key is defined
-        for row in row_iterator:
+    def my_iterator(iter_data: dict, iter_row_iterator: Iterator) -> Iterator[Event]:
+        """Create an iterator that yields events from a large CSV file."""
+        timestamp_key = iter_data.get("timestamp")  # Check if timestamp key is defined
+        for row in iter_row_iterator:
             # Create the Event dictionary
             event: Event = {
-                "case_id": handle_keys(mydata["case_keys"], row),  # Extract case ID
-                "activity": handle_keys(mydata["activity_keys"], row),  # Extract activity
+                "case_id": handle_keys(iter_data["case_keys"], row),  # Extract case ID
+                "activity": handle_keys(iter_data["activity_keys"], row),  # Extract activity
                 "timestamp": None,
             }
 
@@ -226,7 +276,8 @@ if DATA == "file":
 
             yield event
 
-    dataset = my_iterator()
+    dataset = my_iterator(mydata, row_iterator)
+    dataset_test = my_iterator(mydata_test, row_iterator_test)
 
 
 # ============================================================
@@ -237,38 +288,9 @@ if DATA == "synthetic":
     sequences = []
 
     # Open the file and process it line by line
-    with open(
+    with Path(
         "/Users/bollig/innatelogic/git/circuits/innatelogic/circuits/process_mining/data/10.pautomac.train"
-    ) as file:
-        # Skip the first line (a header)
-        next(file)
-
-        # Process each line to extract the sequences
-        for line in file:
-            # Split the line into individual string numbers and convert them to integers
-            numbers = list(map(int, line.split()))
-
-            # Ignore the first element of each line
-            if len(numbers) > 1:
-                # As 0 is padding symbol in LSTMs, add 1 to each number in the sequence after ignoring the first element
-                incremented_numbers = [num + 1 for num in numbers[1:]]
-
-                # Store the modified sequence
-                sequences.append([*incremented_numbers, stop_symbol])
-
-    dataset = iter(interleave_sequences(sequences, random_index=False))
-
-# ============================================================
-# Synthetic data sets
-# ============================================================
-
-if DATA == "synthetic":
-    sequences = []
-
-    # Open the file and process it line by line
-    with open(
-        "/Users/bollig/innatelogic/git/circuits/innatelogic/circuits/process_mining/data/10.pautomac.train"
-    ) as file:
+    ).open() as file:
         # Skip the first line (a header)
         next(file)
 

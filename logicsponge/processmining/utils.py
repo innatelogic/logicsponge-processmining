@@ -1,3 +1,5 @@
+"""Utility functions for process mining."""
+
 import copy
 
 import numpy as np
@@ -7,6 +9,7 @@ from logicsponge.processmining.types import Config, Event, Metrics, Prediction, 
 
 
 def extract_event_fields(event: Event) -> Event:
+    """Extract the required fields from an event."""
     return event
 
 
@@ -18,10 +21,13 @@ stop_symbol = DEFAULT_CONFIG["stop_symbol"]
 
 
 def probs_prediction(probs: ProbDistr, config: Config) -> Prediction | None:
-    """Returns the top-k activities based on their probabilities.
+    """Return the top-k activities based on their probabilities.
+
     If stop_symbol has a probability of 1.0 and there are no other activities, return None.
-    If stop_symbol has a probability of 1.0 and there are other activities, give a uniform distribution to these other activities.
-    If stop_symbol is present but with a probability less than 1.0 and include_stop is False, remove it and normalize the rest.
+    If stop_symbol has a probability of 1.0 and there are other activities, give a uniform distribution to these
+    other activities.
+    If stop_symbol is present but with a probability less than 1.0 and include_stop is False, remove it and
+    normalize the rest.
     """
     # If there are no probabilities, return None
     if not probs:
@@ -109,7 +115,7 @@ def probs_prediction(probs: ProbDistr, config: Config) -> Prediction | None:
 
 
 def metrics_prediction(metrics: Metrics, config: Config) -> Prediction | None:
-    """Returns prediction including time delays."""
+    """Return prediction including time delays."""
     probs = metrics["probs"]
     delays = metrics["predicted_delays"]
 
@@ -123,3 +129,26 @@ def metrics_prediction(metrics: Metrics, config: Config) -> Prediction | None:
         prediction["predicted_delays"] = copy.deepcopy(delays)
 
     return prediction
+
+
+def compute_perplexity_stats(perplexities: list[float]) -> dict[str, float]:
+    """Compute and return perplexity statistics."""
+    res = {}
+
+    arithmetic_mean_perplexity = sum(perplexities) / len(perplexities) if perplexities else None
+
+    inverted_sum = sum(((1.0 / p) if p > 0 else float("inf")) for p in perplexities) if perplexities else float("inf")
+    harmonic__mean_perplexity = len(perplexities) / inverted_sum if inverted_sum > 0 else float("inf")
+
+    sorted_perplexities = sorted(perplexities)
+    q1_perplexity = sorted_perplexities[int(0.25 * len(sorted_perplexities))] if sorted_perplexities else None
+    q3_perplexity = sorted_perplexities[int(0.75 * len(sorted_perplexities))] if sorted_perplexities else None
+    median_perplexity = sorted_perplexities[int(0.5 * len(sorted_perplexities))] if sorted_perplexities else None
+
+    res["pp_arithmetic_mean"] = arithmetic_mean_perplexity
+    res["pp_harmonic_mean"] = harmonic__mean_perplexity
+    res["pp_median"] = median_perplexity
+    res["pp_q1"] = q1_perplexity
+    res["pp_q3"] = q3_perplexity
+
+    return res
