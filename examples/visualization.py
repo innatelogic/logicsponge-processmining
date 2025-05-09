@@ -127,7 +127,6 @@ app.layout = html.Div(
         dcc.Store(id="previous-node-count-fpt", data=len(pm_fpt.state_info)),
         dcc.Store(id="ngram-elements", data=initial_elements_ngram),
         dcc.Store(id="fpt-elements", data=initial_elements_fpt),
-
         # Tabs component
         dcc.Tabs(
             id="model-tabs",
@@ -137,7 +136,6 @@ app.layout = html.Div(
                 dcc.Tab(label="Frequency Prefix Tree", value="fpt"),
             ],
         ),
-
         # Cytoscape component that will be updated based on active tab
         html.Div(id="tab-content"),
     ]
@@ -185,13 +183,10 @@ def update_models(
 
     return elements_ngram, elements_fpt, False, current_node_count_ngram, current_node_count_fpt
 
+
 @app.callback(
     Output("tab-content", "children"),
-    [
-        Input("model-tabs", "value"),
-        Input("ngram-elements", "data"),
-        Input("fpt-elements", "data")
-    ],
+    [Input("model-tabs", "value"), Input("ngram-elements", "data"), Input("fpt-elements", "data")],
 )
 def render_tab_content(
     active_tab: str,
@@ -204,20 +199,20 @@ def render_tab_content(
     elements = ngram_elements if active_tab == "ngram" else fpt_elements
 
     # Determine layout based on node count changes
-    layout = (
-        {"name": "breadthfirst", "directed": True, "animate": True}
-    )
+    layout = {"name": "breadthfirst", "directed": True, "animate": True}
 
     # Return the Cytoscape component for the active tab
-    return html.Div([
-        cyto.Cytoscape(
-            id=f"{active_tab}-graph",
-            layout=layout,
-            style={"width": "100%", "height": "600px"},
-            elements=elements,
-            stylesheet=graph_stylesheet,
-        )
-    ])
+    return html.Div(
+        [
+            cyto.Cytoscape(
+                id=f"{active_tab}-graph",
+                layout=layout,
+                style={"width": "100%", "height": "600px"},
+                elements=elements,
+                stylesheet=graph_stylesheet,
+            )
+        ]
+    )
 
 
 if __name__ == "__main__":

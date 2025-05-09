@@ -125,7 +125,6 @@ app.layout = html.Div(
         dcc.Interval(id="interval-component", interval=1000, n_intervals=0),
         dcc.Store(id="previous-node-count-ngram", data=len(pm_ngram.state_info)),
         dcc.Store(id="previous-node-count-fpt", data=len(pm_fpt.state_info)),
-
         # Tabs component
         dcc.Tabs(
             id="model-tabs",
@@ -145,7 +144,7 @@ app.layout = html.Div(
                             elements=initial_elements_ngram,
                             stylesheet=graph_stylesheet,
                         ),
-                    ]
+                    ],
                 ),
                 dcc.Tab(
                     label="Frequency Prefix Tree",
@@ -161,7 +160,7 @@ app.layout = html.Div(
                             elements=initial_elements_fpt,
                             stylesheet=graph_stylesheet,
                         ),
-                    ]
+                    ],
                 ),
             ],
         ),
@@ -203,7 +202,7 @@ def update_graphs(
             dash.no_update,
             True,
             previous_node_count_ngram,
-            previous_node_count_fpt
+            previous_node_count_fpt,
         )
 
     # Update all process mining models with the new data
@@ -237,7 +236,7 @@ def update_graphs(
         layout_fpt,
         False,
         current_node_count_ngram,
-        current_node_count_fpt
+        current_node_count_fpt,
     )
 
 

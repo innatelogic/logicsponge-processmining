@@ -192,7 +192,7 @@ class StreamingMiner(ABC):
                     self.stats["top_k_correct_preds"][i] += 1
             else:
                 self.stats["wrong_predictions"] += 1
-                for k in range (len(prediction["top_k_activities"])):
+                for k in range(len(prediction["top_k_activities"])):
                     if actual_next_activity == prediction["top_k_activities"][k]:
                         for i in range(k, len(self.stats["top_k_correct_preds"])):
                             self.stats["top_k_correct_preds"][i] += 1
@@ -241,13 +241,7 @@ class StreamingMiner(ABC):
             return math.exp(-normalized_likelihood) if log_likelihood else 1.0 / normalized_likelihood
         return float("inf")
 
-    def evaluate(
-        self,
-        data: list[list[Event]],
-        mode: str = "incremental",
-        *,
-        log_likelihood: bool = False
-        ) -> float:
+    def evaluate(self, data: list[list[Event]], mode: str = "incremental", *, log_likelihood: bool = False) -> float:
         """Evaluate in batch mode.
 
         Evaluate the dataset either incrementally or by full sequence.
@@ -265,7 +259,6 @@ class StreamingMiner(ABC):
         pause_time = 0.0
 
         for sequence in tqdm(data, desc="Processing sequences"):
-
             pause_start_time = time.time()
 
             logger.debug(">>>>> Start Evaluating Sequence <<<<<")
@@ -336,24 +329,19 @@ class StreamingMiner(ABC):
                     current_state = self.next_state(current_state, actual_next_activity)
                     logger.debug("Next state: %s", current_state)
 
-
             # Normalize by the length of the sequence
             if log_likelihood:
                 normalized_likelihood = likelihood / len(sequence) if len(sequence) > 0 else likelihood
             else:
                 normalized_likelihood = likelihood ** (1 / len(sequence)) if len(sequence) > 0 else likelihood
 
-            seq_perplexity = StreamingMiner.compute_seq_perplexity(
-                normalized_likelihood,
-                log_likelihood=log_likelihood
-            )
+            seq_perplexity = StreamingMiner.compute_seq_perplexity(normalized_likelihood, log_likelihood=log_likelihood)
             perplexities.append(seq_perplexity)
 
             logger.debug("Pred. sequence: %s", predicted_sequence.replace(self.config["stop_symbol"].__str__(), "S"))
             logger.debug("Sequence likelihood: %s", likelihood)
             logger.debug("Sequence perplexity: %s", seq_perplexity)
             logger.debug("===== End Evaluating Sequence =====")
-
 
         perplexity_stats = compute_perplexity_stats(perplexities)
         logger.debug("Perplexity stats: %s", perplexity_stats)
@@ -362,7 +350,6 @@ class StreamingMiner(ABC):
             self.stats[key] = value
 
         return time.time() - eval_start_time - pause_time
-
 
     @abstractmethod
     def get_state_info(self, state_id: StateId) -> ComposedState | None:
@@ -409,7 +396,7 @@ class StreamingMiner(ABC):
 class BasicMiner(StreamingMiner):
     """The Basic Miner is a wrapper for a single algorithm."""
 
-    def __init__(self, *args: dict[str, Any], algorithm: Any, **kwargs: Any) -> None: # noqa: ANN401
+    def __init__(self, *args: dict[str, Any], algorithm: Any, **kwargs: Any) -> None:  # noqa: ANN401
         """Initialize the BasicMiner with a specific algorithm."""
         super().__init__(*args, **kwargs)
         self.algorithm = algorithm
@@ -490,12 +477,12 @@ class MultiMiner(StreamingMiner, ABC):
     """The Multi Miner is a wrapper for several algorithms."""
 
     def __init__(
-            self,
-            *args: dict[str, Any] | None,
-            models: list[StreamingMiner],
-            delay_weights: list[float] | None = None,
-            **kwargs: Any # noqa: ANN401
-        ) -> None:
+        self,
+        *args: dict[str, Any] | None,
+        models: list[StreamingMiner],
+        delay_weights: list[float] | None = None,
+        **kwargs: Any,  # noqa: ANN401
+    ) -> None:
         """Initialize the MultiMiner with a list of models."""
         super().__init__(*args, **kwargs)
         self.models = models
@@ -603,7 +590,7 @@ class MultiMiner(StreamingMiner, ABC):
 class HardVoting(MultiMiner):
     """The Hard Voting class implements a hard voting mechanism for ensemble learning."""
 
-    def __init__(self, *args: dict[str, Any] | None, **kwargs: Any) -> None: # noqa: ANN401
+    def __init__(self, *args: dict[str, Any] | None, **kwargs: Any) -> None:  # noqa: ANN401
         """Initialize the HardVoting class."""
         super().__init__(*args, **kwargs)
 
@@ -765,7 +752,7 @@ class HardVoting(MultiMiner):
 class SoftVoting(MultiMiner):
     """Soft voting based on weighted probabilities."""
 
-    def __init__(self, *args: dict[str, Any], prob_weights: list[float] | None = None, **kwargs: Any) -> None: # noqa: ANN401
+    def __init__(self, *args: dict[str, Any], prob_weights: list[float] | None = None, **kwargs: Any) -> None:  # noqa: ANN401
         """Initialize the SoftVoting class with probability weights."""
         super().__init__(*args, **kwargs)
 
@@ -881,7 +868,7 @@ class AdaptiveVoting(MultiMiner):
     total_predictions: int
     correct_predictions: list[int]
 
-    def __init__(self, *args: dict[str, Any], **kwargs: Any) -> None: # noqa: ANN401
+    def __init__(self, *args: dict[str, Any], **kwargs: Any) -> None:  # noqa: ANN401
         """Initialize the AdaptiveVoting class."""
         super().__init__(*args, **kwargs)
         # Initialize prediction tracking for each model
@@ -988,7 +975,7 @@ class AdaptiveVoting(MultiMiner):
 class Fallback(MultiMiner):
     """Fallback model (Backoff)."""
 
-    def __init__(self, *args: dict[str, Any], **kwargs: Any) -> None: # noqa: ANN401
+    def __init__(self, *args: dict[str, Any], **kwargs: Any) -> None:  # noqa: ANN401
         """Initialize the Fallback model."""
         super().__init__(*args, **kwargs)
 
@@ -1073,7 +1060,7 @@ class Fallback(MultiMiner):
 class Relativize(MultiMiner):
     """Relativize the probabilities of two models."""
 
-    def __init__(self, *args: dict[str, Any], **kwargs: Any) -> None: # noqa: ANN401
+    def __init__(self, *args: dict[str, Any], **kwargs: Any) -> None:  # noqa: ANN401
         """Initialize the Relativize class."""
         super().__init__(*args, **kwargs)
         if len(self.models) != 2:  # noqa: PLR2004
@@ -1430,7 +1417,7 @@ class NeuralNetworkMiner(StreamingMiner):
             if self.index_activity.get(idx) is not None
         }
 
-    def next_state(self, *args: Any, **kwargs: Any) -> ComposedState: # noqa: ANN401
+    def next_state(self, *args: Any, **kwargs: Any) -> ComposedState:  # noqa: ANN401
         """Not implemented."""
         msg = "Not implemented for NeuralNetworkMiner."
         raise NotImplementedError(msg)

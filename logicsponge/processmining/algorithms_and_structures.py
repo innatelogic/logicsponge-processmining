@@ -38,10 +38,14 @@ class BayesianClassifier:
     def __init__(self, single_occurence_allowed: bool = True, config: dict = {}) -> None:
         """Initialize the BayesianClassifier with the given configuration."""
         self.memory: dict[tuple[ActivityName, ...], dict[ActivityName, int]] = {}
-               
-        self.config = config if config else {
-            "top_k": 1,
-        }
+
+        self.config = (
+            config
+            if config
+            else {
+                "top_k": 1,
+            }
+        )
 
         # Statistics for batch mode
         self.stats = {
@@ -49,16 +53,13 @@ class BayesianClassifier:
             "correct_predictions": 0,
             "wrong_predictions": 0,
             "empty_predictions": 0,
-
             "top_k_correct_preds": [0] * self.config["top_k"],
-
             # For perplexity
             "pp_arithmetic_mean": None,
             "pp_harmonic_mean": None,
             "pp_median": None,
             "pp_q1": None,
-            "pp_q3": None,      
-
+            "pp_q3": None,
             # For delay predictions
             "delay_error_sum": 0,
             "actual_delay_sum": 0,
@@ -91,15 +92,14 @@ class BayesianClassifier:
 
         self.memory = mem_frequency
 
-
     def evaluate(
-            self,
-            data: list[list[Event]],
-            mode: str = "",
-            *,
-            log_likelihood: bool = False,
-            debug: bool = False,
-        ) -> float:
+        self,
+        data: list[list[Event]],
+        mode: str = "",
+        *,
+        log_likelihood: bool = False,
+        debug: bool = False,
+    ) -> float:
         """Evaluation of the dataset using a Bayes classifier."""
         perplexities = []
 
@@ -107,16 +107,14 @@ class BayesianClassifier:
         pause_time = 0.0
 
         for sequence in data:
-
             prefix = []
             likelihood = 0.0 if log_likelihood else 1.0
 
-            for i in range(len(sequence)): 
-
+            for i in range(len(sequence)):
                 event = sequence[i]
 
                 actual_activity = event.get("activity")
-                
+
                 bayes_prediction = self._get_bayes_prediction(prefix)
 
                 pause_start_time = time.time()
@@ -124,7 +122,7 @@ class BayesianClassifier:
                     likelihood += math.log(self._get_conditional_likelihood(prefix, actual_activity))
                 else:
                     likelihood *= self._get_conditional_likelihood(prefix, actual_activity)
-                
+
                 if bayes_prediction is None:
                     self.stats["empty_predictions"] += 1
                 elif bayes_prediction[0] == actual_activity:
@@ -134,17 +132,17 @@ class BayesianClassifier:
                 else:
                     self.stats["wrong_predictions"] += 1
 
-                    for k in range (len(bayes_prediction)):
+                    for k in range(len(bayes_prediction)):
                         if actual_activity == bayes_prediction[k]:
                             for indices_top_k in range(k, len(self.stats["top_k_correct_preds"])):
                                 self.stats["top_k_correct_preds"][indices_top_k] += 1
                             break
-                
+
                 pause_time += time.time() - pause_start_time
 
                 self.stats["total_predictions"] += 1
                 prefix.append(actual_activity)
-            
+
             pause_start_time = time.time()
             # Normalize by the length of the sequence
             if log_likelihood:
@@ -159,7 +157,7 @@ class BayesianClassifier:
 
             perplexities.append(seq_perplexity)
             pause_time += time.time() - pause_start_time
-        
+
         eval_time = time.time() - eval_start_time - pause_time
 
         perplexity_stats = compute_perplexity_stats(perplexities)
@@ -181,7 +179,7 @@ class BayesianClassifier:
         if prefix_act in self.memory:
             if (not self.single_occurence_allowed) and (sum(self.memory[prefix_act].values()) == 1):
                 return 0.0
-                
+
             # Get the next activity with the highest frequency
             next_activities = self.memory[prefix_act]
             if activity not in next_activities:
@@ -195,7 +193,7 @@ class BayesianClassifier:
             return float(activity_count) / total_count
 
         return 0.0
-        
+
     def _get_bayes_prediction(self, prefix: list[ActivityName]) -> list[ActivityName] | None:
         """Returns the predicted activity based on the Bayes classifier."""
         try:
@@ -207,16 +205,21 @@ class BayesianClassifier:
         if prefix_act in self.memory:
             if (not self.single_occurence_allowed) and (sum(self.memory[prefix_act].values()) == 1):
                 # If the priefix has only one occurrence, return None (no prediction)
-                logger.debug("Prefix %s has only one occurrence. No prediction available (not allowed on single prefix).", prefix)
+                logger.debug(
+                    "Prefix %s has only one occurrence. No prediction available (not allowed on single prefix).", prefix
+                )
                 return None
-                
+
             # Get the next activity with the highest frequency
             next_activities = self.memory[prefix_act]
-            sorted_activities: list[ActivityName] = sorted(next_activities, key=lambda activity: next_activities[activity], reverse=True)
-            return sorted_activities[:self.config.get("top_k", 1)]
+            sorted_activities: list[ActivityName] = sorted(
+                next_activities, key=lambda activity: next_activities[activity], reverse=True
+            )
+            return sorted_activities[: self.config.get("top_k", 1)]
 
         logger.debug("No prediction available for prefix %s, %s.", prefix, len(prefix))
         return None
+
 
 # ============================================================
 # Base Structure
@@ -596,7 +599,7 @@ class NGram(BaseStructure):
         super().__init__(*args, **kwargs)
         self.window_length = window_length
         self.return_to_initial = return_to_initial
-    
+
         self.recover_lengths = [self.window_length, *(sorted(recover_lengths, reverse=True) if recover_lengths else [])]
         logger.debug("Recover lengths: %s", self.recover_lengths)
 
@@ -688,24 +691,24 @@ class NGram(BaseStructure):
 
         # Mark the recovered state (when not None) with a negative sign
         next_state = (
-            - next_state 
+            -next_state
             if (
-                next_state is not None 
-                and (state is None or state < 0) 
+                next_state is not None
+                and (state is None or state < 0)
                 and self.state_info[next_state]["level"] < self.window_length
-            ) 
+            )
             else next_state
         )
 
         if self.state_info[state]["level"] == self.window_length and next_state is None:
             full_access_string = self.state_info[state]["access_string"] + (activity,)
-            access_string = full_access_string[-self.window_length:]
+            access_string = full_access_string[-self.window_length :]
 
             next_state = self.access_strings.get(access_string, None)
             logger.debug(f"Recovered (window_length) State: {state} - Activity: {activity} - {next_state}")
 
         return next_state
-    
+
         # if next_state is not None and self.state_info[next_state]["total_visits"] == 0:
         #     return None
         # if next_state is None or next_state < 0:

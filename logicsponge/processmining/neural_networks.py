@@ -346,7 +346,6 @@ def evaluate_rnn(
             correct_predictions += (predicted_indices[mask] == masked_targets).sum().item()
             total_predictions += mask.sum().item()  # Count non-padding tokens
 
-
             pause_start_time = time.time()
 
             # ================ Start for metrics ================
@@ -368,7 +367,7 @@ def evaluate_rnn(
             for k in range(max_k):
                 # For each position, check if the true label is in the top k predictions
                 # Get the predictions up to k+1 (inclusive) for each position
-                top_k_preds = masked_top_k[:, :(k+1)]
+                top_k_preds = masked_top_k[:, : (k + 1)]
 
                 # Check if true label is in the top-k predictions for each position
                 # Expand target to match shape of predictions for comparison
@@ -399,8 +398,6 @@ def evaluate_rnn(
 
             # ================= End for metrics =================
             pause_time += time.time() - pause_start_time
-
-
 
     accuracy = correct_predictions / total_predictions if total_predictions > 0 else 0
 
