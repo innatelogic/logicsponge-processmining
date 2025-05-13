@@ -1,10 +1,10 @@
 import copy
 import logging
 import math
+import time
 from abc import ABC, abstractmethod
 from collections import deque
 from datetime import timedelta
-import time
 from typing import Any
 
 from logicsponge.processmining.automata import PDFA
@@ -30,13 +30,21 @@ logger = logging.getLogger(__name__)
 
 class BayesianClassifier:
     """Bayesian Classifier for predicting the next activity in a sequence of events.
+
     This class implements a simple Bayesian classifier that uses the frequency of
     activity sequences to predict the next activity. It is designed to work with
     event logs, where each event has an associated activity name.
     """
 
-    def __init__(self, single_occurence_allowed: bool = True, config: dict = {}) -> None:
+    def __init__(
+            self,
+            config: dict | None = None,
+            *,
+            single_occurence_allowed: bool = True,
+        ) -> None:
         """Initialize the BayesianClassifier with the given configuration."""
+        if config is None:
+            config = {}
         self.memory: dict[tuple[ActivityName, ...], dict[ActivityName, int]] = {}
 
         self.config = (
@@ -71,7 +79,7 @@ class BayesianClassifier:
         self.single_occurence_allowed = single_occurence_allowed
 
     def initialize_memory(self, data: list[list[Event]]) -> None:
-        """Evaluation of the dataset using a Bayes classifier."""
+        """Initialize weights of the Bayes classifier."""
         mem_frequency: dict[tuple[ActivityName, ...], dict[ActivityName, int]] = {}
         for sequence in data:
             prefix = []
@@ -100,7 +108,7 @@ class BayesianClassifier:
         log_likelihood: bool = False,
         debug: bool = False,
     ) -> float:
-        """Evaluation of the dataset using a Bayes classifier."""
+        """Evaluate the dataset using a Bayes classifier."""
         perplexities = []
 
         eval_start_time = time.time()
@@ -169,11 +177,10 @@ class BayesianClassifier:
         return eval_time
 
     def _get_conditional_likelihood(self, prefix: list[ActivityName], activity: ActivityName) -> float:
-        """Returns the predicted activity based on the Bayes classifier."""
-        try:
-            self.memory
-        except AttributeError:
-            raise ValueError("Memory not initialized. Please call initialize_memory() first.")
+        """Return the predicted activity based on the Bayes classifier."""
+        if not self.memory:
+            msg = "Memory not initialized. Please call initialize_memory() first."
+            raise ValueError(msg) from None
 
         prefix_act = tuple(prefix)
         if prefix_act in self.memory:
@@ -195,11 +202,11 @@ class BayesianClassifier:
         return 0.0
 
     def _get_bayes_prediction(self, prefix: list[ActivityName]) -> list[ActivityName] | None:
-        """Returns the predicted activity based on the Bayes classifier."""
-        try:
-            self.memory
-        except AttributeError:
-            raise ValueError("Memory not initialized. Please call initialize_memory() first.")
+        """Return the predicted activity based on the Bayes classifier."""
+        if not self.memory:
+            # Check if memory is initialized
+            msg = "Memory not initialized. Please call initialize_memory() first."
+            raise ValueError(msg) from None
 
         prefix_act = tuple(prefix)
         if prefix_act in self.memory:
@@ -227,13 +234,22 @@ class BayesianClassifier:
 
 
 class BaseStructure(PDFA, ABC):
+    """Base structure for process mining."""
+
     case_info: dict[CaseId, Any]
     last_transition: tuple[StateId, ActivityName, StateId] | None
     min_total_visits: int
     min_max_prob: float
     modified_cases: set[CaseId]
 
-    def __init__(self, *args, min_total_visits: int = 1, min_max_prob: float = 0.0, **kwargs) -> None:
+    def __init__(
+            self,
+            *args,
+            min_total_visits: int = 1,
+            min_max_prob: float = 0.0,
+            **kwargs
+        ) -> None:
+        """Initialize the BaseStructure."""
         super().__init__(*args, **kwargs)
 
         self.case_info = {}  # provides case info such as current state or last timestamp
@@ -353,9 +369,13 @@ class BaseStructure(PDFA, ABC):
     def get_metrics(self, state: StateId) -> Metrics:
         """Combine probabilities and delays for a given state into a single metrics dictionary."""
         probs = self.get_probabilities(state)
+        # activity_list = list(probs)
+
         return Metrics(
+            state_id=state,
             probs=probs,
             predicted_delays=self.get_predicted_delays(state),
+            # likelihoods=self.state_act_likelihoods(state, activity_list)
         )
 
     @abstractmethod
@@ -482,6 +502,15 @@ class BaseStructure(PDFA, ABC):
             if timestamp:
                 self.case_info[case_id]["last_timestamp"] = timestamp
 
+    # def act_state_likelihood(self, activity: ActivityName, prev_state: StateId) -> float:
+    #     """Return the likelihood of the given activity given a previous state."""
+    #     # Check if the activity is valid for the next state
+    #     if activity not in self.transitions[prev_state]:
+    #         logger.debug("     -> [!] Activity %s not found in state %s, returning 0.0.", activity, prev_state)
+    #         return 0.0
+    #     return self.get_probabilities(prev_state).get(activity, 0.0)
+
+
     def state_act_likelihood(self, state: StateId | None, next_activity: ActivityName) -> float:
         """Return the likelihood of the given activity given a current state."""
         # Check if the activity is valid for the current state
@@ -492,11 +521,24 @@ class BaseStructure(PDFA, ABC):
         logger.debug("     -> State: %s. Activities: %s", state, self.state_info[state]["activity_frequency"])
         logger.debug("     -> Next activity: %s", next_activity)
 
-        # BE CAREFUL: we need to use state_metrics and not state_info otherwise the __stop__ frequencies are ignored!
+        # BE CAREFUL: we need to use state_metrics (relies on self.get_probabilities(state)) and not state_info
+        # otherwise the __stop__ frequencies are ignored!
         # Below is an example of the problem:
         # (self.state_info[state]["activity_frequency"].get(next_activity, 0))
         # / max(1, self.state_info[state]["total_visits"])
-        return self.state_metrics(state).get("probs", {}).get(next_activity, 0.0)
+
+        return self.get_probabilities(state).get(next_activity, 0.0)
+
+    def state_act_likelihoods(
+        self,
+        state: StateId | None,
+        eligible_activities: list[ActivityName]
+    ) -> dict[ActivityName, float]:
+        """Return the likelihood of the given activities given a current state."""
+        likelihoods = {}
+        for activity in eligible_activities:
+            likelihoods[activity] = self.state_act_likelihood(state, activity)
+        return likelihoods
 
     def state_metrics(self, state: StateId | None) -> Metrics:
         """Return metrics based on state."""
@@ -509,16 +551,24 @@ class BaseStructure(PDFA, ABC):
             # if state is None:
             #     logger.debug(f"State is None, returning empty metrics.\n")
             # elif self.state_info.get(state, {}).get("total_visits", 0) < self.min_total_visits:
-            #     logger.debug(f"State {state} has less than {self.min_total_visits} visits, returning empty metrics.\n")
+            #     logger.debug(f"State {state} has less than
+            # {self.min_total_visits} visits, returning empty metrics.\n")
             # elif max(self.get_probabilities(state).values()) < self.min_max_prob:
             #     logger.debug(f"State {state} has max prob less than {self.min_max_prob}, returning empty metrics.\n")
             return empty_metrics()
 
         return self.get_metrics(state)
 
+    def get_state_from_case(self, case_id: CaseId) -> StateId:
+        """Return the current state of a case."""
+        if case_id not in self.case_info:
+            return self.initial_state
+
+        return self.case_info[case_id]["state"]
+
     def case_metrics(self, case_id: CaseId) -> Metrics:
         """Return metrics based on case."""
-        state = self.initial_state if case_id not in self.case_info else self.case_info[case_id].get("state", None)
+        state = self.get_state_from_case(case_id)
 
         return self.state_metrics(state)
 
@@ -705,7 +755,7 @@ class NGram(BaseStructure):
             access_string = full_access_string[-self.window_length :]
 
             next_state = self.access_strings.get(access_string, None)
-            logger.debug(f"Recovered (window_length) State: {state} - Activity: {activity} - {next_state}")
+            logger.debug("Recovered (window_length) State: %s - Activity: %s - %s", state, activity, next_state)
 
         return next_state
 
@@ -729,22 +779,23 @@ class NGram(BaseStructure):
         for i in trunc_recover_lengths:
             access_string = () if i == 0 else full_access_string[-i:]
             next_state = self.access_strings.get(access_string, None)
-            logger.debug(f"[{i}] State: {state} - Activity: {activity} - {next_state}")
+            logger.debug(f"[{i}] State: {state} - Activity: {activity} - {next_state}") # noqa: G004
             if next_state is not None and self.state_info[next_state]["total_visits"] > 0:
                 return next_state
 
             logger.error(
-                f"[!!!]   Recovery failed with access string {full_access_string} for state {state} and activity {activity}"
+                f"[!!!]   Recovery failed with access string {full_access_string}", # noqa: G004
+                f"for state {state} and activity {activity}"
             )
         # Get number of active visits
         if len(self.recover_lengths) > 1:
             total_visits = self.state_info[state]["total_visits"]
             level = self.state_info[state]["level"]
             logger.debug(
-                f"Total visits for state {state}: {total_visits}    -   Level: {level}  / {self.window_length}"
+                f"Total visits for state {state}: {total_visits}    -   Level: {level}  / {self.window_length}" # noqa: G004
             )
 
-        logger.debug(f"Recovery failed with access string for state {state} and activity {activity}")
+        logger.debug(f"Recovery failed with access string for state {state} and activity {activity}") # noqa: G004
         return None
 
     # def sequence_metrics(self, sequence: list[Event]) -> Metrics:
@@ -815,6 +866,8 @@ class Bag(BaseStructure):
 
 
 class Parikh(BaseStructure):
+    """Parikh structure for process mining."""
+
     parikh_vectors: dict[str, StateId]
 
     def __init__(self, *args, upper_bound: int | None = None, **kwargs) -> None:  # noqa: ANN002, ANN003

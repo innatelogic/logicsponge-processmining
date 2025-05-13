@@ -47,7 +47,7 @@ from logicsponge.processmining.utils import compute_perplexity_stats
 # ============================================================
 SOFT_VOTING_NGRAMS = [(2, 3, 6, 8), (2, 3, 5, 6), (2, 3, 5, 8), (2, 3, 4, 6), (2, 3, 6, 7), (2, 3, 7, 8), (2, 3, 6, 8)]
 
-WINDOW_RANGE = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 15]
+WINDOW_RANGE = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16]
 
 NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 # ] + [
@@ -72,7 +72,7 @@ stats_to_log = []
 
 
 # Create an ID for the current run
-stats_file_path = Path(f"results/stats_{RUN_ID}.json")
+stats_file_path = Path(f"results/stats_batch_{RUN_ID}.json")
 log_file_path = Path(f"results/log_{RUN_ID}.txt")
 log_file_path.parent.mkdir(parents=True, exist_ok=True)
 with log_file_path.open("w") as f:
@@ -627,7 +627,15 @@ for iteration in range(n_iterations):
         for key, value in per_state_stats.items():
             per_state_stats[key] = value.to_dict()
 
-        stats_to_log.append({"strategy": strategy_name, "per_state_stats": per_state_stats})
+        stats_to_log.append(
+            {
+                "strategy": strategy_name,
+                "strategy_accuracy": correct_percentage,
+                "strategy_perplexity": stats["pp_harmonic_mean"],
+                "strategy_eval_time": evaluation_time,
+                "per_state_stats": per_state_stats
+            }
+        )
 
         num_states = strategy.get_num_states() if isinstance(strategy, BasicMiner) else None
 
@@ -789,6 +797,17 @@ for iteration in range(n_iterations):
         iteration_data["Good Preds"].append(lstm_stats["correct_predictions"])
         iteration_data["Tot Preds"].append(lstm_stats["total_predictions"])
         iteration_data["Nb States"].append(None)
+
+
+        stats_to_log.append(
+            {
+                "strategy": "LSTM",
+                "strategy_accuracy": lstm_stats["accuracy"] * 100,
+                "strategy_perplexity": lstm_perplexity_stats["pp_harmonic_mean"],
+                "strategy_eval_time": lstm_eval_time,
+                # "per_state_stats": None
+            }
+        )
 
         all_metrics["LSTM"]["accuracies"].append(lstm_stats["accuracy"])
         all_metrics["LSTM"]["pp_arithmetic_mean"].append(lstm_perplexity_stats["pp_arithmetic_mean"])
