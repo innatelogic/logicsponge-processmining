@@ -88,7 +88,7 @@ start_symbol = DEFAULT_CONFIG["start_symbol"]
 # ============================================================
 SOFT_VOTING_NGRAMS = [(2, 3, 6, 8), (2, 3, 5, 6), (2, 3, 5, 8), (2, 3, 4, 6), (2, 3, 6, 7), (2, 3, 7, 8), (2, 3, 6, 8)]
 
-WINDOW_RANGE = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16]
+WINDOW_RANGE = [0, 1, 2, 3, 4, 5, 6, 7, 8] #, 9, 10, 12, 14, 16]
 
 NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 # ] + [
@@ -200,7 +200,7 @@ fallback_ngram8to_ooo = StreamingActivityPredictor(
     )
 )
 
-adaptive_ngram = StreamingActivityPredictor(
+complex_fallback = StreamingActivityPredictor(
     strategy=Fallback(
         models=[
             BasicMiner(algorithm=NGram(window_length=9, min_total_visits=10, min_max_prob=0.9)),
@@ -318,11 +318,11 @@ models = [
     "fallback_ngram10to2",
     "fallback_ngram13to2",
     "fallback_ngram8to_ooo",
-    "adaptive_ngram",
+    "complex_fallback",
     "hard_voting",
+    "adaptive_voting",
     "soft_voting",
     *list(soft_voting_predictors.keys()), # Add all soft_voting predictor names
-    "adaptive_voting",
     "lstm",
 ]
 
@@ -409,15 +409,15 @@ sponge = (
         | (fallback_ngram8to2 * Evaluation("fallback_ngram8to2"))
         | (fallback_ngram8to3 * Evaluation("fallback_ngram8to3"))
         | (fallback_ngram8to4 * Evaluation("fallback_ngram8to4"))
-        | (fallback_ngram10to2 * Evaluation("fallback_ngram10to2ç"))
+        | (fallback_ngram10to2 * Evaluation("fallback_ngram10to2"))
         | (fallback_ngram13to2 * Evaluation("fallback_ngram13to2"))
         | (fallback_ngram8to_ooo * Evaluation("fallback_ngram8to_ooo"))
-        | (adaptive_ngram * Evaluation("adaptive_ngram"))
+        | (complex_fallback * Evaluation("complex_fallback"))
         | (hard_voting * Evaluation("hard_voting"))
+        | (adaptive_voting * Evaluation("adaptive_voting"))
         | (soft_voting * Evaluation("soft_voting"))
         # Add all soft_voting_predictors to the pipeline
         | ((predictor * Evaluation(name)) for name, predictor in soft_voting_predictors.items())
-        | (adaptive_voting * Evaluation("adaptive_voting"))
         # | (
         #     AddStartSymbol(start_symbol=start_symbol)
         #     * lstm
