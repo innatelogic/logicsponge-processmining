@@ -117,7 +117,7 @@ for ngram_name in NGRAM_NAMES:
     NGRAM_MODELS[ngram_name] = StreamingActivityPredictor(
         strategy=BasicMiner(
             algorithm=NGram(
-                window_length=window_length, recover_lengths=[], return_to_initial=NGRAM_RETURN_TO_INITIAL
+                window_length=window_length, recover_lengths=[]
             ),
             config=config,
         )
@@ -128,7 +128,7 @@ fallback = StreamingActivityPredictor(
     strategy=Fallback(
         models=[
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-            BasicMiner(algorithm=NGram(window_length=4, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=4)),
         ],
         config=config,
     )
@@ -137,8 +137,8 @@ fallback = StreamingActivityPredictor(
 fallback_ngram8to2 = StreamingActivityPredictor(
     strategy=Fallback(
         models=[
-            BasicMiner(algorithm=NGram(window_length=7, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=7)),
+            BasicMiner(algorithm=NGram(window_length=1)),
         ],
         config=config,
     )
@@ -147,8 +147,8 @@ fallback_ngram8to2 = StreamingActivityPredictor(
 fallback_ngram8to3 = StreamingActivityPredictor(
     strategy=Fallback(
         models=[
-            BasicMiner(algorithm=NGram(window_length=7, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=2, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=7)),
+            BasicMiner(algorithm=NGram(window_length=2)),
         ],
         config=config,
     )
@@ -157,8 +157,8 @@ fallback_ngram8to3 = StreamingActivityPredictor(
 fallback_ngram8to4 = StreamingActivityPredictor(
     strategy=Fallback(
         models=[
-            BasicMiner(algorithm=NGram(window_length=7, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=7)),
+            BasicMiner(algorithm=NGram(window_length=3)),
         ],
         config=config,
     )
@@ -167,8 +167,8 @@ fallback_ngram8to4 = StreamingActivityPredictor(
 fallback_ngram10to2 = StreamingActivityPredictor(
     strategy=Fallback(
         models=[
-            BasicMiner(algorithm=NGram(window_length=9, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=9)),
+            BasicMiner(algorithm=NGram(window_length=1)),
         ],
         config=config,
     )
@@ -177,8 +177,8 @@ fallback_ngram10to2 = StreamingActivityPredictor(
 fallback_ngram13to2 = StreamingActivityPredictor(
     strategy=Fallback(
         models=[
-            BasicMiner(algorithm=NGram(window_length=12, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=12)),
+            BasicMiner(algorithm=NGram(window_length=1)),
         ],
         config=config,
     )
@@ -187,14 +187,14 @@ fallback_ngram13to2 = StreamingActivityPredictor(
 fallback_ngram8to_ooo = StreamingActivityPredictor(
     strategy=Fallback(
         models=[
-            BasicMiner(algorithm=NGram(window_length=7, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=6, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=5, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=4, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=2, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=0, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=7)),
+            BasicMiner(algorithm=NGram(window_length=6)),
+            BasicMiner(algorithm=NGram(window_length=5)),
+            BasicMiner(algorithm=NGram(window_length=4)),
+            BasicMiner(algorithm=NGram(window_length=3)),
+            BasicMiner(algorithm=NGram(window_length=2)),
+            BasicMiner(algorithm=NGram(window_length=1)),
+            BasicMiner(algorithm=NGram(window_length=0)),
         ],
         config=config,
     )
@@ -211,7 +211,7 @@ complex_fallback = StreamingActivityPredictor(
             BasicMiner(algorithm=NGram(window_length=4, min_total_visits=10, min_max_prob=0.0)),
             BasicMiner(algorithm=NGram(window_length=3, min_total_visits=10, min_max_prob=0.0)),
             BasicMiner(algorithm=NGram(window_length=2, min_total_visits=10, min_max_prob=0.0)),
-            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=1)),
         ],
         config=config,
     )
@@ -237,9 +237,9 @@ soft_voting = StreamingActivityPredictor(
         models=[
             BasicMiner(algorithm=Bag()),
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-            BasicMiner(algorithm=NGram(window_length=2, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=4, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=2)),
+            BasicMiner(algorithm=NGram(window_length=3)),
+            BasicMiner(algorithm=NGram(window_length=4)),
             # BasicMiner(algorithm=NGram(window_length=5)),
             # BasicMiner(algorithm=NGram(window_length=6)),
         ],
@@ -255,10 +255,10 @@ soft_voting_predictors = {
             models=[
                 BasicMiner(algorithm=Bag()),
                 BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-                BasicMiner(algorithm=NGram(window_length=grams[0], return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-                BasicMiner(algorithm=NGram(window_length=grams[1], return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-                BasicMiner(algorithm=NGram(window_length=grams[2], return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-                BasicMiner(algorithm=NGram(window_length=grams[3], return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+                BasicMiner(algorithm=NGram(window_length=grams[0])),
+                BasicMiner(algorithm=NGram(window_length=grams[1])),
+                BasicMiner(algorithm=NGram(window_length=grams[2])),
+                BasicMiner(algorithm=NGram(window_length=grams[3])),
             ],
             config=config,
         )

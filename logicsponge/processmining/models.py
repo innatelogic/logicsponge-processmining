@@ -947,7 +947,7 @@ class AdaptiveVoting(MultiMiner):
     total_predictions: int
     correct_predictions: list[int]
 
-    def __init__(self, *args: dict[str, Any], select_best: str = "accuracy", **kwargs: Any) -> None:  # noqa: ANN401
+    def __init__(self, *args: dict[str, Any], select_best: str = "acc", **kwargs: Any) -> None:  # noqa: ANN401
         """Initialize the AdaptiveVoting class."""
         super().__init__(*args, **kwargs)
         # Initialize prediction tracking for each model
@@ -957,7 +957,7 @@ class AdaptiveVoting(MultiMiner):
         self.select_best = select_best
         accepted_options = ["acc", "prob", "prob x acc"]
         if self.select_best not in accepted_options:
-            msg = f"select_best must be in {accepted_options}."
+            msg = f"select_best must be in {accepted_options}. Provided: {self.select_best}"
             raise ValueError(msg)
 
     def update(self, event: Event) -> None:
