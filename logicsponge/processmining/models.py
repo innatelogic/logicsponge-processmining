@@ -925,20 +925,40 @@ class SoftVoting(MultiMiner):
 
 
 class AdaptiveVoting(MultiMiner):
-    """To be used only in streaming mode.
+    """Selects the best model for each prediction.
 
-    In batch mode, it will stick to the model with the highest training accuracy.
+    Args:
+        select_best (str): The criterion to select the best model.
+            - "acc": Selects the model with the highest accuracy.
+            - "prob": Selects the model with the highest probability.
+            - "prob x acc": Selects the model with the highest probability times accuracy.
+
+    Note:
+        - when using "acc", the model with the highest accuracy is selected.
+        In streaming mode, this model can change over time, but in batch mode, it will
+        stick to the model with the highest training accuracy.
+        - when using "prob", the model with the highest probability of its prediction
+        is selected (depending on the state).
+        - when using "prob x acc", the model with the highest value of probability
+        of its prediction, times the accuracy of the model, is selected.
+
     """
 
     total_predictions: int
     correct_predictions: list[int]
 
-    def __init__(self, *args: dict[str, Any], **kwargs: Any) -> None:  # noqa: ANN401
+    def __init__(self, *args: dict[str, Any], select_best: str = "accuracy", **kwargs: Any) -> None:  # noqa: ANN401
         """Initialize the AdaptiveVoting class."""
         super().__init__(*args, **kwargs)
         # Initialize prediction tracking for each model
         self.total_predictions = 0
         self.correct_predictions = [0] * len(self.models)
+
+        self.select_best = select_best
+        accepted_options = ["acc", "prob", "prob x acc"]
+        if self.select_best not in accepted_options:
+            msg = f"select_best must be in {accepted_options}."
+            raise ValueError(msg)
 
     def update(self, event: Event) -> None:
         """Overwritten to account for keeping track of accuracies in streaming mode."""
@@ -979,10 +999,46 @@ class AdaptiveVoting(MultiMiner):
             return 0.0
 
         # Get the best model
-        best_model_index = self.select_best_model()
-        best_model = self.models[best_model_index]
+        best_model_index = (
+            self.select_best_model()
+            if self.select_best == "acc"
+            else self.get_best_model_metrics(state)[0]
+        )
 
-        return best_model.state_act_likelihood(state[best_model_index], next_activity)
+        return (
+            self.models[best_model_index].state_act_likelihood(state[best_model_index], next_activity)
+            if best_model_index is not None
+            else 0.0
+        )
+
+        # # Get the best model
+        # best_model_index = self.select_best_model()
+        # best_model = self.models[best_model_index]
+
+        # return best_model.state_act_likelihood(state[best_model_index], next_activity)
+
+    def get_best_model_metrics(self, state: ComposedState) -> tuple[int | None, Metrics]:
+        """Return the metrics of the model with the best accuracy so far."""
+        if state is None:
+            return None, empty_metrics()
+
+        all_state_metrics = [
+            model.state_metrics(model_state) for model, model_state in zip(self.models, state, strict=True)
+        ]
+
+        # Select the metrics with the highest max probability and the index of the model
+        return max(
+            enumerate(all_state_metrics),
+            key=lambda x: (
+                (max(x[1]["probs"].values()) if x[1]["probs"] else 0.0)
+                * (
+                    self.correct_predictions[x[0]]
+                    if self.select_best == "prob x acc"
+                    else 1.0
+                )
+            ),
+        )
+
 
     def state_metrics(self, state: ComposedState | None) -> Metrics:
         """Return the probability distribution from the model with the best accuracy so far."""
@@ -990,11 +1046,13 @@ class AdaptiveVoting(MultiMiner):
             return empty_metrics()
 
         # Get the best model
-        best_model_index = self.select_best_model()
-        best_model = self.models[best_model_index]
-
-        best_model_state = state[best_model_index]
-        best_model_metrics = best_model.state_metrics(best_model_state)
+        if self.select_best == "acc":
+            best_model_index = self.select_best_model()
+            best_model = self.models[best_model_index]
+            best_model_state = state[best_model_index]
+            best_model_metrics = best_model.state_metrics(best_model_state)
+        else:
+            best_model_metrics = self.get_best_model_metrics(state)[1]
 
         delays_list = [
             model.state_metrics(model_state)["predicted_delays"]
@@ -1010,16 +1068,20 @@ class AdaptiveVoting(MultiMiner):
 
     def case_metrics(self, case_id: CaseId) -> Metrics:
         """Return the probability distribution from the model with the best accuracy so far."""
-        # Get the best model
-        best_model_index = self.select_best_model()
-        best_model = self.models[best_model_index]
+        state = self.get_state_from_case(case_id)
 
-        best_model_metrics = best_model.case_metrics(case_id)
+        # Get the best model
+        if self.select_best == "accuracy":
+            best_model_index = self.select_best_model()
+            best_model = self.models[best_model_index]
+            best_model_metrics = best_model.case_metrics(case_id)
+        else:
+            best_model_metrics = self.get_best_model_metrics(state)[1]
 
         delays_list = [model.case_metrics(case_id)["predicted_delays"] for model in self.models]
 
         return Metrics(
-            state_id=self.get_state_from_case(case_id),
+            state_id=state,
             probs=best_model_metrics["probs"],
             predicted_delays=self.voting_delays(delays_list),
             # likelihoods=best_model_metrics["likelihoods"]
