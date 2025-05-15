@@ -37,7 +37,15 @@ from logicsponge.processmining.data_utils import (
     split_sequence_data,
     transform_to_seqs,
 )
-from logicsponge.processmining.models import Alergia, BasicMiner, Fallback, HardVoting, Relativize, SoftVoting
+from logicsponge.processmining.models import (
+    AdaptiveVoting,
+    Alergia,
+    BasicMiner,
+    Fallback,
+    HardVoting,
+    Relativize,
+    SoftVoting,
+)
 from logicsponge.processmining.neural_networks import LSTMModel, PreprocessData, evaluate_rnn, train_rnn
 from logicsponge.processmining.test_data import data_name, dataset, dataset_test
 from logicsponge.processmining.utils import compute_perplexity_stats
@@ -45,9 +53,11 @@ from logicsponge.processmining.utils import compute_perplexity_stats
 # ============================================================
 # Generate a list of ngrams to test
 # ============================================================
-SOFT_VOTING_NGRAMS = [(2, 3, 6, 8), (2, 3, 5, 6), (2, 3, 5, 8), (2, 3, 4, 6), (2, 3, 6, 7), (2, 3, 7, 8), (2, 3, 6, 8)]
+VOTING_NGRAMS = [(2, 3, 4), (2, 3, 5, 6), (2, 3, 5, 7), (2, 3, 5, 8), (2, 3, 4, 5), (2, 3, 4, 7)]
 
-WINDOW_RANGE = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16]
+SELECT_BEST_ARGS = ["prob"] # ["acc", "prob", "prob x acc"]
+
+WINDOW_RANGE = [0, 1, 2, 3, 4, 5, 6, 7, 8] #, 9, 10, 12, 14, 16]
 
 NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 # ] + [
@@ -57,7 +67,7 @@ NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 #     f"ngram_{i+1}_shorts" for i in WINDOW_RANGE
 # ]
 
-NGRAM_RETURN_TO_INITIAL = True
+NGRAM_TOINI = True
 # ============================================================
 
 mpl.use("Agg")
@@ -108,7 +118,7 @@ torch.cuda.manual_seed(123)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-NN_TRAINING = True
+NN_TRAINING = False
 SHOW_DELAYS = False
 
 # ============================================================
@@ -165,12 +175,15 @@ all_metrics = {
         "fallback ngram_10->ngram_2",
         "fallback ngram_13->ngram_2",
         "fallback ngram_8->...->1",
-        "adaptive_ngram",
+        "complex fallback",
         "hard voting",
-        "soft voting",
-        # "soft voting B",
-        # "soft voting C",
-        *[f"soft voting {grams}" for grams in SOFT_VOTING_NGRAMS],
+        *[
+            f"adaptive voting {grams} {select_best_arg}"
+            for select_best_arg in SELECT_BEST_ARGS
+            for grams in VOTING_NGRAMS
+        ],
+        *[f"soft voting {grams}" for grams in VOTING_NGRAMS],
+        *[f"soft voting {grams}*" for grams in VOTING_NGRAMS],
         "alergia",
         "LSTM",
         "bayesian train",
@@ -239,7 +252,7 @@ for iteration in range(n_iterations):
                 algorithm=NGram(
                     window_length=window_length,
                     recover_lengths=recovery_lengths,
-                    return_to_initial=NGRAM_RETURN_TO_INITIAL,
+                    return_to_initial=NGRAM_TOINI,
                 ),
                 config=config,
             )
@@ -247,7 +260,7 @@ for iteration in range(n_iterations):
             # Use the default NGram algorithm without recovery
             NGRAM_MODELS[ngram_name] = BasicMiner(
                 algorithm=NGram(
-                    window_length=window_length, recover_lengths=[], return_to_initial=NGRAM_RETURN_TO_INITIAL
+                    window_length=window_length, recover_lengths=[], return_to_initial=NGRAM_TOINI
                 ),
                 config=config,
             )
@@ -259,104 +272,104 @@ for iteration in range(n_iterations):
     fallback = Fallback(
         models=[
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-            BasicMiner(algorithm=NGram(window_length=4, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=4, return_to_initial=NGRAM_TOINI)),
         ],
         config=config,
     )
 
     fallback_ngram8to2 = Fallback(
         models=[
-            BasicMiner(algorithm=NGram(window_length=7, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=7, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_TOINI)),
         ],
         config=config,
     )
 
     fallback_ngram8to3 = Fallback(
         models=[
-            BasicMiner(algorithm=NGram(window_length=7, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=2, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=7, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=2, return_to_initial=NGRAM_TOINI)),
         ],
         config=config,
     )
 
     fallback_ngram8to4 = Fallback(
         models=[
-            BasicMiner(algorithm=NGram(window_length=7, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=7, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_TOINI)),
         ],
         config=config,
     )
 
     fallback_ngram10to2 = Fallback(
         models=[
-            BasicMiner(algorithm=NGram(window_length=9, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=9, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_TOINI)),
         ],
         config=config,
     )
 
     fallback_ngram13to2 = Fallback(
         models=[
-            BasicMiner(algorithm=NGram(window_length=12, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=12, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_TOINI)),
         ],
         config=config,
     )
 
     fallback_ngram8to_ooo = Fallback(
         models=[
-            BasicMiner(algorithm=NGram(window_length=7, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=6, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=5, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=4, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=2, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=0, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=7, min_total_visits=10, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=6, min_total_visits=10, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=5, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=4, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=2, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=0, return_to_initial=NGRAM_TOINI)),
         ],
         config=config,
     )
 
-    adaptive_ngram = Fallback(
+    complex_fallback = Fallback(
         models=[
             BasicMiner(
                 algorithm=NGram(
-                    window_length=9, min_total_visits=10, min_max_prob=0.9, return_to_initial=NGRAM_RETURN_TO_INITIAL
+                    window_length=9, min_total_visits=10, min_max_prob=0.9, return_to_initial=NGRAM_TOINI
                 )
             ),
             BasicMiner(
                 algorithm=NGram(
-                    window_length=8, min_total_visits=10, min_max_prob=0.9, return_to_initial=NGRAM_RETURN_TO_INITIAL
+                    window_length=8, min_total_visits=10, min_max_prob=0.9, return_to_initial=NGRAM_TOINI
                 )
             ),
             BasicMiner(
                 algorithm=NGram(
-                    window_length=7, min_total_visits=10, min_max_prob=0.8, return_to_initial=NGRAM_RETURN_TO_INITIAL
+                    window_length=7, min_total_visits=10, min_max_prob=0.8, return_to_initial=NGRAM_TOINI
                 )
             ),
             BasicMiner(
                 algorithm=NGram(
-                    window_length=6, min_total_visits=10, min_max_prob=0.7, return_to_initial=NGRAM_RETURN_TO_INITIAL
+                    window_length=6, min_total_visits=10, min_max_prob=0.7, return_to_initial=NGRAM_TOINI
                 )
             ),
             BasicMiner(
                 algorithm=NGram(
-                    window_length=5, min_total_visits=10, min_max_prob=0.6, return_to_initial=NGRAM_RETURN_TO_INITIAL
+                    window_length=5, min_total_visits=10, min_max_prob=0.6, return_to_initial=NGRAM_TOINI
                 )
             ),
             BasicMiner(
                 algorithm=NGram(
-                    window_length=4, min_total_visits=10, min_max_prob=0.0, return_to_initial=NGRAM_RETURN_TO_INITIAL
+                    window_length=4, min_total_visits=10, min_max_prob=0.0, return_to_initial=NGRAM_TOINI
                 )
             ),
             BasicMiner(
                 algorithm=NGram(
-                    window_length=3, min_total_visits=10, min_max_prob=0.0, return_to_initial=NGRAM_RETURN_TO_INITIAL
+                    window_length=3, min_total_visits=10, min_max_prob=0.0, return_to_initial=NGRAM_TOINI
                 ),
             ),
             BasicMiner(algorithm=NGram(window_length=2, min_total_visits=10, min_max_prob=0.0)),
-            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_TOINI)),
         ],
         config=config,
     )
@@ -365,66 +378,93 @@ for iteration in range(n_iterations):
         models=[
             BasicMiner(algorithm=Bag()),
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-            BasicMiner(algorithm=NGram(window_length=2, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=4, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=2, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=4, return_to_initial=NGRAM_TOINI)),
             # BasicMiner(algorithm=NGram(window_length=5)),
             # BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
 
-    soft_voting = SoftVoting(
-        models=[
-            BasicMiner(algorithm=Bag()),
-            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-            BasicMiner(algorithm=NGram(window_length=2, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            BasicMiner(algorithm=NGram(window_length=4, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            # BasicMiner(algorithm=NGram(window_length=5)),
-            # BasicMiner(algorithm=NGram(window_length=6)),
-        ],
-        config=config,
-    )
-
-    # soft_voting_B = SoftVoting(
-    #     models=[
-    #         BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-    #         BasicMiner(algorithm=NGram(window_length=2, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-    #         BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-    #         BasicMiner(algorithm=NGram(window_length=4, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-    #     ],
-    #     config=config,
-    # )
-
-    # soft_voting_C = SoftVoting(
-    #     models=[
-    #         BasicMiner(algorithm=NGram(window_length=2, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-    #         BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-    #         BasicMiner(algorithm=NGram(window_length=4, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-    #     ],
-    #     config=config,
-    # )
-
-    soft_voting_tests = [
-        SoftVoting(
+    adaptive_voting_list = [
+        AdaptiveVoting(
             models=[
                 BasicMiner(algorithm=Bag()),
                 BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-                BasicMiner(algorithm=NGram(window_length=grams[0], return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-                BasicMiner(algorithm=NGram(window_length=grams[1], return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-                BasicMiner(algorithm=NGram(window_length=grams[2], return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-                BasicMiner(algorithm=NGram(window_length=grams[3], return_to_initial=NGRAM_RETURN_TO_INITIAL)),
-            ],
-            config=config,
+                BasicMiner(algorithm=NGram(window_length=grams[0], min_total_visits=10, return_to_initial=NGRAM_TOINI)),
+                BasicMiner(algorithm=NGram(window_length=grams[1], min_total_visits=10, return_to_initial=NGRAM_TOINI)),
+                BasicMiner(algorithm=NGram(window_length=grams[2], min_total_visits=10, return_to_initial=NGRAM_TOINI)),
+            ] + (
+                [
+                    BasicMiner(algorithm=NGram(window_length=grams[3], min_total_visits=10, return_to_initial=NGRAM_TOINI))
+                ]
+                if len(grams) > 3 else []
+            ),
+            select_best=select_best_arg,
+            config=config
         )
-        for grams in SOFT_VOTING_NGRAMS
+        for grams in VOTING_NGRAMS
+        for select_best_arg in SELECT_BEST_ARGS
     ]
+
+
+    # soft_voting = SoftVoting(
+    #     models=[
+    #         BasicMiner(algorithm=Bag()),
+    #         BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
+    #         BasicMiner(algorithm=NGram(window_length=2, return_to_initial=NGRAM_TOINI)),
+    #         BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_TOINI)),
+    #         BasicMiner(algorithm=NGram(window_length=4, return_to_initial=NGRAM_TOINI)),
+    #         # BasicMiner(algorithm=NGram(window_length=5)),
+    #         # BasicMiner(algorithm=NGram(window_length=6)),
+    #     ],
+    #     config=config,
+    # )
+
+    soft_voting_list = (
+        [
+            SoftVoting(
+                models=[
+                    BasicMiner(algorithm=Bag()),
+                    BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
+                    BasicMiner(algorithm=NGram(window_length=grams[0], return_to_initial=NGRAM_TOINI)),
+                    BasicMiner(algorithm=NGram(window_length=grams[1], return_to_initial=NGRAM_TOINI)),
+                    BasicMiner(algorithm=NGram(window_length=grams[2], return_to_initial=NGRAM_TOINI)),
+                ] + (
+                    [
+                        BasicMiner(algorithm=NGram(window_length=grams[3], return_to_initial=NGRAM_TOINI))
+                    ] if len(grams) > 3 else []
+                ),
+                config=config,
+            )
+            for grams in VOTING_NGRAMS
+        ]
+        +
+        [
+            SoftVoting(
+                models=[
+                    BasicMiner(algorithm=Bag()),
+                    BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
+                    BasicMiner(algorithm=NGram(window_length=grams[0], min_total_visits=10, return_to_initial=NGRAM_TOINI)),
+                    BasicMiner(algorithm=NGram(window_length=grams[1], min_total_visits=10, return_to_initial=NGRAM_TOINI)),
+                    BasicMiner(algorithm=NGram(window_length=grams[2], min_total_visits=10, return_to_initial=NGRAM_TOINI)),
+                ]
+                + (
+                    [
+                        BasicMiner(algorithm=NGram(window_length=grams[3], min_total_visits=10, return_to_initial=NGRAM_TOINI))
+                    ]
+                    if len(grams) > 3 else []
+                ),
+            )
+            for grams in VOTING_NGRAMS
+        ]
+    )
 
     relativize = Relativize(
         models=[
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-            BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_TOINI)),
         ],
         config=config,
     )
@@ -473,10 +513,22 @@ for iteration in range(n_iterations):
         )
         for ngram_name, ngram_model in NGRAM_MODELS.items()
     }
-    soft_voting_strategies = {
-        f"soft voting {grams}": (soft_voting_test, test_set_transformed)
-        for grams, soft_voting_test in zip(SOFT_VOTING_NGRAMS, soft_voting_tests, strict=False)
+    # Repeat each tuple in VOTING_NGRAMS 3 times for adaptive voting strategies
+    repeated_ngrams = [gram for grams in VOTING_NGRAMS for gram in [grams] * len(SELECT_BEST_ARGS)]
+    adaptive_voting_strategies = {
+        f"adaptive voting {grams} {adaptive_voting.select_best}": (adaptive_voting, test_set_transformed)
+        for grams, adaptive_voting in zip(repeated_ngrams, adaptive_voting_list, strict=False)
     }
+
+    soft_voting_strategies1 = {
+        f"soft voting {grams}": (soft_voting_test, test_set_transformed)
+        for grams, soft_voting_test in zip(VOTING_NGRAMS, soft_voting_list[:len(VOTING_NGRAMS)], strict=False)
+    }
+    soft_voting_strategies2 = {
+        f"soft voting {grams}*": (soft_voting_test, test_set_transformed)
+        for grams, soft_voting_test in zip(VOTING_NGRAMS, soft_voting_list[len(VOTING_NGRAMS):], strict=False)
+    }
+    soft_voting_strategies = {**soft_voting_strategies1, **soft_voting_strategies2}
     bayesian_strategies = {model_name: (model, test_set_transformed) for model_name, model in BAYESIAN_MODELS.items()}
     strategies = {
         "fpt": (fpt, test_set_transformed),
@@ -492,11 +544,9 @@ for iteration in range(n_iterations):
         "fallback ngram_10->ngram_2": (fallback_ngram10to2, test_set_transformed),
         "fallback ngram_13->ngram_2": (fallback_ngram13to2, test_set_transformed),
         "fallback ngram_8->...->1": (fallback_ngram8to_ooo, test_set_transformed),
-        "adaptive_ngram": (adaptive_ngram, test_set_transformed),
+        "complex fallback": (complex_fallback, test_set_transformed),
         "hard voting": (hard_voting, test_set_transformed),
-        "soft voting": (soft_voting, test_set_transformed),
-        # "soft voting B": (soft_voting_B, test_set_transformed),
-        # "soft voting C": (soft_voting_C, test_set_transformed),
+        **adaptive_voting_strategies,
         **soft_voting_strategies,
         "alergia": (smm, test_set_transformed),
         **bayesian_strategies,
@@ -532,11 +582,14 @@ for iteration in range(n_iterations):
         # fallback_ngram13to2.update(event)
         # fallback_ngram8to_ooo.update(event)
 
-        # adaptive_ngram.update(event)
+        # complex_fallback.update(event)
         # hard_voting.update(event)
+        # adaptive_voting_acc.update(event)
+        # adaptive_voting_prob.update(event)
+        # adaptive_voting_probxacc.update(event)
         # soft_voting.update(event)
 
-        # for soft_voting_test in soft_voting_tests:
+        # for soft_voting_test in soft_voting_list:
         #     soft_voting_test.update(event)
 
     miners_end_time = time.time()
