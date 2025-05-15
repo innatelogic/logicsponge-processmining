@@ -2,11 +2,13 @@
 
 import gc
 import logging
+import time
+from pathlib import Path
 
+# ruff: noqa: E402
 import torch
 from torch import nn, optim
 
-# ruff: noqa: E402
 logging.basicConfig(
     level=logging.INFO,
     format="%(message)s",  # Only log level and message, no date
@@ -29,6 +31,7 @@ from logicsponge.processmining.models import (
 from logicsponge.processmining.neural_networks import LSTMModel
 from logicsponge.processmining.streaming import (
     AddStartSymbol,
+    CSVStatsWriter,
     Evaluation,
     IteratorStreamer,
     PrintEval,
@@ -37,6 +40,10 @@ from logicsponge.processmining.streaming import (
 from logicsponge.processmining.test_data import dataset
 
 logger = logging.getLogger(__name__)
+RUN_ID = int(time.time())
+stats_to_log = []
+stats_file_path = Path(f"results/stats_streaming_{RUN_ID}.csv")
+
 
 # disable circular gc here, since a phase 2 may take minutes
 gc.disable()
@@ -76,6 +83,24 @@ config = {
 start_symbol = DEFAULT_CONFIG["start_symbol"]
 
 
+# ============================================================
+# Generate a list of ngrams to test
+# ============================================================
+SOFT_VOTING_NGRAMS = [(2, 3, 6, 8), (2, 3, 5, 6), (2, 3, 5, 8), (2, 3, 4, 6), (2, 3, 6, 7), (2, 3, 7, 8), (2, 3, 6, 8)]
+
+WINDOW_RANGE = [0, 1, 2, 3, 4, 5, 6, 7, 8] #, 9, 10, 12, 14, 16]
+
+NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
+# ] + [
+#     f"ngram_{i+1}_recovery" for i in WINDOW_RANGE
+# ]
+# ] + [
+#     f"ngram_{i+1}_shorts" for i in WINDOW_RANGE
+# ]
+
+NGRAM_RETURN_TO_INITIAL = True
+# ============================================================
+
 fpt = StreamingActivityPredictor(
     strategy=BasicMiner(algorithm=FrequencyPrefixTree(), config=config),
 )
@@ -84,49 +109,98 @@ bag = StreamingActivityPredictor(
     strategy=BasicMiner(algorithm=Bag(), config=config),
 )
 
-ngram_1 = StreamingActivityPredictor(
-    strategy=BasicMiner(algorithm=NGram(window_length=0), config=config),
-)
+# NGram models
+NGRAM_MODELS: dict[str, StreamingActivityPredictor] = {}
+for ngram_name in NGRAM_NAMES:
+    window_length = int(ngram_name.split("_")[1]) - 1
+    # Assuming recovery options are not used in streaming for simplicity, matching current streaming file structure
+    NGRAM_MODELS[ngram_name] = StreamingActivityPredictor(
+        strategy=BasicMiner(
+            algorithm=NGram(
+                window_length=window_length, recover_lengths=[], return_to_initial=NGRAM_RETURN_TO_INITIAL
+            ),
+            config=config,
+        )
+    )
 
-ngram_2 = StreamingActivityPredictor(
-    strategy=BasicMiner(algorithm=NGram(window_length=1), config=config),
-)
-
-ngram_3 = StreamingActivityPredictor(
-    strategy=BasicMiner(algorithm=NGram(window_length=2), config=config),
-)
-
-ngram_4 = StreamingActivityPredictor(
-    strategy=BasicMiner(algorithm=NGram(window_length=3), config=config),
-)
-
-ngram_5 = StreamingActivityPredictor(
-    strategy=BasicMiner(algorithm=NGram(window_length=4), config=config),
-)
-
-ngram_6 = StreamingActivityPredictor(
-    strategy=BasicMiner(algorithm=NGram(window_length=5), config=config),
-)
-
-ngram_7 = StreamingActivityPredictor(
-    strategy=BasicMiner(algorithm=NGram(window_length=6), config=config),
-)
-
-ngram_8 = StreamingActivityPredictor(
-    strategy=BasicMiner(algorithm=NGram(window_length=7), config=config),
-)
 
 fallback = StreamingActivityPredictor(
     strategy=Fallback(
         models=[
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-            BasicMiner(algorithm=NGram(window_length=4)),
+            BasicMiner(algorithm=NGram(window_length=4, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
         ],
         config=config,
     )
 )
 
-adaptive_ngram = StreamingActivityPredictor(
+fallback_ngram8to2 = StreamingActivityPredictor(
+    strategy=Fallback(
+        models=[
+            BasicMiner(algorithm=NGram(window_length=7, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+        ],
+        config=config,
+    )
+)
+
+fallback_ngram8to3 = StreamingActivityPredictor(
+    strategy=Fallback(
+        models=[
+            BasicMiner(algorithm=NGram(window_length=7, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=2, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+        ],
+        config=config,
+    )
+)
+
+fallback_ngram8to4 = StreamingActivityPredictor(
+    strategy=Fallback(
+        models=[
+            BasicMiner(algorithm=NGram(window_length=7, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+        ],
+        config=config,
+    )
+)
+
+fallback_ngram10to2 = StreamingActivityPredictor(
+    strategy=Fallback(
+        models=[
+            BasicMiner(algorithm=NGram(window_length=9, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+        ],
+        config=config,
+    )
+)
+
+fallback_ngram13to2 = StreamingActivityPredictor(
+    strategy=Fallback(
+        models=[
+            BasicMiner(algorithm=NGram(window_length=12, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+        ],
+        config=config,
+    )
+)
+
+fallback_ngram8to_ooo = StreamingActivityPredictor(
+    strategy=Fallback(
+        models=[
+            BasicMiner(algorithm=NGram(window_length=7, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=6, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=5, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=4, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=2, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=0, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+        ],
+        config=config,
+    )
+)
+
+complex_fallback = StreamingActivityPredictor(
     strategy=Fallback(
         models=[
             BasicMiner(algorithm=NGram(window_length=9, min_total_visits=10, min_max_prob=0.9)),
@@ -137,7 +211,7 @@ adaptive_ngram = StreamingActivityPredictor(
             BasicMiner(algorithm=NGram(window_length=4, min_total_visits=10, min_max_prob=0.0)),
             BasicMiner(algorithm=NGram(window_length=3, min_total_visits=10, min_max_prob=0.0)),
             BasicMiner(algorithm=NGram(window_length=2, min_total_visits=10, min_max_prob=0.0)),
-            BasicMiner(algorithm=NGram(window_length=1)),
+            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
         ],
         config=config,
     )
@@ -163,33 +237,34 @@ soft_voting = StreamingActivityPredictor(
         models=[
             BasicMiner(algorithm=Bag()),
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-            BasicMiner(algorithm=NGram(window_length=2)),
-            BasicMiner(algorithm=NGram(window_length=3)),
-            BasicMiner(algorithm=NGram(window_length=4)),
-            BasicMiner(algorithm=NGram(window_length=5)),
+            BasicMiner(algorithm=NGram(window_length=2, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            BasicMiner(algorithm=NGram(window_length=4, return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+            # BasicMiner(algorithm=NGram(window_length=5)),
             # BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
 )
 
-list_grams = [(2, 3, 6, 8), (2, 3, 5, 6), (2, 3, 5, 8), (2, 3, 4, 6), (2, 3, 6, 7), (2, 3, 7, 8), (2, 3, 6, 8)]
-soft_voting_tests = [
-    StreamingActivityPredictor(
+# list_grams = [(2, 3, 6, 8), (2, 3, 5, 6), (2, 3, 5, 8), (2, 3, 4, 6), (2, 3, 6, 7), (2, 3, 7, 8), (2, 3, 6, 8)]
+# Use SOFT_VOTING_NGRAMS for consistency
+soft_voting_predictors = {
+    f"soft_voting_{grams}": StreamingActivityPredictor(
         strategy=SoftVoting(
             models=[
                 BasicMiner(algorithm=Bag()),
                 BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-                BasicMiner(algorithm=NGram(window_length=grams[0])),
-                BasicMiner(algorithm=NGram(window_length=grams[1])),
-                BasicMiner(algorithm=NGram(window_length=grams[2])),
-                BasicMiner(algorithm=NGram(window_length=grams[3])),
+                BasicMiner(algorithm=NGram(window_length=grams[0], return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+                BasicMiner(algorithm=NGram(window_length=grams[1], return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+                BasicMiner(algorithm=NGram(window_length=grams[2], return_to_initial=NGRAM_RETURN_TO_INITIAL)),
+                BasicMiner(algorithm=NGram(window_length=grams[3], return_to_initial=NGRAM_RETURN_TO_INITIAL)),
             ],
             config=config,
         )
     )
-    for grams in list_grams
-]
+    for grams in SOFT_VOTING_NGRAMS
+}
 
 adaptive_voting = StreamingActivityPredictor(
     strategy=AdaptiveVoting(
@@ -235,30 +310,33 @@ lstm = StreamingActivityPredictor(
 models = [
     "fpt",
     "bag",
-    "ngram_1",
-    "ngram_2",
-    "ngram_3",
-    "ngram_4",
-    "ngram_5",
-    "ngram_6",
-    "ngram_7",
-    "ngram_8",
+    *NGRAM_NAMES,  # Add all NGRAM_NAMES
     "fallback",
-    "adaptive_ngram",
+    "fallback_ngram8to2",
+    "fallback_ngram8to3",
+    "fallback_ngram8to4",
+    "fallback_ngram10to2",
+    "fallback_ngram13to2",
+    "fallback_ngram8to_ooo",
+    "complex_fallback",
     "hard_voting",
-    "soft_voting",
-    "soft_voting_test_1",
-    "soft_voting_test_2",
-    "soft_voting_test_3",
-    "soft_voting_test_4",
-    "soft_voting_test_5",
-    "soft_voting_test_6",
-    "soft_voting_test_7",
     "adaptive_voting",
+    "soft_voting",
+    *list(soft_voting_predictors.keys()), # Add all soft_voting predictor names
     "lstm",
 ]
 
-accuracy_list = [f"{model}.accuracy" for model in models]
+
+metrics_attributes = [
+    "accuracy",
+    "pp_arithmetic_mean",
+    "pp_harmonic_mean",
+    "pp_median",
+    "pp_q1",
+    "pp_q3",
+]
+metrics_list = [f"{model}.{attribute}" for model in models for attribute in metrics_attributes]
+
 latency_mean_list = [f"{model}.latency_mean" for model in models]
 
 delay_attributes = [
@@ -270,7 +348,7 @@ delay_attributes = [
 
 delay_list = [f"{model}.{attribute}" for model in models for attribute in delay_attributes]
 
-all_attributes = ["index", *accuracy_list, *latency_mean_list, *delay_list]
+all_attributes = ["index", *metrics_list, *latency_mean_list, *delay_list]
 
 streamer = IteratorStreamer(data_iterator=dataset)
 
@@ -325,39 +403,34 @@ sponge = (
     * (
         (fpt * Evaluation("fpt"))
         | (bag * Evaluation("bag"))
-        | (ngram_1 * Evaluation("ngram_1"))
-        | (ngram_2 * Evaluation("ngram_2"))
-        | (ngram_3 * Evaluation("ngram_3"))
-        | (ngram_4 * Evaluation("ngram_4"))
-        | (ngram_5 * Evaluation("ngram_5"))
-        | (ngram_6 * Evaluation("ngram_6"))
-        | (ngram_7 * Evaluation("ngram_7"))
-        | (ngram_8 * Evaluation("ngram_8"))
+        # Add all NGRAM_MODELS to the pipeline
+        | ((NGRAM_MODELS[name] * Evaluation(name)) for name in NGRAM_NAMES)
         | (fallback * Evaluation("fallback"))
-        | (adaptive_ngram * Evaluation("adaptive_ngram"))
+        | (fallback_ngram8to2 * Evaluation("fallback_ngram8to2"))
+        | (fallback_ngram8to3 * Evaluation("fallback_ngram8to3"))
+        | (fallback_ngram8to4 * Evaluation("fallback_ngram8to4"))
+        | (fallback_ngram10to2 * Evaluation("fallback_ngram10to2"))
+        | (fallback_ngram13to2 * Evaluation("fallback_ngram13to2"))
+        | (fallback_ngram8to_ooo * Evaluation("fallback_ngram8to_ooo"))
+        | (complex_fallback * Evaluation("complex_fallback"))
         | (hard_voting * Evaluation("hard_voting"))
-        | (soft_voting * Evaluation("soft_voting"))
-        | (soft_voting_tests[0] * Evaluation("soft_voting_test_1"))
-        | (soft_voting_tests[1] * Evaluation("soft_voting_test_2"))
-        | (soft_voting_tests[2] * Evaluation("soft_voting_test_3"))
-        | (soft_voting_tests[3] * Evaluation("soft_voting_test_4"))
-        | (soft_voting_tests[4] * Evaluation("soft_voting_test_5"))
-        | (soft_voting_tests[5] * Evaluation("soft_voting_test_6"))
-        | (soft_voting_tests[6] * Evaluation("soft_voting_test_7"))
         | (adaptive_voting * Evaluation("adaptive_voting"))
-        | (
-            AddStartSymbol(start_symbol=start_symbol)
-            * lstm
-            * DataItemFilter(data_item_filter=start_filter)
-            * Evaluation("lstm")
-        )
+        | (soft_voting * Evaluation("soft_voting"))
+        # Add all soft_voting_predictors to the pipeline
+        | ((predictor * Evaluation(name)) for name, predictor in soft_voting_predictors.items())
+        # | (
+        #     AddStartSymbol(start_symbol=start_symbol)
+        #     * lstm
+        #     * DataItemFilter(data_item_filter=start_filter)
+        #     * Evaluation("lstm")
+        # )
     )
     * ls.MergeToSingleStream()
     * ls.Flatten()
     * ls.AddIndex(key="index", index=1)
     * ls.KeyFilter(keys=all_attributes)
     * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 100 == 0 or item["index"] > len_dataset - 10)
-    * PrintEval()
+    * (PrintEval() | CSVStatsWriter(csv_path=stats_file_path))
     # * ls.Print()
     # * (dashboard.Plot("Accuracy (%)", x="index", y=accuracy_list))
     # * (dashboard.Plot("Latency Mean (ms)", x="index", y=latency_mean_list))

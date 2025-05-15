@@ -31,13 +31,15 @@ class Metrics(TypedDict):
 
     """
 
+    state_id: ComposedState
     probs: ProbDistr
     predicted_delays: ActivityDelays
+    # likelihoods: dict[ActivityName, float]
 
 
 def empty_metrics() -> Metrics:
     """Return an empty metrics object."""
-    return Metrics(probs={}, predicted_delays={})
+    return Metrics(state_id=None, probs={}, predicted_delays={}) # , likelihoods={})
 
 
 class Config(TypedDict, total=True):

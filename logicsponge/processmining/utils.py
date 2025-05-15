@@ -1,6 +1,7 @@
 """Utility functions for process mining."""
 
 import copy
+import math
 
 import numpy as np
 
@@ -152,3 +153,9 @@ def compute_perplexity_stats(perplexities: list[float]) -> dict[str, float]:
     res["pp_q3"] = q3_perplexity
 
     return res
+
+def compute_seq_perplexity(normalized_likelihood: float, *, log_likelihood: bool) -> float:
+    """Compute the perplexity of a sequence."""
+    if normalized_likelihood is not None and normalized_likelihood > 0:
+        return math.exp(-normalized_likelihood) if log_likelihood else 1.0 / normalized_likelihood
+    return float("inf")

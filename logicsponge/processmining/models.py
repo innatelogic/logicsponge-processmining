@@ -9,10 +9,10 @@ import itertools
 import logging
 import math
 import random
+import time
 from abc import ABC, abstractmethod
 from collections import Counter, OrderedDict
 from datetime import timedelta
-import time
 from typing import Any
 
 import matplotlib as mpl
@@ -36,7 +36,12 @@ from logicsponge.processmining.types import (
     StateId,
     empty_metrics,
 )
-from logicsponge.processmining.utils import compute_perplexity_stats, metrics_prediction, probs_prediction
+from logicsponge.processmining.utils import (
+    compute_perplexity_stats,
+    compute_seq_perplexity,
+    metrics_prediction,
+    probs_prediction,
+)
 
 mpl.use("Agg")
 
@@ -234,13 +239,6 @@ class StreamingMiner(ABC):
 
         self.stats["last_timestamps"][case_id] = timestamp
 
-    @staticmethod
-    def compute_seq_perplexity(normalized_likelihood: float, *, log_likelihood: bool) -> float:
-        """Compute the perplexity of a sequence."""
-        if normalized_likelihood is not None and normalized_likelihood > 0:
-            return math.exp(-normalized_likelihood) if log_likelihood else 1.0 / normalized_likelihood
-        return float("inf")
-
     def evaluate(
         self,
         data: list[list[Event]],
@@ -311,8 +309,10 @@ class StreamingMiner(ABC):
                 logger.debug("      [Before] Likelihood: %s", likelihood)
                 if log_likelihood:
                     likelihood += math.log(self.state_act_likelihood(current_state, actual_next_activity))
+                    # likelihood += metrics["likelihoods"].get(actual_next_activity, 0.0)
                 else:
                     likelihood *= self.state_act_likelihood(current_state, actual_next_activity)
+                    # likelihood *= metrics["likelihoods"].get(actual_next_activity, 0.0)
                 logger.debug("      [After] Likelihood: %s", likelihood)
 
                 # likelihood *= (
@@ -342,7 +342,7 @@ class StreamingMiner(ABC):
             else:
                 normalized_likelihood = likelihood ** (1 / len(sequence)) if len(sequence) > 0 else likelihood
 
-            seq_perplexity = StreamingMiner.compute_seq_perplexity(normalized_likelihood, log_likelihood=log_likelihood)
+            seq_perplexity = compute_seq_perplexity(normalized_likelihood, log_likelihood=log_likelihood)
             perplexities.append(seq_perplexity)
 
             logger.debug("Pred. sequence: %s", predicted_sequence.replace(self.config["stop_symbol"].__str__(), "S"))
@@ -383,6 +383,10 @@ class StreamingMiner(ABC):
         """Return metrics dictionary based on state."""
 
     @abstractmethod
+    def get_state_from_case(self, case_id: CaseId) -> ComposedState:
+        """Return the state of the algorithm based on the case ID."""
+
+    @abstractmethod
     def case_metrics(self, case_id: CaseId) -> Metrics:
         """Return metrics dictionary based on case."""
 
@@ -393,6 +397,17 @@ class StreamingMiner(ABC):
     @abstractmethod
     def state_act_likelihood(self, state: ComposedState | None, next_activity: ActivityName) -> float:
         """Return the likelihood of the given activity given a current state."""
+
+    def state_act_likelihoods(
+        self,
+        state: StateId | None,
+        eligible_activities: list[ActivityName]
+    ) -> dict[ActivityName, float]:
+        """Return the likelihood of the given activities given a current state."""
+        likelihoods = {}
+        for activity in eligible_activities:
+            likelihoods[activity] = self.state_act_likelihood(state, activity)
+        return likelihoods
 
 
 # ============================================================
@@ -420,6 +435,11 @@ class BasicMiner(StreamingMiner):
     def __str__(self) -> str:
         """Return a string representation of the BasicMiner."""
         return f"BasicMiner({self.algorithm})"
+
+    def get_state_from_case(self, case_id: CaseId) -> StateId:
+        """Return the state of the algorithm based on the case ID."""
+        return self.algorithm.get_state_from_case(case_id)
+
 
     def get_num_states(self) -> int:
         """Return the number of states in the algorithm."""
@@ -559,6 +579,11 @@ class MultiMiner(StreamingMiner, ABC):
             model.get_state_info(model_state) if hasattr(model, "get_state_info") else None
             for model, model_state in zip(self.models, state_id, strict=True)
         )
+
+    def get_state_from_case(self, case_id: CaseId) -> ComposedState:
+        """Return the state of the algorithm based on the case ID."""
+        # Get the state from each model
+        return tuple([model.get_state_from_case(case_id) for model in self.models])
 
     def update(self, event: Event) -> None:
         """Update the algorithm with the new event."""
@@ -727,28 +752,43 @@ class HardVoting(MultiMiner):
             model.state_metrics(model_state)["predicted_delays"]
             for model, model_state in zip(self.models, state, strict=True)
         ]
+        # activity_list = [activity for metrics in metrics_list for activity in metrics["probs"]]
 
         return Metrics(
+            state_id=tuple([metrics["state_id"] for metrics in metrics_list]),
             probs=self.voting_probs(probs_list),
             predicted_delays=self.voting_delays(delays_list),
+            # likelihoods=self.state_act_likelihoods(state, activity_list)
         )
+
 
     def case_metrics(self, case_id: CaseId) -> Metrics:
         """Return the hard voting of predictions from the ensemble."""
+        # Non optimal, but it is convenient to call state_act_likelihood for the likelihood computation
+        # So we need first to get the state of each model, although this is already done inside
+        # each model.case_metrics() call
+        # state = self.get_state_from_case(case_id)
+
         metrics_list = [model.case_metrics(case_id) for model in self.models]
         probs_list = [metrics["probs"] for metrics in metrics_list]
-        delays_list = [model.case_metrics(case_id)["predicted_delays"] for model in self.models]
+        delays_list = [metrics["predicted_delays"] for metrics in metrics_list]
+
+        # activity_list = [activity for metrics in metrics_list for activity in metrics["probs"]]
 
         return Metrics(
+            state_id=tuple([metrics["state_id"] for metrics in metrics_list]),
             probs=self.voting_probs(probs_list),
             predicted_delays=self.voting_delays(delays_list),
+            # likelihoods=self.state_act_likelihoods(state, activity_list)
         )
 
     def sequence_metrics(self, sequence: list[Event]) -> Metrics:
         """Return the majority vote."""
+        msg = "Hard voting is not implemented for sequences."
+        raise NotImplementedError(msg)
         metrics_list = [model.sequence_metrics(sequence) for model in self.models]
         probs_list = [metrics["probs"] for metrics in metrics_list]
-        delays_list = [model.sequence_metrics(sequence)["predicted_delays"] for model in self.models]
+        delays_list = [metrics["predicted_delays"] for metrics in metrics_list]
 
         return Metrics(
             probs=self.voting_probs(probs_list),
@@ -836,26 +876,44 @@ class SoftVoting(MultiMiner):
             for model, model_state in zip(self.models, state, strict=True)
         ]
 
+        # activity_list = [activity for metrics in metrics_list for activity in metrics["probs"]]
+
         return Metrics(
+            state_id=tuple([metrics["state_id"] for metrics in metrics_list]),
             probs=voting_probs,
             predicted_delays=self.voting_delays(delays_list),
+            # likelihoods=self.state_act_likelihoods(state, activity_list)
         )
 
-        # output_metrics["likelihood"] = self.voting_likelihood(output_metrics)
+
+
+
 
     def case_metrics(self, case_id: CaseId) -> Metrics:
         """Return the hard voting of predictions from the ensemble."""
+        # Non optimal, but it is convenient to call state_act_likelihood for the likelihood computation
+        # So we need first to get the state of each model, although this is already done inside
+        # each model.case_metrics() call
+        # state = self.get_state_from_case(case_id)
+
         metrics_list = [model.case_metrics(case_id) for model in self.models]
         probs_list = [metrics["probs"] for metrics in metrics_list]
-        delays_list = [model.case_metrics(case_id)["predicted_delays"] for model in self.models]
+        delays_list = [metrics["predicted_delays"] for metrics in metrics_list]
+
+        # activity_list = [activity for metrics in metrics_list for activity in metrics["probs"]]
 
         return Metrics(
+            state_id=tuple([metrics["state_id"] for metrics in metrics_list]),
             probs=self.voting_probs(probs_list),
             predicted_delays=self.voting_delays(delays_list),
+            # likelihoods=self.state_act_likelihoods(state, activity_list)
         )
+
 
     def sequence_metrics(self, sequence: list[Event]) -> Metrics:
         """Return the majority vote."""
+        msg = "Soft voting is not implemented for sequences."
+        raise NotImplementedError(msg)
         metrics_list = [model.sequence_metrics(sequence) for model in self.models]
         probs_list = [metrics["probs"] for metrics in metrics_list]
         delays_list = [model.sequence_metrics(sequence)["predicted_delays"] for model in self.models]
@@ -867,20 +925,40 @@ class SoftVoting(MultiMiner):
 
 
 class AdaptiveVoting(MultiMiner):
-    """To be used only in streaming mode.
+    """Selects the best model for each prediction.
 
-    In batch mode, it will stick to the model with the highest training accuracy.
+    Args:
+        select_best (str): The criterion to select the best model.
+            - "acc": Selects the model with the highest accuracy.
+            - "prob": Selects the model with the highest probability.
+            - "prob x acc": Selects the model with the highest probability times accuracy.
+
+    Note:
+        - when using "acc", the model with the highest accuracy is selected.
+        In streaming mode, this model can change over time, but in batch mode, it will
+        stick to the model with the highest training accuracy.
+        - when using "prob", the model with the highest probability of its prediction
+        is selected (depending on the state).
+        - when using "prob x acc", the model with the highest value of probability
+        of its prediction, times the accuracy of the model, is selected.
+
     """
 
     total_predictions: int
     correct_predictions: list[int]
 
-    def __init__(self, *args: dict[str, Any], **kwargs: Any) -> None:  # noqa: ANN401
+    def __init__(self, *args: dict[str, Any], select_best: str = "accuracy", **kwargs: Any) -> None:  # noqa: ANN401
         """Initialize the AdaptiveVoting class."""
         super().__init__(*args, **kwargs)
         # Initialize prediction tracking for each model
         self.total_predictions = 0
         self.correct_predictions = [0] * len(self.models)
+
+        self.select_best = select_best
+        accepted_options = ["acc", "prob", "prob x acc"]
+        if self.select_best not in accepted_options:
+            msg = f"select_best must be in {accepted_options}."
+            raise ValueError(msg)
 
     def update(self, event: Event) -> None:
         """Overwritten to account for keeping track of accuracies in streaming mode."""
@@ -921,10 +999,46 @@ class AdaptiveVoting(MultiMiner):
             return 0.0
 
         # Get the best model
-        best_model_index = self.select_best_model()
-        best_model = self.models[best_model_index]
+        best_model_index = (
+            self.select_best_model()
+            if self.select_best == "acc"
+            else self.get_best_model_metrics(state)[0]
+        )
 
-        return best_model.state_act_likelihood(state[best_model_index], next_activity)
+        return (
+            self.models[best_model_index].state_act_likelihood(state[best_model_index], next_activity)
+            if best_model_index is not None
+            else 0.0
+        )
+
+        # # Get the best model
+        # best_model_index = self.select_best_model()
+        # best_model = self.models[best_model_index]
+
+        # return best_model.state_act_likelihood(state[best_model_index], next_activity)
+
+    def get_best_model_metrics(self, state: ComposedState) -> tuple[int | None, Metrics]:
+        """Return the metrics of the model with the best accuracy so far."""
+        if state is None:
+            return None, empty_metrics()
+
+        all_state_metrics = [
+            model.state_metrics(model_state) for model, model_state in zip(self.models, state, strict=True)
+        ]
+
+        # Select the metrics with the highest max probability and the index of the model
+        return max(
+            enumerate(all_state_metrics),
+            key=lambda x: (
+                (max(x[1]["probs"].values()) if x[1]["probs"] else 0.0)
+                * (
+                    self.correct_predictions[x[0]]
+                    if self.select_best == "prob x acc"
+                    else 1.0
+                )
+            ),
+        )
+
 
     def state_metrics(self, state: ComposedState | None) -> Metrics:
         """Return the probability distribution from the model with the best accuracy so far."""
@@ -932,10 +1046,13 @@ class AdaptiveVoting(MultiMiner):
             return empty_metrics()
 
         # Get the best model
-        best_model_index = self.select_best_model()
-        best_model = self.models[best_model_index]
-
-        best_model_state = state[best_model_index]
+        if self.select_best == "acc":
+            best_model_index = self.select_best_model()
+            best_model = self.models[best_model_index]
+            best_model_state = state[best_model_index]
+            best_model_metrics = best_model.state_metrics(best_model_state)
+        else:
+            best_model_metrics = self.get_best_model_metrics(state)[1]
 
         delays_list = [
             model.state_metrics(model_state)["predicted_delays"]
@@ -943,34 +1060,49 @@ class AdaptiveVoting(MultiMiner):
         ]
 
         return Metrics(
-            probs=best_model.state_metrics(best_model_state)["probs"],
+            state_id=state,
+            probs=best_model_metrics["probs"],
             predicted_delays=self.voting_delays(delays_list),
+            # likelihoods=best_model_metrics["likelihoods"]
         )
 
     def case_metrics(self, case_id: CaseId) -> Metrics:
         """Return the probability distribution from the model with the best accuracy so far."""
+        state = self.get_state_from_case(case_id)
+
         # Get the best model
-        best_model_index = self.select_best_model()
-        best_model = self.models[best_model_index]
+        if self.select_best == "accuracy":
+            best_model_index = self.select_best_model()
+            best_model = self.models[best_model_index]
+            best_model_metrics = best_model.case_metrics(case_id)
+        else:
+            best_model_metrics = self.get_best_model_metrics(state)[1]
 
         delays_list = [model.case_metrics(case_id)["predicted_delays"] for model in self.models]
 
         return Metrics(
-            probs=best_model.case_metrics(case_id)["probs"],
+            state_id=state,
+            probs=best_model_metrics["probs"],
             predicted_delays=self.voting_delays(delays_list),
+            # likelihoods=best_model_metrics["likelihoods"]
         )
 
     def sequence_metrics(self, sequence: list[Event]) -> Metrics:
         """Return the probability distribution from the model with the best accuracy so far."""
+        msg = "Adaptive voting is not implemented for sequences."
+        raise NotImplementedError(msg)
         # Get the best model
         best_model_index = self.select_best_model()
         best_model = self.models[best_model_index]
+
+        # best_model_metrics = best_model.sequence_metrics(sequence)
 
         delays_list = [model.sequence_metrics(sequence)["predicted_delays"] for model in self.models]
 
         return Metrics(
             probs=best_model.sequence_metrics(sequence)["probs"],
             predicted_delays=self.voting_delays(delays_list),
+            # likelihoods=best_model_metrics["likelihoods"]
         )
 
 
@@ -1004,8 +1136,10 @@ class Fallback(MultiMiner):
             metrics = model.state_metrics(model_state)
             if metrics["probs"]:
                 return Metrics(
+                    state_id=state,
                     probs=metrics["probs"],
                     predicted_delays=self.voting_delays(delays_list),
+                    # likelihoods=metrics["likelihoods"]
                 )
 
         # If all models return empty metrics
@@ -1036,8 +1170,10 @@ class Fallback(MultiMiner):
                 msg = f"Fallback chooses model {model} with metrics {metrics}"
                 logger.debug(msg)
                 return Metrics(
+                    state_id=self.get_state_from_case(case_id),
                     probs=metrics["probs"],
                     predicted_delays=self.voting_delays(delays_list),
+                    # likelihoods=metrics["likelihoods"]
                 )
 
         # If all models return {}
@@ -1048,6 +1184,9 @@ class Fallback(MultiMiner):
 
         Cascading through the models in order.
         """
+        msg = "Fallback is not implemented for sequences."
+        raise NotImplementedError(msg)
+
         delays_list = [model.sequence_metrics(sequence)["predicted_delays"] for model in self.models]
 
         for model in self.models:
@@ -1058,6 +1197,7 @@ class Fallback(MultiMiner):
                 return Metrics(
                     probs=metrics["probs"],
                     predicted_delays=self.voting_delays(delays_list),
+                    # likelihoods=metrics["likelihoods"]
                 )
 
         # If all models return {}
@@ -1090,9 +1230,11 @@ class Relativize(MultiMiner):
         (state1, state2) = state
 
         probs = self.model1.state_metrics(state1)["probs"]
+        # likelihoods = self.model1.state_metrics(state1)["likelihoods"] # TODO TO BE CHECKED
 
         if probs:
             probs = self.model2.state_metrics(state2)["probs"]
+            # likelihoods = self.model2.state_metrics(state2)["likelihoods"] # TODO TO BE CHECKED
 
         delays_list = [
             model.state_metrics(model_state)["predicted_delays"]
@@ -1100,36 +1242,51 @@ class Relativize(MultiMiner):
         ]
 
         return Metrics(
+            state_id=state,
             probs=probs,
             predicted_delays=self.voting_delays(delays_list),
+            # likelihoods=likelihoods
         )
 
     def case_metrics(self, case_id: CaseId) -> Metrics:
         """Return the first non-{} probabilities from the models, cascading through the models in order."""
-        probs = self.model1.case_metrics(case_id)["probs"]
+        metrics = self.model1.case_metrics(case_id)
+        probs = metrics["probs"]
+        # likelihoods = metrics["likelihoods"]
 
         if probs:
-            probs = self.model2.case_metrics(case_id)["probs"]
+            metrics = self.model2.case_metrics(case_id)
+            probs = metrics["probs"]
+            # likelihoods = metrics["likelihoods"]
 
         delays_list = [model.case_metrics(case_id)["predicted_delays"] for model in self.models]
 
         return Metrics(
+            state_id=self.get_state_from_case(case_id),
             probs=probs,
             predicted_delays=self.voting_delays(delays_list),
+            # likelihoods=likelihoods
         )
 
     def sequence_metrics(self, sequence: list[Event]) -> Metrics:
         """Return the first non-{} probabilities from the models for the given sequence."""
-        probs = self.model1.sequence_metrics(sequence)["probs"]
+        msg = "Relativize is not implemented for sequences."
+        raise NotImplementedError(msg)
+        metrics = self.model1.sequence_metrics(sequence)
+        probs = metrics["probs"]
+        # likelihoods = metrics["likelihoods"]
 
         if probs:
-            probs = self.model2.sequence_metrics(sequence)["probs"]
+            metrics = self.model2.sequence_metrics(sequence)
+            probs = metrics["probs"]
+            # likelihoods = metrics["likelihoods"]
 
         delays_list = [model.sequence_metrics(sequence)["predicted_delays"] for model in self.models]
 
         return Metrics(
             probs=probs,
             predicted_delays=self.voting_delays(delays_list),
+            # likelihoods=likelihoods
         )
 
 
@@ -1176,9 +1333,12 @@ class Alergia(BasicMiner):
 
         The state should be a probabilistic automaton.
         """
+        probs = self.get_probability_distribution(state)
         return Metrics(
-            probs=self.get_probability_distribution(state),
+            state_id=state,
+            probs=probs,
             predicted_delays={},
+            # likelihoods=probs
         )
 
     def case_metrics(self, case_id: CaseId) -> Metrics:  # noqa: ARG002
@@ -1198,7 +1358,13 @@ class Alergia(BasicMiner):
             self.algorithm.step_to(symbol[0], symbol[1])
 
         # Get probability distribution for the current state
-        return Metrics(probs=self.get_probability_distribution(self.algorithm.current_state), predicted_delays={})
+        probs = self.get_probability_distribution(self.algorithm.current_state)
+        return Metrics(
+            state_id=self.algorithm.current_state,
+            probs=probs,
+            predicted_delays={},
+            # likelihoods=probs
+        )
 
     def next_state(self, current_state: ComposedState, activity: ActivityName) -> ComposedState:
         """Take a transition from the current state."""
@@ -1215,7 +1381,15 @@ class Alergia(BasicMiner):
 class NeuralNetworkMiner(StreamingMiner):
     device: torch.device | None
 
-    def __init__(self, *args, model: RNNModel | LSTMModel, batch_size: int, optimizer, criterion, **kwargs) -> None:
+    def __init__(
+            self,
+            *args,
+            model: RNNModel | LSTMModel,
+            batch_size: int,
+            optimizer,
+            criterion,
+            **kwargs
+        ) -> None:
         super().__init__(*args, **kwargs)
         self.device = model.device
         self.model = model.to(device=self.device)  # The neural network, make sure it's at the device
@@ -1228,6 +1402,11 @@ class NeuralNetworkMiner(StreamingMiner):
 
         self.activity_index = {}
         self.index_activity = {}
+
+    def get_state_from_case(self, case_id: CaseId) -> StateId:
+        """Not implemented."""
+        msg = "Not implemented for NeuralNetworkMiner."
+        raise NotImplementedError(msg)
 
     def state_act_likelihood(self, state: ComposedState | None, next_activity: ActivityName) -> float:
         """Return the likelihood of the sequence based on the metrics from the models."""
@@ -1369,9 +1548,12 @@ class NeuralNetworkMiner(StreamingMiner):
         if not index_sequence or len(index_sequence) < 1:
             return empty_metrics()
 
+        probs = self.idx_sequence_probs(index_sequence)
         return Metrics(
-            probs=self.idx_sequence_probs(index_sequence),
+            state_id=-1,
+            probs=probs,
             predicted_delays={},
+            # likelihoods=probs
         )
 
     def sequence_metrics(self, sequence: list[Event]) -> Metrics:
@@ -1380,6 +1562,8 @@ class NeuralNetworkMiner(StreamingMiner):
         ...along with the
         probability of the top activity.
         """
+        msg = "NeuralNetworkMiner does not support sequence metrics."
+        raise NotImplementedError(msg)
         if not sequence or len(sequence) < 1:
             return empty_metrics()
 
@@ -1392,9 +1576,11 @@ class NeuralNetworkMiner(StreamingMiner):
                 return empty_metrics()
             index_sequence.append(activity_idx)
 
+        probs = self.idx_sequence_probs(index_sequence)
         return Metrics(
-            probs=self.idx_sequence_probs(index_sequence),
+            probs=probs,
             predicted_delays={},
+            # likelihoods=probs
         )
 
     def idx_sequence_probs(self, index_sequence: list[int]) -> ProbDistr:
