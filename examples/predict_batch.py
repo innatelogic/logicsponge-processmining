@@ -67,7 +67,6 @@ NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 #     f"ngram_{i+1}_shorts" for i in WINDOW_RANGE
 # ]
 
-NGRAM_TOINI = True
 # ============================================================
 
 mpl.use("Agg")
@@ -252,7 +251,6 @@ for iteration in range(n_iterations):
                 algorithm=NGram(
                     window_length=window_length,
                     recover_lengths=recovery_lengths,
-                    return_to_initial=NGRAM_TOINI,
                 ),
                 config=config,
             )
@@ -260,7 +258,7 @@ for iteration in range(n_iterations):
             # Use the default NGram algorithm without recovery
             NGRAM_MODELS[ngram_name] = BasicMiner(
                 algorithm=NGram(
-                    window_length=window_length, recover_lengths=[], return_to_initial=NGRAM_TOINI
+                    window_length=window_length, recover_lengths=[]
                 ),
                 config=config,
             )
@@ -272,61 +270,61 @@ for iteration in range(n_iterations):
     fallback = Fallback(
         models=[
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-            BasicMiner(algorithm=NGram(window_length=4, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=4)),
         ],
         config=config,
     )
 
     fallback_ngram8to2 = Fallback(
         models=[
-            BasicMiner(algorithm=NGram(window_length=7, return_to_initial=NGRAM_TOINI)),
-            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=7)),
+            BasicMiner(algorithm=NGram(window_length=1)),
         ],
         config=config,
     )
 
     fallback_ngram8to3 = Fallback(
         models=[
-            BasicMiner(algorithm=NGram(window_length=7, return_to_initial=NGRAM_TOINI)),
-            BasicMiner(algorithm=NGram(window_length=2, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=7)),
+            BasicMiner(algorithm=NGram(window_length=2)),
         ],
         config=config,
     )
 
     fallback_ngram8to4 = Fallback(
         models=[
-            BasicMiner(algorithm=NGram(window_length=7, return_to_initial=NGRAM_TOINI)),
-            BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=7)),
+            BasicMiner(algorithm=NGram(window_length=3)),
         ],
         config=config,
     )
 
     fallback_ngram10to2 = Fallback(
         models=[
-            BasicMiner(algorithm=NGram(window_length=9, return_to_initial=NGRAM_TOINI)),
-            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=9)),
+            BasicMiner(algorithm=NGram(window_length=1)),
         ],
         config=config,
     )
 
     fallback_ngram13to2 = Fallback(
         models=[
-            BasicMiner(algorithm=NGram(window_length=12, return_to_initial=NGRAM_TOINI)),
-            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=12)),
+            BasicMiner(algorithm=NGram(window_length=1)),
         ],
         config=config,
     )
 
     fallback_ngram8to_ooo = Fallback(
         models=[
-            BasicMiner(algorithm=NGram(window_length=7, min_total_visits=10, return_to_initial=NGRAM_TOINI)),
-            BasicMiner(algorithm=NGram(window_length=6, min_total_visits=10, return_to_initial=NGRAM_TOINI)),
-            BasicMiner(algorithm=NGram(window_length=5, return_to_initial=NGRAM_TOINI)),
-            BasicMiner(algorithm=NGram(window_length=4, return_to_initial=NGRAM_TOINI)),
-            BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_TOINI)),
-            BasicMiner(algorithm=NGram(window_length=2, return_to_initial=NGRAM_TOINI)),
-            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_TOINI)),
-            BasicMiner(algorithm=NGram(window_length=0, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=7, min_total_visits=10)),
+            BasicMiner(algorithm=NGram(window_length=6, min_total_visits=10)),
+            BasicMiner(algorithm=NGram(window_length=5)),
+            BasicMiner(algorithm=NGram(window_length=4)),
+            BasicMiner(algorithm=NGram(window_length=3)),
+            BasicMiner(algorithm=NGram(window_length=2)),
+            BasicMiner(algorithm=NGram(window_length=1)),
+            BasicMiner(algorithm=NGram(window_length=0)),
         ],
         config=config,
     )
@@ -335,41 +333,41 @@ for iteration in range(n_iterations):
         models=[
             BasicMiner(
                 algorithm=NGram(
-                    window_length=9, min_total_visits=10, min_max_prob=0.9, return_to_initial=NGRAM_TOINI
+                    window_length=9, min_total_visits=10, min_max_prob=0.9
                 )
             ),
             BasicMiner(
                 algorithm=NGram(
-                    window_length=8, min_total_visits=10, min_max_prob=0.9, return_to_initial=NGRAM_TOINI
+                    window_length=8, min_total_visits=10, min_max_prob=0.9
                 )
             ),
             BasicMiner(
                 algorithm=NGram(
-                    window_length=7, min_total_visits=10, min_max_prob=0.8, return_to_initial=NGRAM_TOINI
+                    window_length=7, min_total_visits=10, min_max_prob=0.8
                 )
             ),
             BasicMiner(
                 algorithm=NGram(
-                    window_length=6, min_total_visits=10, min_max_prob=0.7, return_to_initial=NGRAM_TOINI
+                    window_length=6, min_total_visits=10, min_max_prob=0.7
                 )
             ),
             BasicMiner(
                 algorithm=NGram(
-                    window_length=5, min_total_visits=10, min_max_prob=0.6, return_to_initial=NGRAM_TOINI
+                    window_length=5, min_total_visits=10, min_max_prob=0.6
                 )
             ),
             BasicMiner(
                 algorithm=NGram(
-                    window_length=4, min_total_visits=10, min_max_prob=0.0, return_to_initial=NGRAM_TOINI
+                    window_length=4, min_total_visits=10, min_max_prob=0.0
                 )
             ),
             BasicMiner(
                 algorithm=NGram(
-                    window_length=3, min_total_visits=10, min_max_prob=0.0, return_to_initial=NGRAM_TOINI
+                    window_length=3, min_total_visits=10, min_max_prob=0.0
                 ),
             ),
             BasicMiner(algorithm=NGram(window_length=2, min_total_visits=10, min_max_prob=0.0)),
-            BasicMiner(algorithm=NGram(window_length=1, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=1)),
         ],
         config=config,
     )
@@ -378,28 +376,29 @@ for iteration in range(n_iterations):
         models=[
             BasicMiner(algorithm=Bag()),
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-            BasicMiner(algorithm=NGram(window_length=2, return_to_initial=NGRAM_TOINI)),
-            BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_TOINI)),
-            BasicMiner(algorithm=NGram(window_length=4, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=2)),
+            BasicMiner(algorithm=NGram(window_length=3)),
+            BasicMiner(algorithm=NGram(window_length=4)),
             # BasicMiner(algorithm=NGram(window_length=5)),
             # BasicMiner(algorithm=NGram(window_length=6)),
         ],
         config=config,
     )
 
+    optional_num_ngrams = 3
     adaptive_voting_list = [
         AdaptiveVoting(
             models=[
                 BasicMiner(algorithm=Bag()),
                 BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-                BasicMiner(algorithm=NGram(window_length=grams[0], min_total_visits=10, return_to_initial=NGRAM_TOINI)),
-                BasicMiner(algorithm=NGram(window_length=grams[1], min_total_visits=10, return_to_initial=NGRAM_TOINI)),
-                BasicMiner(algorithm=NGram(window_length=grams[2], min_total_visits=10, return_to_initial=NGRAM_TOINI)),
+                BasicMiner(algorithm=NGram(window_length=grams[0], min_total_visits=10)),
+                BasicMiner(algorithm=NGram(window_length=grams[1], min_total_visits=10)),
+                BasicMiner(algorithm=NGram(window_length=grams[2], min_total_visits=10)),
             ] + (
                 [
-                    BasicMiner(algorithm=NGram(window_length=grams[3], min_total_visits=10, return_to_initial=NGRAM_TOINI))
+                    BasicMiner(algorithm=NGram(window_length=grams[optional_num_ngrams], min_total_visits=10))
                 ]
-                if len(grams) > 3 else []
+                if len(grams) > optional_num_ngrams else []
             ),
             select_best=select_best_arg,
             config=config
@@ -413,9 +412,9 @@ for iteration in range(n_iterations):
     #     models=[
     #         BasicMiner(algorithm=Bag()),
     #         BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-    #         BasicMiner(algorithm=NGram(window_length=2, return_to_initial=NGRAM_TOINI)),
-    #         BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_TOINI)),
-    #         BasicMiner(algorithm=NGram(window_length=4, return_to_initial=NGRAM_TOINI)),
+    #         BasicMiner(algorithm=NGram(window_length=2)),
+    #         BasicMiner(algorithm=NGram(window_length=3)),
+    #         BasicMiner(algorithm=NGram(window_length=4)),
     #         # BasicMiner(algorithm=NGram(window_length=5)),
     #         # BasicMiner(algorithm=NGram(window_length=6)),
     #     ],
@@ -428,13 +427,13 @@ for iteration in range(n_iterations):
                 models=[
                     BasicMiner(algorithm=Bag()),
                     BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-                    BasicMiner(algorithm=NGram(window_length=grams[0], return_to_initial=NGRAM_TOINI)),
-                    BasicMiner(algorithm=NGram(window_length=grams[1], return_to_initial=NGRAM_TOINI)),
-                    BasicMiner(algorithm=NGram(window_length=grams[2], return_to_initial=NGRAM_TOINI)),
+                    BasicMiner(algorithm=NGram(window_length=grams[0])),
+                    BasicMiner(algorithm=NGram(window_length=grams[1])),
+                    BasicMiner(algorithm=NGram(window_length=grams[2])),
                 ] + (
                     [
-                        BasicMiner(algorithm=NGram(window_length=grams[3], return_to_initial=NGRAM_TOINI))
-                    ] if len(grams) > 3 else []
+                        BasicMiner(algorithm=NGram(window_length=grams[optional_num_ngrams]))
+                    ] if len(grams) > optional_num_ngrams else []
                 ),
                 config=config,
             )
@@ -446,15 +445,15 @@ for iteration in range(n_iterations):
                 models=[
                     BasicMiner(algorithm=Bag()),
                     BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-                    BasicMiner(algorithm=NGram(window_length=grams[0], min_total_visits=10, return_to_initial=NGRAM_TOINI)),
-                    BasicMiner(algorithm=NGram(window_length=grams[1], min_total_visits=10, return_to_initial=NGRAM_TOINI)),
-                    BasicMiner(algorithm=NGram(window_length=grams[2], min_total_visits=10, return_to_initial=NGRAM_TOINI)),
+                    BasicMiner(algorithm=NGram(window_length=grams[0], min_total_visits=10)),
+                    BasicMiner(algorithm=NGram(window_length=grams[1], min_total_visits=10)),
+                    BasicMiner(algorithm=NGram(window_length=grams[2], min_total_visits=10)),
                 ]
                 + (
                     [
-                        BasicMiner(algorithm=NGram(window_length=grams[3], min_total_visits=10, return_to_initial=NGRAM_TOINI))
+                        BasicMiner(algorithm=NGram(window_length=grams[optional_num_ngrams], min_total_visits=10))
                     ]
-                    if len(grams) > 3 else []
+                    if len(grams) > optional_num_ngrams else []
                 ),
             )
             for grams in VOTING_NGRAMS
@@ -464,7 +463,7 @@ for iteration in range(n_iterations):
     relativize = Relativize(
         models=[
             BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-            BasicMiner(algorithm=NGram(window_length=3, return_to_initial=NGRAM_TOINI)),
+            BasicMiner(algorithm=NGram(window_length=3)),
         ],
         config=config,
     )

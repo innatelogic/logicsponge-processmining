@@ -642,13 +642,11 @@ class NGram(BaseStructure):
         *args,  # noqa: ANN002
         window_length: int = 1,
         recover_lengths: list[int] | None = None,
-        return_to_initial: bool = False,
         **kwargs,  # noqa: ANN003
     ) -> None:
         """Initialize the NGram structure."""
         super().__init__(*args, **kwargs)
         self.window_length = window_length
-        self.return_to_initial = return_to_initial
 
         self.recover_lengths = [self.window_length, *(sorted(recover_lengths, reverse=True) if recover_lengths else [])]
         logger.debug("Recover lengths: %s", self.recover_lengths)
