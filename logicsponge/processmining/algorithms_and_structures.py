@@ -656,6 +656,8 @@ class NGram(BaseStructure):
         # Maps access string to its state; will be used to do backtracking in inference if transition is not possible.
         self.access_strings = {(): self.initial_state}
 
+        self.window_complete = False  # Indicates if the window is complete (used for backtracking)
+
     def __str__(self) -> str:
         """Represent as a string of the NGram structure."""
         return (
@@ -734,13 +736,27 @@ class NGram(BaseStructure):
 
     def next_state(self, state: StateId | None, activity: ActivityName) -> StateId | None:
         """Overwrite next_state from superclass to implement backoff (backtracking)."""
-        # When state is None (unknown prefix), we initiate the recovery process from the initial state
-        state = state if state is not None else self.initial_state
+        if state is None:
+            return None
 
         next_state = super().next_state(abs(state), activity)
 
+        if next_state is None:
+            # If the next state is None, we need to try to recover it
+            # by checking the access string of the current state
+            access_string = self.state_info[state]["access_string"] + (activity,)
+            access_string = access_string[-self.window_length :]
+
+            for recovered_length in range(len(access_string)):
+                recovered_string = access_string[recovered_length:]
+                # Check if the access string exists in the dictionary
+                # and if the state is not already visited
+                if recovered_string in self.access_strings:
+                    next_state = self.access_strings[recovered_string]
+                    break
+
         # Mark the recovered state (when not None) with a negative sign
-        next_state = (
+        return (
             -next_state
             if (
                 next_state is not None
@@ -750,7 +766,7 @@ class NGram(BaseStructure):
             else next_state
         )
 
-        if self.state_info[state]["level"] == self.window_length and next_state is None:
+        if (self.state_info[state]["level"] == self.window_length and next_state is None):
             full_access_string = self.state_info[state]["access_string"] + (activity,)
             access_string = full_access_string[-self.window_length :]
 
