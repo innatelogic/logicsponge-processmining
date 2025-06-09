@@ -117,7 +117,7 @@ torch.cuda.manual_seed(123)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-NN_TRAINING = False
+NN_TRAINING = True
 SHOW_DELAYS = False
 
 # ============================================================
@@ -651,8 +651,8 @@ for iteration in range(n_iterations):
     #     iteration_data[f"Top-{k+1}"] = []
 
     for strategy_name, (strategy, test_data) in strategies.items():
-        if "hard" in strategy_name:
-            continue
+        # if "hard" in strategy_name:
+        #     continue
         # if not strategy_name.startswith("ngram_"):
         #     continue
 
@@ -947,11 +947,11 @@ for model_name, stats in all_metrics.items():
     results["Std"].append(std_acc)
 
     if len(stats["num_states"]) > 0 and None not in stats["num_states"]:
-        mean_num_states = np.mean(stats["num_states"])
+        final_num_states = stats["num_states"][-1]
     else:
-        mean_num_states = None
+        final_num_states = None
 
-    results["States"].append(mean_num_states)
+    results["States"].append(final_num_states)
 
     if len(stats["mean_delay_error"]) > 0 and None not in stats["mean_delay_error"]:
         mean_delay_error = timedelta(seconds=float(np.mean(stats["mean_delay_error"])))
