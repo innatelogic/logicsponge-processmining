@@ -9,10 +9,31 @@ from typing import Any, TypedDict
 
 CaseId = str | tuple[str, ...]
 
-StateId = int
+class StateId(int):
+    """A class representing a state identifier."""
+
+    in_recovery: bool = False
+
+    def __new__(cls, value: int) -> "StateId":
+        """Create a new StateId instance."""
+        obj = int.__new__(cls, value)
+        obj.in_recovery = False
+        return obj
+
+    @classmethod
+    def with_recovery(cls, value: int) -> "StateId":
+        """Create a new StateId instance with recovery mode enabled."""
+        obj = int.__new__(cls, value)
+        obj.in_recovery = True
+        return obj
+
+    def __repr__(self) -> str:
+        """Return a string representation of the StateId."""
+        return f"StateId({int(self)}, in_recovery={self.in_recovery})"
+
 ComposedState = Any  # QUESTION: Is there a way to write this? ComposedState = StateId | tuple[ComposedState, ...]
 
-ActivityName = str | tuple[str, ...]
+ActivityName = str | tuple[str, ...] # QUESTION: why tuple[str, ...]?
 
 Prediction = dict[str, Any]
 
@@ -27,7 +48,6 @@ class Metrics(TypedDict):
     Attributes:
         probs (ProbDistr): Probability distribution of activities.
         predicted_delays (ActivityDelays): Predicted delays for activities.
-        likelihood (float): Likelihood of the metrics, default is 1.0.
 
     """
 

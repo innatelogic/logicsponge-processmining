@@ -280,7 +280,7 @@ class BaseStructure(PDFA, ABC):
         If no state ID is provided, ID is assigned based on current number of states.
         """
         if state_id is None:
-            state_id = len(self.state_info)
+            state_id = StateId(len(self.state_info))
 
         self.state_info[state_id] = {}
         self.state_info[state_id]["total_visits"] = 0
@@ -511,7 +511,7 @@ class BaseStructure(PDFA, ABC):
     #     return self.get_probabilities(prev_state).get(activity, 0.0)
 
 
-    def state_act_likelihood(self, state: StateId | None, next_activity: ActivityName) -> float:
+    def state_act_likelihood(self, state: StateId, next_activity: ActivityName) -> float:
         """Return the likelihood of the given activity given a current state."""
         # Check if the activity is valid for the current state
         if state not in self.state_info:
@@ -537,7 +537,7 @@ class BaseStructure(PDFA, ABC):
         """Return the likelihood of the given activities given a current state."""
         likelihoods = {}
         for activity in eligible_activities:
-            likelihoods[activity] = self.state_act_likelihood(state, activity)
+            likelihoods[activity] = self.state_act_likelihood(state, activity) if state is not None else 0.0
         return likelihoods
 
     def state_metrics(self, state: StateId | None) -> Metrics:
@@ -737,7 +737,7 @@ class NGram(BaseStructure):
         # if state is None:
         #     return None
 
-        next_state = super().next_state(abs(state) if state is not None else state, activity)
+        next_state = super().next_state(state, activity)
 
         if next_state is None:
             # If the next state is None, we need to try to recover it
@@ -758,16 +758,23 @@ class NGram(BaseStructure):
                     # Worst case: self.access_strings[()] = self.initial_state
                     break
 
+            if next_state is not None:
+                next_state.in_recovery = True
+
+        if (next_state is not None) and (self.state_info[next_state]["level"] >= self.window_length):
+            next_state.in_recovery = False
+
+        return next_state
         # Mark the recovered state (when not None) with a negative sign
-        return (
-            -next_state
-            if (
-                next_state is not None
-                and (state is None or state < 0)
-                and self.state_info[next_state]["level"] < self.window_length
-            )
-            else next_state
-        )
+        # return (
+        #     -next_state
+        #     if (
+        #         next_state is not None
+        #         and (state is None or state < 0)
+        #         and self.state_info[next_state]["level"] < self.window_length
+        #     )
+        #     else next_state
+        # )
 
         if (self.state_info[state]["level"] == self.window_length and next_state is None):
             full_access_string = self.state_info[state]["access_string"] + (activity,)
