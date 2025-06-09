@@ -193,7 +193,7 @@ class Evaluation(ls.FunctionTerm):
 
         self.likelihoods: dict[int, float] = {}
         self.sequence_lengths: dict[int, int] = {}
-        self.perplexities: dict[int, float] = {}
+        # self.perplexities: dict[int, float] = {}
 
     def f(self, item: DataItem) -> DataItem:
         if item["case_id"] not in self.sequence_lengths:
@@ -203,11 +203,11 @@ class Evaluation(ls.FunctionTerm):
         self.likelihoods[item["case_id"]] *= item["likelihood"]
         self.sequence_lengths[item["case_id"]] += 1
 
-        # Compute perplexity
-        normalized_likelihood = self.likelihoods[item["case_id"]] ** (1 / self.sequence_lengths[item["case_id"]])
-        self.perplexities[item["case_id"]] = compute_seq_perplexity(normalized_likelihood, log_likelihood=False)
+        # # Compute perplexity
+        # normalized_likelihood = self.likelihoods[item["case_id"]] ** (1 / self.sequence_lengths[item["case_id"]])
+        # self.perplexities[item["case_id"]] = compute_seq_perplexity(normalized_likelihood, log_likelihood=False)
 
-        perplexity_stats = compute_perplexity_stats(list(self.perplexities.values()))
+        # perplexity_stats = compute_perplexity_stats(list(self.perplexities.values()))
 
         self.latency_sum += item["latency"]
         self.latency_max = max(item["latency"], self.latency_max)
@@ -298,7 +298,7 @@ class Evaluation(ls.FunctionTerm):
                 "mean_actual_delay": mean_actual_delay,
                 "mean_normalized_error": mean_normalized_error,
                 "delay_predictions": self.delay_count,
-                **perplexity_stats,
+                # **perplexity_stats,
             }
         )
 
