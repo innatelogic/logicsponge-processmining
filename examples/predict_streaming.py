@@ -337,6 +337,9 @@ metrics_attributes = [
 ]
 metrics_list = [f"{model}.{attribute}" for model in models for attribute in metrics_attributes]
 
+train_latency_list = [f"{model}.train_latency_mean" for model in models]
+predict_latency_list = [f"{model}.predict_latency_mean" for model in models]
+
 latency_mean_list = [f"{model}.latency_mean" for model in models]
 
 delay_attributes = [
@@ -348,7 +351,7 @@ delay_attributes = [
 
 delay_list = [f"{model}.{attribute}" for model in models for attribute in delay_attributes]
 
-all_attributes = ["index", *metrics_list, *latency_mean_list, *delay_list]
+all_attributes = ["index", *metrics_list, *train_latency_list, *predict_latency_list, *latency_mean_list] #, *delay_list]
 
 streamer = IteratorStreamer(data_iterator=dataset)
 
