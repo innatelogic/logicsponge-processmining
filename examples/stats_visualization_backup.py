@@ -702,13 +702,12 @@ if __name__ == "__main__":
 
             # Get data from the latest batch_index for this model
             latest_entry = model_df.loc[model_df["batch_index"].idxmax()]
-
             model_stats = {
                 "strategy": model_name,
                 "accuracy": latest_entry.get("accuracy", 0),
                 # Use latency_mean as evaluation_time, default to 0 if not present
                 "evaluation_time": latest_entry.get("latency_mean", 0),
-                "perplexity": 0,  # Perplexity is not typically in streaming CSVs
+                "perplexity": latest_entry.get("pp_harmonic_mean", 0),
                 "per_state_stats": {},  # No per-state stats in streaming CSVs
             }
             log_data_streaming.append(model_stats)
