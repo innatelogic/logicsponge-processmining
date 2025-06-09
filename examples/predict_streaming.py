@@ -329,6 +329,7 @@ models = [
 
 metrics_attributes = [
     "accuracy",
+    "top_k_accuracy",
     "pp_arithmetic_mean",
     "pp_harmonic_mean",
     "pp_median",
@@ -421,18 +422,18 @@ sponge = (
         | (soft_voting * Evaluation("soft_voting"))
         # Add all soft_voting_predictors to the pipeline
         | ((predictor * Evaluation(name)) for name, predictor in soft_voting_predictors.items())
-        # | (
-        #     AddStartSymbol(start_symbol=start_symbol)
-        #     * lstm
-        #     * DataItemFilter(data_item_filter=start_filter)
-        #     * Evaluation("lstm")
-        # )
+        | (
+            AddStartSymbol(start_symbol=start_symbol)
+            * lstm
+            * DataItemFilter(data_item_filter=start_filter)
+            * Evaluation("lstm")
+        )
     )
     * ls.MergeToSingleStream()
     * ls.Flatten()
     * ls.AddIndex(key="index", index=1)
     * ls.KeyFilter(keys=all_attributes)
-    * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 100 == 0 or item["index"] > len_dataset - 10)
+    * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 100 == 0 or item["index"] == len_dataset - 1)
     * (PrintEval() | CSVStatsWriter(csv_path=stats_file_path))
     # * ls.Print()
     # * (dashboard.Plot("Accuracy (%)", x="index", y=accuracy_list))

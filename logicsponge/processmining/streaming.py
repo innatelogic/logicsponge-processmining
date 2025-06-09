@@ -176,6 +176,7 @@ class Evaluation(ls.FunctionTerm):
         super().__init__(*args, **kwargs)
         self.top_activities = top_activities
         self.correct_predictions = 0
+        self.top_k_correct_preds = 0
         self.total_predictions = 0
         self.missing_predictions = 0
 
@@ -217,11 +218,14 @@ class Evaluation(ls.FunctionTerm):
 
         if item["prediction"] is None:
             self.missing_predictions += 1
-        elif self.top_activities:
-            if item["activity"] in item["prediction"]["top_k_activities"]:
+        else:
+            if self.top_activities and item["activity"] in item["prediction"]["top_k_activities"]:
+                    self.correct_predictions += 1
+            elif item["activity"] == item["prediction"]["activity"]:
                 self.correct_predictions += 1
-        elif item["activity"] == item["prediction"]["activity"]:
-            self.correct_predictions += 1
+
+            if item["activity"] in item["prediction"]["top_k_activities"]:
+                self.top_k_correct_preds += 1
 
         self.total_predictions += 1
 
@@ -282,6 +286,9 @@ class Evaluation(ls.FunctionTerm):
             mean_normalized_error = None
 
         accuracy = self.correct_predictions / self.total_predictions * 100 if self.total_predictions > 0 else 0
+        top_k_accuracy = (
+            self.top_k_correct_preds / self.total_predictions * 100 if self.total_predictions > 0 else 0
+        )
 
         return DataItem(
             {
@@ -289,7 +296,9 @@ class Evaluation(ls.FunctionTerm):
                 "correct_predictions": self.correct_predictions,
                 "total_predictions": self.total_predictions,
                 "missing_predictions": self.missing_predictions,
+                "top_k_correct_preds": self.top_k_correct_preds,
                 "accuracy": accuracy,
+                "top_k_accuracy": top_k_accuracy,
                 "predict_latency_mean": self.predict_latency_sum / self.total_predictions,
                 "train_latency_mean": self.train_latency_sum / self.total_predictions,
                 "latency_mean": self.latency_sum / self.total_predictions,
