@@ -734,15 +734,19 @@ class NGram(BaseStructure):
 
     def next_state(self, state: StateId | None, activity: ActivityName) -> StateId | None:
         """Overwrite next_state from superclass to implement backoff (backtracking)."""
-        if state is None:
-            return None
+        # if state is None:
+        #     return None
 
-        next_state = super().next_state(abs(state), activity)
+        next_state = super().next_state(abs(state) if state is not None else state, activity)
 
         if next_state is None:
             # If the next state is None, we need to try to recover it
             # by checking the access string of the current state
-            access_string = self.state_info[state]["access_string"] + (activity,)
+            access_string = (
+                self.state_info[state]["access_string"] + (activity,)
+                if state is not None
+                else (str(activity),)
+            )
             access_string = access_string[-self.window_length :]
 
             for recovered_length in range(len(access_string)):
@@ -751,6 +755,7 @@ class NGram(BaseStructure):
                 # and if the state is not already visited
                 if recovered_string in self.access_strings:
                     next_state = self.access_strings[recovered_string]
+                    # Worst case: self.access_strings[()] = self.initial_state
                     break
 
         # Mark the recovered state (when not None) with a negative sign
