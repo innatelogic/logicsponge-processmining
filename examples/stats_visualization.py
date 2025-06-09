@@ -844,6 +844,8 @@ if __name__ == "__main__":
                 "strategy": model_name,
                 "strategy_accuracy": latest_entry.get("accuracy", 0),
                 # Use latency_mean as evaluation_time, default to 0 if not present
+                "predict_latency": latest_entry.get("predict_latency_mean", 0),
+                "train_latency": latest_entry.get("train_latency_mean", 0),
                 "evaluation_time": latest_entry.get("latency_mean", 0),
                 "perplexity": latest_entry.get("pp_harmonic_mean"),
                 "per_state_stats": {},  # No per-state stats in streaming CSVs
