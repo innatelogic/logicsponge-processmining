@@ -1,5 +1,5 @@
 import csv
-import logging  # noqa: D100
+import logging
 import time
 from collections.abc import Iterator
 from datetime import timedelta
@@ -88,7 +88,7 @@ class DataPreparation(ls.FunctionTerm):
         """
         # Construct the new DataItem with case_id and activity values
         return DataItem(
-            {"case_id": handle_keys(self.case_keys, item), "activity": handle_keys(self.activity_keys, item)}
+            {"case_id": handle_keys(self.case_keys, item), "activity": handle_keys(self.activity_keys, item)} # type: ignore
         )
 
 
@@ -114,13 +114,17 @@ class StreamingActivityPredictor(ls.FunctionTerm):
             case_id = item["case_id"]
 
             start_time = time.time()
-
             metrics = self.strategy.case_metrics(case_id)
             prediction = metrics_prediction(metrics, self.strategy.config)
-            likelihood = self.strategy.state_act_likelihood(metrics["state_id"], item["activity"])
+            predict_latency = time.time() - start_time  # time taken to compute prediction
+
+            # pause_time = time.time()
+            # likelihood = self.strategy.state_act_likelihood(metrics["state_id"], item["activity"])
+            # start_time += time.time() - pause_time  # Adjust start time to account for the pause
 
             # prediction = self.strategy.case_predictions.get(item["case_id"], None)
 
+            start_time_training = time.time()
             event: Event = {
                 "case_id": item["case_id"],
                 "activity": item["activity"],
@@ -128,6 +132,7 @@ class StreamingActivityPredictor(ls.FunctionTerm):
             }
 
             self.strategy.update(event)
+            training_latency = time.time() - start_time_training  # time taken to update the model
 
             end_time = time.time()
             latency = (end_time - start_time) * 1000  # latency in milliseconds (ms)
@@ -154,8 +159,10 @@ class StreamingActivityPredictor(ls.FunctionTerm):
                     "case_id": item["case_id"],
                     "activity": item["activity"],  # actual activity
                     "prediction": prediction,  # containing predicted activity
-                    "likelihood": likelihood,
+                    "likelihood": 0.0,
                     "latency": latency,
+                    "predict_latency": predict_latency * 1_000_000,
+                    "train_latency": training_latency * 1_000_000,
                     "delay_error": delay_error,
                     "actual_delay": actual_delay,
                     "predicted_delay": predicted_delay,
@@ -171,6 +178,10 @@ class Evaluation(ls.FunctionTerm):
         self.correct_predictions = 0
         self.total_predictions = 0
         self.missing_predictions = 0
+
+        self.predict_latency_sum = 0
+        self.train_latency_sum = 0
+
         self.latency_sum = 0
         self.latency_max = 0
         self.last_timestamps = {}  # records last timestamps for every case
@@ -200,6 +211,9 @@ class Evaluation(ls.FunctionTerm):
 
         self.latency_sum += item["latency"]
         self.latency_max = max(item["latency"], self.latency_max)
+
+        self.predict_latency_sum += item["predict_latency"]
+        self.train_latency_sum += item["train_latency"]
 
         if item["prediction"] is None:
             self.missing_predictions += 1
@@ -276,6 +290,8 @@ class Evaluation(ls.FunctionTerm):
                 "total_predictions": self.total_predictions,
                 "missing_predictions": self.missing_predictions,
                 "accuracy": accuracy,
+                "predict_latency_mean": self.predict_latency_sum / self.total_predictions,
+                "train_latency_mean": self.train_latency_sum / self.total_predictions,
                 "latency_mean": self.latency_sum / self.total_predictions,
                 "latency_max": self.latency_max,
                 "mean_delay_error": mean_delay_error,
@@ -420,7 +436,7 @@ class CSVStatsWriter(ls.FunctionTerm):
                 if needs_header:
                     writer.writeheader()
 
-                writer.writerows(records_to_write)
+                writer.writerows(records_to_write) # type: ignore
         except OSError as e:
             logger.exception("Error writing to CSV file %s. %s", self.csv_path, e)
         except Exception as e:
