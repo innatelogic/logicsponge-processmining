@@ -401,11 +401,11 @@ class StreamingMiner(ABC):
     def state_act_likelihoods(
         self,
         state: StateId | None,
-        eligible_activities: list[ActivityName]
+        wanted_activities: list[ActivityName]
     ) -> dict[ActivityName, float]:
-        """Return the likelihood of the given activities given a current state."""
+        """Return the likelihood of the wanted activities given a current state."""
         likelihoods = {}
-        for activity in eligible_activities:
+        for activity in wanted_activities:
             likelihoods[activity] = self.state_act_likelihood(state, activity)
         return likelihoods
 
