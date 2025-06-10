@@ -126,6 +126,7 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 NN_TRAINING = True
+SKIP_LSTM = False
 SHOW_DELAYS = False
 
 # ============================================================
@@ -193,7 +194,7 @@ all_metrics = {
         *[f"soft voting {grams}*" for grams in VOTING_NGRAMS],
         "alergia",
         "LSTM",
-        "transformer"
+        "transformer",
         "bayesian train",
         "bayesian test",
         "bayesian t+t",
@@ -485,20 +486,6 @@ for iteration in range(n_iterations):
         "bayesian test nonsingle": BayesianClassifier(single_occurence_allowed=False, config=config),
         "bayesian t+t nonsingle": BayesianClassifier(single_occurence_allowed=False, config=config),
     }
-    # bayesian_classifier_train = BayesianClassifier(config=config)
-    # bayesian_classifier_train.initialize_memory(train_set_transformed)
-
-    # bayesian_classifier_test = BayesianClassifier(config=config)
-    # bayesian_classifier_test.initialize_memory(test_set_transformed)
-
-    # bayesian_classifier_train_test = BayesianClassifier(config=config)
-    # bayesian_classifier_train_test.initialize_memory(train_set_transformed + test_set_transformed)
-
-    # bayesian_classifier_test_nonsingle = BayesianClassifier(single_occurence_allowed=False, config=config)
-    # bayesian_classifier_test_nonsingle.initialize_memory(test_set_transformed)
-
-    # bayesian_classifier_train_test_nonsingle = BayesianClassifier(single_occurence_allowed=False, config=config)
-    # bayesian_classifier_train_test_nonsingle.initialize_memory(train_set_transformed + test_set_transformed)
 
     # ============= Train Alergia
     alergia_start_time = time.time()
@@ -575,31 +562,6 @@ for iteration in range(n_iterations):
             end_time = time.time()
             training_times[strategy_name] += end_time - start_time
 
-        # fpt.update(event)
-        # bag.update(event)
-
-        # for ngram_model in NGRAM_MODELS.values():
-        #     ngram_model.update(event)
-
-        # fallback.update(event)
-        # fallback_ngram8to2.update(event)
-        # fallback_ngram8to3.update(event)
-        # fallback_ngram8to4.update(event)
-
-        # fallback_ngram10to2.update(event)
-        # fallback_ngram13to2.update(event)
-        # fallback_ngram8to_ooo.update(event)
-
-        # complex_fallback.update(event)
-        # hard_voting.update(event)
-        # adaptive_voting_acc.update(event)
-        # adaptive_voting_prob.update(event)
-        # adaptive_voting_probxacc.update(event)
-        # soft_voting.update(event)
-
-        # for soft_voting_test in soft_voting_list:
-        #     soft_voting_test.update(event)
-
     for strategy_name in strategies:
         training_times[strategy_name] /= len(train_set)
 
@@ -664,12 +626,12 @@ for iteration in range(n_iterations):
     #     iteration_data[f"Top-{k+1}"] = []
 
     for strategy_name, (strategy, test_data) in strategies.items():
-        if "hard" in strategy_name:
-            continue
-        if "bayesian" in strategy_name:
-            continue
-        if "voting" in strategy_name or "ngram" in strategy_name:
-            continue
+        # if "hard" in strategy_name:
+        #     continue
+        # if "bayesian" in strategy_name:
+        #     continue
+        # if "voting" in strategy_name or "ngram" in strategy_name:
+        #     continue
         # if not strategy_name.startswith("ngram_"):
         #     continue
 
@@ -797,6 +759,9 @@ for iteration in range(n_iterations):
 
     # LSTM Evaluation
     if NN_TRAINING:
+        msg = "Training and evaluating LSTM model..."
+        logger.info(msg)
+
         # For RNNs: Append START symbol
         nn_train_set_transformed = add_start_to_sequences(train_set_transformed, start_symbol)
         nn_val_set_transformed = add_start_to_sequences(val_set_transformed, start_symbol)
@@ -821,7 +786,7 @@ for iteration in range(n_iterations):
         start_time = time.time()
         model = train_rnn(
             model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=20
-        )
+        ) if not SKIP_LSTM else model
         end_time = time.time()
         training_time = end_time - start_time
 
@@ -903,12 +868,14 @@ for iteration in range(n_iterations):
         # ============================================================
         # ============================================================
 
-        # Initialize the Transformer model
-        embedding_dim = 128  # Should be divisible by nhead
-        nhead = 8
-        num_encoder_layers = 3
-        num_decoder_layers = 3
-        dim_feedforward = 512
+        # Initialize the transformer model
+        msg = "Training and evaluating transformer model..."
+        logger.info(msg)
+
+        nhead = 2
+        num_encoder_layers = 2
+        num_decoder_layers = 2
+        dim_feedforward = 128
         dropout = 0.1
 
         model = TransformerModel(
@@ -923,10 +890,10 @@ for iteration in range(n_iterations):
         )
 
         criterion = nn.CrossEntropyLoss()
-        optimizer = optim.Adam(model.parameters(), lr=0.0001)  # Lower learning rate for Transformer
+        optimizer = optim.Adam(model.parameters(), lr=0.0001)  # Lower learning rate for transformer
 
 
-        # Train the Transformer
+        # Train the transformer
         start_time = time.time()
         model = train_transformer(
             model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer,
@@ -935,7 +902,7 @@ for iteration in range(n_iterations):
         end_time = time.time()
         training_time = end_time - start_time
 
-        # Evaluate the Transformer
+        # Evaluate the transformer
         transformer_stats, transformer_perplexities, transformer_eval_time = evaluate_transformer(
             model, nn_test_set_transformed, dataset_type="Test", max_k=config["top_k"]
         )
@@ -947,11 +914,11 @@ for iteration in range(n_iterations):
             or not isinstance(transformer_stats["total_predictions"], int)
             or not isinstance(transformer_stats["accuracy"], float)
         ):
-            msg = "Transformer stats are not in the expected format."
+            msg = "transformer stats are not in the expected format."
             raise TypeError(msg)
 
         # Append data to the iteration data dictionary
-        iteration_data["Model"].append("Transformer")
+        iteration_data["Model"].append("transformer")
 
         iteration_data["PP Harmo"].append(transformer_perplexity_stats["pp_harmonic_mean"])
         iteration_data["PP Arithm"].append(transformer_perplexity_stats["pp_arithmetic_mean"])
@@ -979,7 +946,7 @@ for iteration in range(n_iterations):
         # Add to stats_to_log
         stats_to_log.append(
             {
-                "strategy": "Transformer",
+                "strategy": "transformer",
                 "strategy_accuracy": transformer_stats["accuracy"] * 100,
                 "strategy_perplexity": transformer_perplexity_stats["pp_harmonic_mean"],
                 "strategy_eval_time": transformer_eval_time,
@@ -987,24 +954,24 @@ for iteration in range(n_iterations):
         )
 
         # Add to all_metrics
-        all_metrics["Transformer"]["accuracies"].append(transformer_stats["accuracy"])
-        all_metrics["Transformer"]["pp_arithmetic_mean"].append(transformer_perplexity_stats["pp_arithmetic_mean"])
-        all_metrics["Transformer"]["pp_harmonic_mean"].append(transformer_perplexity_stats["pp_harmonic_mean"])
-        all_metrics["Transformer"]["pp_median"].append(transformer_perplexity_stats["pp_median"])
-        all_metrics["Transformer"]["pp_q1"].append(transformer_perplexity_stats["pp_q1"])
-        all_metrics["Transformer"]["pp_q3"].append(transformer_perplexity_stats["pp_q3"])
+        all_metrics["transformer"]["accuracies"].append(transformer_stats["accuracy"])
+        all_metrics["transformer"]["pp_arithmetic_mean"].append(transformer_perplexity_stats["pp_arithmetic_mean"])
+        all_metrics["transformer"]["pp_harmonic_mean"].append(transformer_perplexity_stats["pp_harmonic_mean"])
+        all_metrics["transformer"]["pp_median"].append(transformer_perplexity_stats["pp_median"])
+        all_metrics["transformer"]["pp_q1"].append(transformer_perplexity_stats["pp_q1"])
+        all_metrics["transformer"]["pp_q3"].append(transformer_perplexity_stats["pp_q3"])
 
         for k in range(1, config["top_k"]):
-            all_metrics["Transformer"][f"top-{k + 1}"].append(iteration_data[f"Top-{k + 1}"][-1])
+            all_metrics["transformer"][f"top-{k + 1}"].append(iteration_data[f"Top-{k + 1}"][-1])
 
-        all_metrics["Transformer"]["pred_time"].append(transformer_eval_time)
-        all_metrics["Transformer"]["train_time"].append(training_time)
+        all_metrics["transformer"]["pred_time"].append(transformer_eval_time)
+        all_metrics["transformer"]["train_time"].append(training_time)
 
-        all_metrics["Transformer"]["num_states"].append(0)
-        all_metrics["Transformer"]["mean_delay_error"].append(None)
-        all_metrics["Transformer"]["mean_actual_delay"].append(None)
-        all_metrics["Transformer"]["mean_normalized_error"].append(None)
-        all_metrics["Transformer"]["num_delay_predictions"].append(None)
+        all_metrics["transformer"]["num_states"].append(0)
+        all_metrics["transformer"]["mean_delay_error"].append(None)
+        all_metrics["transformer"]["mean_actual_delay"].append(None)
+        all_metrics["transformer"]["mean_normalized_error"].append(None)
+        all_metrics["transformer"]["num_delay_predictions"].append(None)
 
     # Create a DataFrame for the iteration and log it
     iteration_df = pd.DataFrame(iteration_data).round(2)

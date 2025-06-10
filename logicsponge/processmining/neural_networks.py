@@ -463,6 +463,7 @@ class TransformerModel(nn.Module):
     pos_encoding: PositionalEncoding
     transformer: nn.Transformer
     fc: nn.Linear
+    input_projection: nn.Linear | None # Added for one-hot projection
 
     def __init__(
         self,
@@ -482,11 +483,13 @@ class TransformerModel(nn.Module):
         self.vocab_size = vocab_size
         self.embedding_dim = embedding_dim
 
-        # Conditional embedding layer
+        # Conditional embedding layer or input projection for one-hot
+        self.input_projection = None
         if not use_one_hot:
             self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0, device=device)
         else:
-            self.embedding = None
+            self.embedding = None # Ensure embedding is None if using one-hot
+            self.input_projection = nn.Linear(vocab_size, embedding_dim, device=device)
 
         # Positional encoding
         self.pos_encoding = PositionalEncoding(embedding_dim, device=device)
@@ -509,36 +512,50 @@ class TransformerModel(nn.Module):
         # Apply custom weight initialization
         self.apply(self._init_weights)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if not self.use_one_hot and self.embedding is not None:
-            # Use embedding layer
-            x = self.embedding(x) * math.sqrt(self.embedding_dim)
+    def forward(self, token_indices: torch.Tensor) -> torch.Tensor: # Renamed x to token_indices
+        # token_indices shape: (batch, seq_len)
+        current_device = self.device if self.device is not None else token_indices.device
+
+        # Create padding mask from token_indices.
+        # True for positions that are padded (original token_id == 0).
+        padding_mask = (token_indices == 0).to(current_device)
+
+        x_embedded: torch.Tensor
+        if not self.use_one_hot:
+            if self.embedding is None:
+                raise ValueError("Embedding layer is None, but use_one_hot is False.")
+            x_embedded = self.embedding(token_indices) * math.sqrt(self.embedding_dim)
         else:
-            # Use one-hot encoding and project to embedding dimension
-            x = F.one_hot(x, num_classes=self.vocab_size).float().to(self.device)
-            # Project one-hot to embedding dimension
-            projection = nn.Linear(self.vocab_size, self.embedding_dim, device=self.device)
-            x = projection(x) * math.sqrt(self.embedding_dim)
+            if self.input_projection is None:
+                raise ValueError("Input projection layer is None, but use_one_hot is True.")
+            x_one_hot = F.one_hot(token_indices, num_classes=self.vocab_size).float().to(current_device)
+            x_embedded = self.input_projection(x_one_hot) * math.sqrt(self.embedding_dim)
 
         # Add positional encoding
-        x = self.pos_encoding(x)
+        x_processed = self.pos_encoding(x_embedded) # Shape: (batch, seq_len, embedding_dim)
 
-        # For autoregressive generation, we use the decoder with causal mask
-        seq_len = x.size(1)
-        tgt_mask = self.transformer.generate_square_subsequent_mask(seq_len).to(self.device)
+        # Create causal mask for the decoder's self-attention.
+        seq_len = x_processed.size(1)
+        causal_mask = self.transformer.generate_square_subsequent_mask(seq_len).to(current_device)
 
-        # Use transformer decoder for autoregressive prediction
-        # We use the same sequence as both src and tgt for teacher forcing
-        output = self.transformer.decoder(
-            tgt=x,
-            memory=x,  # Using same sequence as memory
-            tgt_mask=tgt_mask
+        # Pass through the nn.Transformer module.
+        # src is x_processed, tgt is also x_processed (teacher forcing for next-token prediction).
+        # src_key_padding_mask and tgt_key_padding_mask are derived from original padding.
+        # memory_key_padding_mask also uses padding_mask as memory comes from encoder based on src.
+        transformer_output = self.transformer(
+            src=x_processed,
+            tgt=x_processed,
+            tgt_mask=causal_mask,
+            src_key_padding_mask=padding_mask,
+            tgt_key_padding_mask=padding_mask,
+            memory_key_padding_mask=padding_mask
         )
+        # transformer_output shape: (batch, seq_len, embedding_dim)
 
-        return self.fc(output)
+        return self.fc(transformer_output)
 
     def _init_weights(self, m: nn.Module) -> None:
-        if isinstance(m, nn.Linear):
+        if isinstance(m, nn.Linear): # Covers self.fc and self.input_projection
             nn.init.xavier_uniform_(m.weight)
             if m.bias is not None:
                 nn.init.constant_(m.bias, 0)
