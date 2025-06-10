@@ -247,6 +247,21 @@ soft_voting = StreamingActivityPredictor(
     )
 )
 
+soft_voting_star = StreamingActivityPredictor(
+    strategy=SoftVoting(
+        models=[
+            BasicMiner(algorithm=Bag()),
+            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
+            BasicMiner(algorithm=NGram(window_length=2, min_total_visits=10)),
+            BasicMiner(algorithm=NGram(window_length=3, min_total_visits=10)),
+            BasicMiner(algorithm=NGram(window_length=4, min_total_visits=10)),
+            BasicMiner(algorithm=NGram(window_length=5, min_total_visits=10)),
+            # BasicMiner(algorithm=NGram(window_length=6)),
+        ],
+        config=config,
+    )
+)
+
 # list_grams = [(2, 3, 6, 8), (2, 3, 5, 6), (2, 3, 5, 8), (2, 3, 4, 6), (2, 3, 6, 7), (2, 3, 7, 8), (2, 3, 6, 8)]
 # Use SOFT_VOTING_NGRAMS for consistency
 soft_voting_predictors = {
@@ -322,6 +337,7 @@ models = [
     "hard_voting",
     "adaptive_voting",
     "soft_voting",
+    "soft_voting_star",
     *list(soft_voting_predictors.keys()), # Add all soft_voting predictor names
     "lstm",
 ]
@@ -420,6 +436,7 @@ sponge = (
         | (hard_voting * Evaluation("hard_voting"))
         | (adaptive_voting * Evaluation("adaptive_voting"))
         | (soft_voting * Evaluation("soft_voting"))
+        | (soft_voting_star * Evaluation("soft_voting_star"))
         # Add all soft_voting_predictors to the pipeline
         | ((predictor * Evaluation(name)) for name, predictor in soft_voting_predictors.items())
         | (
