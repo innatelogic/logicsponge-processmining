@@ -660,8 +660,12 @@ for iteration in range(n_iterations):
     #     iteration_data[f"Top-{k+1}"] = []
 
     for strategy_name, (strategy, test_data) in strategies.items():
-        # if "hard" in strategy_name:
-        #     continue
+        if "hard" in strategy_name:
+            continue
+        if "bayesian" in strategy_name:
+            continue
+        if "voting" in strategy_name or "ngram" in strategy_name:
+            continue
         # if not strategy_name.startswith("ngram_"):
         #     continue
 
@@ -920,7 +924,7 @@ for iteration in range(n_iterations):
         start_time = time.time()
         model = train_transformer(
             model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer,
-            batch_size=4, epochs=20  # Smaller batch size for Transformer
+            batch_size=8, epochs=20
         )
         end_time = time.time()
         training_time = end_time - start_time
