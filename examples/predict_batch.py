@@ -600,6 +600,9 @@ for iteration in range(n_iterations):
         # for soft_voting_test in soft_voting_list:
         #     soft_voting_test.update(event)
 
+    for strategy_name in strategies:
+        training_times[strategy_name] /= len(train_set)
+
     miners_end_time = time.time()
     elapsed_time = miners_end_time - miners_start_time
     msg = f"Total training time for process miners: {elapsed_time:.4f} seconds"
@@ -648,6 +651,7 @@ for iteration in range(n_iterations):
         "Top-2": [],
         "Top-3": [],
         "Pred Time": [],
+        "Train Time": [],
         "Good Preds": [],
         "Tot Preds": [],
         "Nb States": [],
@@ -727,6 +731,7 @@ for iteration in range(n_iterations):
             iteration_data[f"Top-{k + 1}"].append(top_k_accuracies[k])
 
         iteration_data["Pred Time"].append(evaluation_time)
+        iteration_data["Train Time"].append(training_times[strategy_name])
 
         iteration_data["Good Preds"].append(stats["correct_predictions"])
         iteration_data["Tot Preds"].append(total)
@@ -858,6 +863,7 @@ for iteration in range(n_iterations):
             )
 
         iteration_data["Pred Time"].append(lstm_eval_time)
+        iteration_data["Train Time"].append(training_time)
 
         iteration_data["Good Preds"].append(lstm_stats["correct_predictions"])
         iteration_data["Tot Preds"].append(lstm_stats["total_predictions"])
@@ -963,6 +969,7 @@ for iteration in range(n_iterations):
             )
 
         iteration_data["Pred Time"].append(transformer_eval_time)
+        iteration_data["Train Time"].append(training_time)
 
         iteration_data["Good Preds"].append(transformer_stats["correct_predictions"])
         iteration_data["Tot Preds"].append(transformer_stats["total_predictions"])
