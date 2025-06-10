@@ -106,6 +106,7 @@ class BayesianClassifier:
         mode: str = "",
         *,
         log_likelihood: bool = False,
+        compute_perplexity: bool = False,
         debug: bool = False,
     ) -> float:
         """Evaluate the dataset using a Bayes classifier."""
@@ -116,7 +117,7 @@ class BayesianClassifier:
 
         for sequence in data:
             prefix = []
-            likelihood = 0.0 if log_likelihood else 1.0
+            likelihood = 0.0 if (log_likelihood or not compute_perplexity) else 1.0
 
             for i in range(len(sequence)):
                 event = sequence[i]
@@ -126,10 +127,11 @@ class BayesianClassifier:
                 bayes_prediction = self._get_bayes_prediction(prefix)
 
                 pause_start_time = time.time()
-                if log_likelihood:
-                    likelihood += math.log(self._get_conditional_likelihood(prefix, actual_activity))
-                else:
-                    likelihood *= self._get_conditional_likelihood(prefix, actual_activity)
+                if compute_perplexity:
+                    if log_likelihood:
+                        likelihood += math.log(self._get_conditional_likelihood(prefix, actual_activity))
+                    else:
+                        likelihood *= self._get_conditional_likelihood(prefix, actual_activity)
 
                 if bayes_prediction is None:
                     self.stats["empty_predictions"] += 1
@@ -153,17 +155,19 @@ class BayesianClassifier:
 
             pause_start_time = time.time()
             # Normalize by the length of the sequence
-            if log_likelihood:
-                normalized_likelihood = likelihood / len(sequence) if len(sequence) > 0 else likelihood
-            else:
-                normalized_likelihood = likelihood ** (1 / len(sequence)) if len(sequence) > 0 else likelihood
 
-            if normalized_likelihood is not None and normalized_likelihood > 0:
-                seq_perplexity = math.exp(-normalized_likelihood) if log_likelihood else 1.0 / normalized_likelihood
-            else:
-                seq_perplexity = float("inf")
+            if compute_perplexity:
+                if log_likelihood:
+                    normalized_likelihood = likelihood / len(sequence) if len(sequence) > 0 else likelihood
+                else:
+                    normalized_likelihood = likelihood ** (1 / len(sequence)) if len(sequence) > 0 else likelihood
 
-            perplexities.append(seq_perplexity)
+                if normalized_likelihood is not None and normalized_likelihood > 0:
+                    seq_perplexity = math.exp(-normalized_likelihood) if log_likelihood else 1.0 / normalized_likelihood
+                else:
+                    seq_perplexity = float("inf")
+
+            perplexities.append(seq_perplexity if compute_perplexity else float("inf")) # type: ignore
             pause_time += time.time() - pause_start_time
 
         eval_time = time.time() - eval_start_time - pause_time

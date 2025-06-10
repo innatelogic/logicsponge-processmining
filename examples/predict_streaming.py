@@ -28,7 +28,7 @@ from logicsponge.processmining.models import (
     NeuralNetworkMiner,
     SoftVoting,
 )
-from logicsponge.processmining.neural_networks import LSTMModel
+from logicsponge.processmining.neural_networks import LSTMModel, TransformerModel
 from logicsponge.processmining.streaming import (
     AddStartSymbol,
     CSVStatsWriter,
@@ -86,7 +86,7 @@ start_symbol = DEFAULT_CONFIG["start_symbol"]
 # ============================================================
 # Generate a list of ngrams to test
 # ============================================================
-SOFT_VOTING_NGRAMS = [(2, 3, 6, 8), (2, 3, 5, 6), (2, 3, 5, 8), (2, 3, 4, 6), (2, 3, 6, 7), (2, 3, 7, 8), (2, 3, 6, 8)]
+SOFT_VOTING_NGRAMS = [(2, 3, 5, 8), (2, 3, 4, 5)] # (2, 3, 6, 8), (2, 3, 5, 6), (2, 3, 4, 6), (2, 3, 6, 7), (2, 3, 7, 8), (2, 3, 6, 8)
 
 WINDOW_RANGE = [0, 1, 2, 3, 4, 5, 6, 7, 8] #, 9, 10, 12, 14, 16]
 
@@ -317,6 +317,37 @@ lstm = StreamingActivityPredictor(
 )
 
 
+# Initialize tranformer model
+nhead = 2
+num_encoder_layers = 2
+num_decoder_layers = 2
+dim_feedforward = 128
+dropout = 0.1
+
+model = TransformerModel(
+    vocab_size=vocab_size,
+    embedding_dim=embedding_dim,
+    nhead=nhead,
+    num_encoder_layers=num_encoder_layers,
+    num_decoder_layers=num_decoder_layers,
+    dim_feedforward=dim_feedforward,
+    dropout=dropout,
+    use_one_hot=True
+)
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=0.0001)  # Lower learning rate for transformer
+
+transformer = StreamingActivityPredictor(
+    strategy=NeuralNetworkMiner(
+        model=model,
+        criterion=criterion,
+        optimizer=optimizer,
+        batch_size=8,
+        config=config,
+    )
+)
+
+
 # ====================================================
 # Sponge
 # ====================================================
@@ -340,6 +371,7 @@ models = [
     "soft_voting_star",
     *list(soft_voting_predictors.keys()), # Add all soft_voting predictor names
     "lstm",
+    "transformer",
 ]
 
 
@@ -378,8 +410,8 @@ def start_filter(item: DataItem) -> bool:
     return item["activity"] != start_symbol
 
 
-len_dataset = 15214
-# len_dataset = 262200
+# len_dataset = 15214
+len_dataset = 262200 # BPI Challenge 2012
 # len_dataset = 65000
 # len_dataset = 1202267
 # len_dataset = 2514266
@@ -426,15 +458,15 @@ sponge = (
         # Add all NGRAM_MODELS to the pipeline
         | ((NGRAM_MODELS[name] * Evaluation(name)) for name in NGRAM_NAMES)
         | (fallback * Evaluation("fallback"))
-        | (fallback_ngram8to2 * Evaluation("fallback_ngram8to2"))
-        | (fallback_ngram8to3 * Evaluation("fallback_ngram8to3"))
-        | (fallback_ngram8to4 * Evaluation("fallback_ngram8to4"))
-        | (fallback_ngram10to2 * Evaluation("fallback_ngram10to2"))
-        | (fallback_ngram13to2 * Evaluation("fallback_ngram13to2"))
-        | (fallback_ngram8to_ooo * Evaluation("fallback_ngram8to_ooo"))
-        | (complex_fallback * Evaluation("complex_fallback"))
+        # | (fallback_ngram8to2 * Evaluation("fallback_ngram8to2"))
+        # | (fallback_ngram8to3 * Evaluation("fallback_ngram8to3"))
+        # | (fallback_ngram8to4 * Evaluation("fallback_ngram8to4"))
+        # | (fallback_ngram10to2 * Evaluation("fallback_ngram10to2"))
+        # | (fallback_ngram13to2 * Evaluation("fallback_ngram13to2"))
+        # | (fallback_ngram8to_ooo * Evaluation("fallback_ngram8to_ooo"))
+        # | (complex_fallback * Evaluation("complex_fallback"))
         | (hard_voting * Evaluation("hard_voting"))
-        | (adaptive_voting * Evaluation("adaptive_voting"))
+        # | (adaptive_voting * Evaluation("adaptive_voting"))
         | (soft_voting * Evaluation("soft_voting"))
         | (soft_voting_star * Evaluation("soft_voting_star"))
         # Add all soft_voting_predictors to the pipeline
@@ -445,6 +477,12 @@ sponge = (
             * DataItemFilter(data_item_filter=start_filter)
             * Evaluation("lstm")
         )
+        # | (
+        #     AddStartSymbol(start_symbol=start_symbol)
+        #     * transformer
+        #     * DataItemFilter(data_item_filter=start_filter)
+        #     * Evaluation("transformer")
+        # )
     )
     * ls.MergeToSingleStream()
     * ls.Flatten()

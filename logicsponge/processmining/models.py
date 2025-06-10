@@ -23,7 +23,7 @@ from tqdm import tqdm
 
 from logicsponge.processmining.config import update_config
 from logicsponge.processmining.data_utils import add_input_symbols_sequence
-from logicsponge.processmining.neural_networks import LSTMModel, RNNModel
+from logicsponge.processmining.neural_networks import LSTMModel, RNNModel, TransformerModel
 from logicsponge.processmining.types import (
     ActivityDelays,
     ActivityName,
@@ -245,6 +245,7 @@ class StreamingMiner(ABC):
         mode: str = "incremental",
         *,
         log_likelihood: bool = False,
+        compute_perplexity: bool = False,
         debug: bool = False, # noqa: ARG002
     ) -> float:
         """Evaluate in batch mode.
@@ -277,7 +278,7 @@ class StreamingMiner(ABC):
 
             current_state = self.initial_state
             metrics = empty_metrics()
-            likelihood = 0.0 if log_likelihood else 1.0
+            likelihood = 0.0 if (log_likelihood or not compute_perplexity) else 1.0
 
             for i in range(len(sequence)):
                 if current_state is None:
@@ -306,14 +307,15 @@ class StreamingMiner(ABC):
 
                 pause_start_time = time.time()
 
-                logger.debug("      [Before] Likelihood: %s", likelihood)
-                if log_likelihood:
-                    likelihood += math.log(self.state_act_likelihood(current_state, actual_next_activity))
-                    # likelihood += metrics["likelihoods"].get(actual_next_activity, 0.0)
-                else:
-                    likelihood *= self.state_act_likelihood(current_state, actual_next_activity)
-                    # likelihood *= metrics["likelihoods"].get(actual_next_activity, 0.0)
-                logger.debug("      [After] Likelihood: %s", likelihood)
+                if compute_perplexity:
+                    logger.debug("      [Before] Likelihood: %s", likelihood)
+                    if log_likelihood:
+                        likelihood += math.log(self.state_act_likelihood(current_state, actual_next_activity))
+                        # likelihood += metrics["likelihoods"].get(actual_next_activity, 0.0)
+                    else:
+                        likelihood *= self.state_act_likelihood(current_state, actual_next_activity)
+                        # likelihood *= metrics["likelihoods"].get(actual_next_activity, 0.0)
+                    logger.debug("      [After] Likelihood: %s", likelihood)
 
                 # likelihood *= (
                 #     metrics["likelihood"]
@@ -336,14 +338,18 @@ class StreamingMiner(ABC):
                     current_state = self.next_state(current_state, actual_next_activity)
                     logger.debug("Next state: %s", current_state)
 
-            # Normalize by the length of the sequence
-            if log_likelihood:
-                normalized_likelihood = likelihood / len(sequence) if len(sequence) > 0 else likelihood
-            else:
-                normalized_likelihood = likelihood ** (1 / len(sequence)) if len(sequence) > 0 else likelihood
+            if compute_perplexity:
+                # Normalize by the length of the sequence
+                if log_likelihood:
+                    normalized_likelihood = likelihood / len(sequence) if len(sequence) > 0 else likelihood
+                else:
+                    normalized_likelihood = likelihood ** (1 / len(sequence)) if len(sequence) > 0 else likelihood
 
-            seq_perplexity = compute_seq_perplexity(normalized_likelihood, log_likelihood=log_likelihood)
-            perplexities.append(seq_perplexity)
+                seq_perplexity = compute_seq_perplexity(normalized_likelihood, log_likelihood=log_likelihood)
+            else:
+                seq_perplexity = float("nan")
+
+            perplexities.append(seq_perplexity if compute_perplexity else likelihood)
 
             logger.debug("Pred. sequence: %s", predicted_sequence.replace(self.config["stop_symbol"].__str__(), "S"))
             logger.debug("Sequence likelihood: %s", likelihood)
@@ -1384,7 +1390,7 @@ class NeuralNetworkMiner(StreamingMiner):
     def __init__(
             self,
             *args,
-            model: RNNModel | LSTMModel,
+            model: RNNModel | LSTMModel | TransformerModel,
             batch_size: int,
             optimizer,
             criterion,

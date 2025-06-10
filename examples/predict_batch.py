@@ -12,6 +12,7 @@ import pandas as pd
 import torch
 from aalpy.learning_algs import run_Alergia
 from torch import nn, optim
+from tqdm import tqdm
 
 # ruff: noqa: E402
 logging.basicConfig(
@@ -63,7 +64,7 @@ SEC_TO_MICRO = 1_000_000
 # ============================================================
 # Generate a list of ngrams to test
 # ============================================================
-VOTING_NGRAMS = [(2, 3, 4), (2, 3, 5, 6), (2, 3, 5, 7), (2, 3, 5, 8), (2, 3, 4, 5), (2, 3, 4, 7)]
+VOTING_NGRAMS = [(2, 3, 4), (2, 3, 5, 8), (2, 3, 4, 5)] # (2, 3, 5, 6), (2, 3, 5, 7), (2, 3, 4, 7)
 
 SELECT_BEST_ARGS = ["prob"] # ["acc", "prob", "prob x acc"]
 
@@ -111,12 +112,10 @@ if torch.backends.mps.is_available():
     # device = torch.device("mps")
     device = torch.device("cpu")
     logger.info("Using cpu.")
-
 elif torch.cuda.is_available():
     msg = f"Using cuda: {torch.cuda.get_device_name(0)}."
     logger.info(msg)
     device = torch.device("cuda")
-
 else:
     device = torch.device("cpu")
     logger.info("Using cpu.")
@@ -129,6 +128,7 @@ torch.backends.cudnn.benchmark = False
 
 NN_TRAINING = True
 SKIP_LSTM = False
+SKIP_TRANSFORMER = True
 SHOW_DELAYS = False
 
 # ============================================================
@@ -152,8 +152,7 @@ data_test = transform_to_seqs(dataset_test)
 # Define the number of iterations
 # ============================================================
 
-# n_iterations = 5
-n_iterations = 2
+n_iterations = 5
 
 # Store metrics across iterations
 all_metrics = {
@@ -179,13 +178,13 @@ all_metrics = {
         "bag",
         *list(NGRAM_NAMES),
         "fallback fpt->ngram",
-        "fallback ngram_8->ngram_2",
-        "fallback ngram_8->ngram_3",
-        "fallback ngram_8->ngram_4",
-        "fallback ngram_10->ngram_2",
-        "fallback ngram_13->ngram_2",
-        "fallback ngram_8->...->1",
-        "complex fallback",
+        # "fallback ngram_8->ngram_2",
+        # "fallback ngram_8->ngram_3",
+        # "fallback ngram_8->ngram_4",
+        # "fallback ngram_10->ngram_2",
+        # "fallback ngram_13->ngram_2",
+        # "fallback ngram_8->...->1",
+        # "complex fallback",
         "hard voting",
         # *[
         #     f"adaptive voting {grams} {select_best_arg}"
@@ -241,6 +240,11 @@ for iteration in range(n_iterations):
     # data_statistics(test_set_transformed)
 
     alergia_train_set_transformed = add_input_symbols(train_set_transformed, "in")
+
+    TRAIN_EVENTS = sum(len(lst) for lst in train_set_transformed)
+    VAL_EVENTS = sum(len(lst) for lst in val_set_transformed)
+    TEST_EVENTS = sum(len(lst) for lst in test_set_transformed)
+
 
     # ============================================================
     # Initialize Process Miners
@@ -535,13 +539,13 @@ for iteration in range(n_iterations):
         # "ngram_15": (ngram_15, retain_sequences_of_length_x_than(test_set_transformed, 10, mode="lower")),
         # "ngram_18": (ngram_18, retain_sequences_of_length_x_than(test_set_transformed, 10, mode="lower")),
         "fallback fpt->ngram": (fallback, test_set_transformed),
-        "fallback ngram_8->ngram_2": (fallback_ngram8to2, test_set_transformed),
-        "fallback ngram_8->ngram_3": (fallback_ngram8to3, test_set_transformed),
-        "fallback ngram_8->ngram_4": (fallback_ngram8to4, test_set_transformed),
-        "fallback ngram_10->ngram_2": (fallback_ngram10to2, test_set_transformed),
-        "fallback ngram_13->ngram_2": (fallback_ngram13to2, test_set_transformed),
-        "fallback ngram_8->...->1": (fallback_ngram8to_ooo, test_set_transformed),
-        "complex fallback": (complex_fallback, test_set_transformed),
+        # "fallback ngram_8->ngram_2": (fallback_ngram8to2, test_set_transformed),
+        # "fallback ngram_8->ngram_3": (fallback_ngram8to3, test_set_transformed),
+        # "fallback ngram_8->ngram_4": (fallback_ngram8to4, test_set_transformed),
+        # "fallback ngram_10->ngram_2": (fallback_ngram10to2, test_set_transformed),
+        # "fallback ngram_13->ngram_2": (fallback_ngram13to2, test_set_transformed),
+        # "fallback ngram_8->...->1": (fallback_ngram8to_ooo, test_set_transformed),
+        # "complex fallback": (complex_fallback, test_set_transformed),
         "hard voting": (hard_voting, test_set_transformed),
         # **adaptive_voting_strategies,
         **soft_voting_strategies,
@@ -555,7 +559,7 @@ for iteration in range(n_iterations):
     # ================= Train Process Miners
     miners_start_time = time.time()
 
-    for event in train_set:
+    for event in tqdm(train_set, desc="Processing events"):
         for strategy_name, (strategy, _) in strategies.items():
             if "alergia" in strategy_name or "bayesian" in strategy_name:
                 continue
@@ -582,17 +586,17 @@ for iteration in range(n_iterations):
             start_time = time.time()
             model.initialize_memory(train_set_transformed)
             end_time = time.time()
-            training_times[model_name] = (end_time - start_time) / len(train_set_transformed)
+            training_times[model_name] = (end_time - start_time) / TRAIN_EVENTS
         elif "test" in model_name:
             start_time = time.time()
             model.initialize_memory(test_set_transformed)
             end_time = time.time()
-            training_times[model_name] = (end_time - start_time) / len(test_set_transformed)
+            training_times[model_name] = (end_time - start_time) / TEST_EVENTS
         elif "t+t" in model_name:
             start_time = time.time()
             model.initialize_memory(train_set_transformed + test_set_transformed)
             end_time = time.time()
-            training_times[model_name] = (end_time - start_time) / len(train_set_transformed + test_set_transformed)
+            training_times[model_name] = (end_time - start_time) / (TRAIN_EVENTS + TEST_EVENTS)
     
     bayesian_end_time = time.time()
     elapsed_time = bayesian_end_time - bayesian_start_time
@@ -645,8 +649,8 @@ for iteration in range(n_iterations):
         msg = f"Evaluating {strategy_name}..."
         logger.info(msg)
 
-        evaluation_time = strategy.evaluate(test_data, mode="incremental", debug=(data_name == "Synthetic_Train"))
-        evaluation_time *= SEC_TO_MICRO / len(test_data)
+        evaluation_time = strategy.evaluate(test_data, mode="incremental", debug=(data_name == "Synthetic_Train"), compute_perplexity="hard" not in strategy_name)
+        evaluation_time *= SEC_TO_MICRO / TEST_EVENTS
 
         stats = strategy.stats
 
@@ -786,7 +790,7 @@ for iteration in range(n_iterations):
         hidden_dim = 128
         output_dim = vocab_size  # Output used to predict the next activity
 
-        model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, use_one_hot=True)
+        model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, device=device, use_one_hot=True)
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.Adam(model.parameters(), lr=0.001)
 
@@ -796,13 +800,13 @@ for iteration in range(n_iterations):
             model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=20
         ) if not SKIP_LSTM else model
         end_time = time.time()
-        training_time = (end_time - start_time) * SEC_TO_MICRO / len(nn_train_set_transformed)
+        training_time = (end_time - start_time) * SEC_TO_MICRO / (TRAIN_EVENTS + VAL_EVENTS)
 
         lstm_stats, lstm_perplexities, lstm_eval_time = evaluate_rnn(
             model, nn_test_set_transformed, dataset_type="Test", max_k=config["top_k"]
         )
         lstm_perplexity_stats = compute_perplexity_stats(lstm_perplexities)
-        lstm_eval_time *= SEC_TO_MICRO / len(nn_test_set_transformed)
+        lstm_eval_time *= SEC_TO_MICRO / TEST_EVENTS
 
         # if SHOW_DELAYS:
         #     # WARNING: LSTM DOES NOT CALCULATES DELAYS SO FAR ??
@@ -895,6 +899,7 @@ for iteration in range(n_iterations):
             num_decoder_layers=num_decoder_layers,
             dim_feedforward=dim_feedforward,
             dropout=dropout,
+            device=device,
             use_one_hot=True  # or False, depending on your preference
         )
 
@@ -907,16 +912,16 @@ for iteration in range(n_iterations):
         model = train_transformer(
             model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer,
             batch_size=8, epochs=20
-        )
+        ) if not SKIP_TRANSFORMER else model
         end_time = time.time()
-        training_time = (end_time - start_time) * SEC_TO_MICRO / len(nn_train_set_transformed)
+        training_time = (end_time - start_time) * SEC_TO_MICRO / (TRAIN_EVENTS + VAL_EVENTS)
 
         # Evaluate the transformer
         transformer_stats, transformer_perplexities, transformer_eval_time = evaluate_transformer(
             model, nn_test_set_transformed, dataset_type="Test", max_k=config["top_k"]
         )
         transformer_perplexity_stats = compute_perplexity_stats(transformer_perplexities)
-        transformer_eval_time *= SEC_TO_MICRO / len(nn_test_set_transformed)
+        transformer_eval_time *= SEC_TO_MICRO / TEST_EVENTS
 
         # Validation checks
         if (
