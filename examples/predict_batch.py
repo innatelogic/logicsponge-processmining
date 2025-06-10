@@ -550,7 +550,7 @@ for iteration in range(n_iterations):
     }
 
     training_times = dict.fromkeys(strategies, 0.0)
-    training_times["alergia"] = alergia_elapsed_time * SEC_TO_MICRO
+    training_times["alergia"] = alergia_elapsed_time
 
     # ================= Train Process Miners
     miners_start_time = time.time()
@@ -565,7 +565,8 @@ for iteration in range(n_iterations):
             training_times[strategy_name] += end_time - start_time
 
     for strategy_name in strategies:
-        training_times[strategy_name] *= SEC_TO_MICRO  # Convert to microseconds
+        if "alergia" in strategy_name or "bayesian" in strategy_name:
+            continue
         training_times[strategy_name] /= len(train_set)
 
     miners_end_time = time.time()
@@ -581,23 +582,25 @@ for iteration in range(n_iterations):
             start_time = time.time()
             model.initialize_memory(train_set_transformed)
             end_time = time.time()
-            training_times[model_name] = end_time - start_time
+            training_times[model_name] = (end_time - start_time) / len(train_set_transformed)
         elif "test" in model_name:
             start_time = time.time()
             model.initialize_memory(test_set_transformed)
             end_time = time.time()
-            training_times[model_name] = end_time - start_time
+            training_times[model_name] = (end_time - start_time) / len(test_set_transformed)
         elif "t+t" in model_name:
             start_time = time.time()
             model.initialize_memory(train_set_transformed + test_set_transformed)
             end_time = time.time()
-            training_times[model_name] = end_time - start_time
-        training_times[model_name] *= SEC_TO_MICRO  # Convert to microseconds
-
+            training_times[model_name] = (end_time - start_time) / len(train_set_transformed + test_set_transformed)
+    
     bayesian_end_time = time.time()
     elapsed_time = bayesian_end_time - bayesian_start_time
     msg = f"Training time for Bayesian Classifiers: {elapsed_time:.4f} seconds"
     logger.info(msg)
+
+    for strategy_name in strategies:
+        training_times[strategy_name] *= SEC_TO_MICRO # Convert to microseconds
 
     # ============================================================
     # Evaluation
@@ -643,7 +646,7 @@ for iteration in range(n_iterations):
         logger.info(msg)
 
         evaluation_time = strategy.evaluate(test_data, mode="incremental", debug=(data_name == "Synthetic_Train"))
-        evaluation_time *= SEC_TO_MICRO  # Convert to microseconds
+        evaluation_time *= SEC_TO_MICRO / len(test_data)
 
         stats = strategy.stats
 
@@ -793,13 +796,13 @@ for iteration in range(n_iterations):
             model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=20
         ) if not SKIP_LSTM else model
         end_time = time.time()
-        training_time = (end_time - start_time) * SEC_TO_MICRO  # Convert to microseconds
+        training_time = (end_time - start_time) * SEC_TO_MICRO / len(nn_train_set_transformed)
 
         lstm_stats, lstm_perplexities, lstm_eval_time = evaluate_rnn(
             model, nn_test_set_transformed, dataset_type="Test", max_k=config["top_k"]
         )
         lstm_perplexity_stats = compute_perplexity_stats(lstm_perplexities)
-        lstm_eval_time *= SEC_TO_MICRO  # Convert to microseconds
+        lstm_eval_time *= SEC_TO_MICRO / len(nn_test_set_transformed)
 
         # if SHOW_DELAYS:
         #     # WARNING: LSTM DOES NOT CALCULATES DELAYS SO FAR ??
@@ -906,14 +909,14 @@ for iteration in range(n_iterations):
             batch_size=8, epochs=20
         )
         end_time = time.time()
-        training_time = (end_time - start_time) * SEC_TO_MICRO  # Convert to microseconds
+        training_time = (end_time - start_time) * SEC_TO_MICRO / len(nn_train_set_transformed)
 
         # Evaluate the transformer
         transformer_stats, transformer_perplexities, transformer_eval_time = evaluate_transformer(
             model, nn_test_set_transformed, dataset_type="Test", max_k=config["top_k"]
         )
         transformer_perplexity_stats = compute_perplexity_stats(transformer_perplexities)
-        transformer_eval_time *= SEC_TO_MICRO  # Convert to microseconds
+        transformer_eval_time *= SEC_TO_MICRO / len(nn_test_set_transformed)
 
         # Validation checks
         if (
