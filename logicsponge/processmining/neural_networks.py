@@ -3,7 +3,6 @@ import logging
 import time
 
 import torch
-import torch.nn.functional as F
 import torch.utils.data
 from torch import nn
 from torch.nn.utils.rnn import pad_sequence
@@ -154,7 +153,7 @@ class LSTMModel(nn.Module):
         else:
             # Use one-hot encoding
             # print(f"x shape: {x.shape}, dtype: {x.dtype}, unique values: {torch.unique(x)}")
-            x = F.one_hot(x, num_classes=self.vocab_size).float().to(self.device)
+            x = torch.nn.functional.one_hot(x, num_classes=self.vocab_size).float().to(self.device)
 
         # Pass through LSTM layers
         lstm_out, _ = self.lstm1(x)
@@ -177,6 +176,86 @@ class LSTMModel(nn.Module):
                     nn.init.constant_(param.data, 0)
         elif isinstance(m, nn.Embedding) and m is not None:
             nn.init.uniform_(m.weight, -0.1, 0.1)
+
+
+class TransformerModel(nn.Module):
+    device: torch.device | None
+    embedding: nn.Embedding | None
+    use_one_hot: bool
+    vocab_size: int
+    embedding_dim: int
+    pos_embedding: nn.Parameter
+    transformer: nn.TransformerEncoder
+    fc: nn.Linear
+
+    def __init__(
+        self,
+        vocab_size: int,
+        embedding_dim: int,
+        hidden_dim: int,
+        output_dim: int,
+        use_one_hot: bool = False,
+        device: torch.device | None = None,
+        max_seq_len: int = 512,  # You can adjust this if needed
+    ):
+        super().__init__()
+        self.device = device
+        self.use_one_hot = use_one_hot
+        self.vocab_size = vocab_size
+        self.embedding_dim = embedding_dim
+
+        # Conditional embedding layer
+        if not use_one_hot:
+            self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0, device=device)
+        else:
+            self.embedding = None
+
+        # Input dimension
+        input_dim = vocab_size if use_one_hot else embedding_dim
+
+        # Positional encoding: learnable [1, max_seq_len, input_dim]
+        self.pos_embedding = nn.Parameter(torch.zeros(1, max_seq_len, input_dim, device=device))
+
+        # Transformer encoder
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=input_dim,
+            nhead=1,
+            dim_feedforward=hidden_dim,
+            batch_first=True,
+            device=device,
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=2)
+
+        # Output layer
+        self.fc = nn.Linear(input_dim, output_dim, device=device)
+
+        # Custom initialization
+        self.apply(self._init_weights)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not self.use_one_hot and self.embedding is not None:
+            x = self.embedding(x)
+        else:
+            x = torch.nn.functional.one_hot(x, num_classes=self.vocab_size).float().to(self.device)
+
+        # Add positional encoding (crop to match sequence length)
+        seq_len = x.size(1)
+        x = x + self.pos_embedding[:, :seq_len, :]
+
+        # Pass through transformer
+        x = self.transformer(x)
+
+        return self.fc(x)
+
+    def _init_weights(self, m: nn.Module) -> None:
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.Embedding) and m is not None:
+            nn.init.uniform_(m.weight, -0.1, 0.1)
+        elif isinstance(m, nn.Parameter):
+            nn.init.normal_(m, mean=0.0, std=0.02)
 
 
 # ============================================================
@@ -356,7 +435,7 @@ def evaluate_rnn(
 
             # Reshape top_k_indices to [batch_size*seq_len, k]
             top_k_indices = top_k_indices.view(-1, max_k)
-            log_probs = F.log_softmax(outputs, dim=-1)  # Log probabilities
+            log_probs = torch.nn.functional.log_softmax(outputs, dim=-1)  # Log probabilities
             log_probs = log_probs.view(-1, log_probs.shape[-1])
             masked_log_probs = log_probs[mask]
 
