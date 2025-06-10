@@ -1,11 +1,9 @@
-import copy
-import logging
-import math
-import time
-
 import torch
 import torch.nn.functional as F
-import torch.utils.data
+import logging
+import copy
+import time
+import math
 from torch import nn
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
@@ -217,6 +215,7 @@ def train_rnn(model, train_sequences, val_sequences, criterion, optimizer, batch
     best_val_accuracy = 0.0
     best_model_state = None
     patience_counter = 0
+    model_device = model.device # Get model's device once
 
     for epoch in range(epochs):
         model.train()
@@ -231,6 +230,10 @@ def train_rnn(model, train_sequences, val_sequences, criterion, optimizer, batch
                 x_batch = sequences[:, :-1]  # All but the last token are input
                 y_batch = sequences[:, 1:]  # Target: sequence shifted by one
 
+                if model_device is not None:
+                    x_batch = x_batch.to(model_device)
+                    y_batch = y_batch.to(model_device)
+
                 optimizer.zero_grad()
 
                 # Forward pass
@@ -244,17 +247,18 @@ def train_rnn(model, train_sequences, val_sequences, criterion, optimizer, batch
                 mask = y_batch != 0  # Mask for non-padding targets
 
                 # Apply the mask to outputs and targets
-                outputs = outputs[mask]
-                y_batch = y_batch[mask]
+                outputs_masked = outputs[mask]
+                y_batch_masked = y_batch[mask]
 
                 # Compute the loss only for non-padding positions
-                loss = criterion(outputs, y_batch)
+                if outputs_masked.size(0) > 0: # Ensure there are non-padded targets
+                    loss = criterion(outputs_masked, y_batch_masked)
 
-                # Backward pass and optimization
-                loss.backward()
-                optimizer.step()
+                    # Backward pass and optimization
+                    loss.backward()
+                    optimizer.step()
 
-                epoch_loss += loss.item()
+                    epoch_loss += loss.item()
                 pbar.update(1)
 
         msg = f"Epoch {epoch + 1}/{epochs}, Average Loss: {epoch_loss / len(dataloader):.4f}"
@@ -318,6 +322,7 @@ def evaluate_rnn(
     model.eval()  # Set the model to evaluation mode
     correct_predictions = 0
     total_predictions = 0
+    model_device = model.device # Get model's device once
 
     # Initialize list to count top-k correct predictions
     top_k_correct_preds = [0] * max_k
@@ -327,10 +332,20 @@ def evaluate_rnn(
     perplexities = []
 
     with torch.no_grad():
-        for sequence in sequences:
+        for i in range(sequences.size(0)): # Iterate through sequences by index
+            single_sequence_trace = sequences[i]
+
             # Input is all but the last token, target is the sequence shifted by one
-            x_input = sequence[:-1].unsqueeze(0)  # All but the last token
-            y_target = sequence[1:].unsqueeze(0)  # Shifted by one as target
+            x_input_cpu = single_sequence_trace[:-1]
+            y_target_cpu = single_sequence_trace[1:]
+
+            x_input = x_input_cpu.unsqueeze(0)
+            y_target = y_target_cpu.unsqueeze(0)
+
+            if model_device is not None:
+                x_input = x_input.to(model_device)
+                y_target = y_target.to(model_device)
+
 
             outputs = model(x_input)
 
@@ -571,6 +586,7 @@ def train_transformer(model, train_sequences, val_sequences, criterion, optimize
     best_val_accuracy = 0.0
     best_model_state = None
     patience_counter = 0
+    model_device = model.device # Get model's device once
 
     for epoch in range(epochs):
         model.train()
@@ -579,10 +595,15 @@ def train_transformer(model, train_sequences, val_sequences, criterion, optimize
         with tqdm(total=len(dataloader), desc=f"Epoch {epoch + 1}/{epochs}", unit="batch") as pbar:
             for batch in dataloader:
                 sequences = batch[0]
+                model_device = model.device # Get model's device
 
                 # Input is the entire sequence except the last element
                 x_batch = sequences[:, :-1]
                 y_batch = sequences[:, 1:]
+
+                if model_device is not None:
+                    x_batch = x_batch.to(model_device)
+                    y_batch = y_batch.to(model_device)
 
                 optimizer.zero_grad()
 
@@ -597,17 +618,18 @@ def train_transformer(model, train_sequences, val_sequences, criterion, optimize
                 mask = y_batch != 0
 
                 # Apply mask
-                outputs = outputs[mask]
-                y_batch = y_batch[mask]
+                outputs_masked = outputs[mask]
+                y_batch_masked = y_batch[mask]
 
                 # Compute loss
-                loss = criterion(outputs, y_batch)
+                if outputs_masked.size(0) > 0: # Ensure there are non-padded targets
+                    loss = criterion(outputs_masked, y_batch_masked)
 
-                # Backward pass
-                loss.backward()
-                optimizer.step()
+                    # Backward pass
+                    loss.backward()
+                    optimizer.step()
 
-                epoch_loss += loss.item()
+                    epoch_loss += loss.item()
                 pbar.update(1)
 
         msg = f"Epoch {epoch + 1}/{epochs}, Average Loss: {epoch_loss / len(dataloader):.4f}"
@@ -666,6 +688,7 @@ def evaluate_transformer(
     model.eval()
     correct_predictions = 0
     total_predictions = 0
+    model_device = model.device # Get model's device once
 
     # Initialize list to count top-k correct predictions
     top_k_correct_preds = [0] * max_k
@@ -675,10 +698,20 @@ def evaluate_transformer(
     perplexities = []
 
     with torch.no_grad():
-        for sequence in sequences:
+        for i in range(sequences.size(0)): # Iterate through sequences by index
+            single_sequence_trace = sequences[i]
+
             # Input is all but the last token
-            x_input = sequence[:-1].unsqueeze(0)
-            y_target = sequence[1:].unsqueeze(0)
+            x_input_cpu = single_sequence_trace[:-1]
+            y_target_cpu = single_sequence_trace[1:]
+
+            x_input = x_input_cpu.unsqueeze(0)
+            y_target = y_target_cpu.unsqueeze(0)
+
+            if model_device is not None:
+                x_input = x_input.to(model_device)
+                y_target = y_target.to(model_device)
+
 
             outputs = model(x_input)
 
@@ -687,7 +720,7 @@ def evaluate_transformer(
             predicted_indices = predicted_indices.view(-1)
             y_target = y_target.view(-1)
 
-            # Create mask to ignore padding
+            # Create a mask to ignore padding
             mask = y_target != 0
             masked_targets = y_target[mask]
 
