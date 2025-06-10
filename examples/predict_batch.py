@@ -46,7 +46,15 @@ from logicsponge.processmining.models import (
     Relativize,
     SoftVoting,
 )
-from logicsponge.processmining.neural_networks import LSTMModel, PreprocessData, evaluate_rnn, train_rnn
+from logicsponge.processmining.neural_networks import (
+    LSTMModel,
+    PreprocessData,
+    TransformerModel,
+    evaluate_rnn,
+    evaluate_transformer,
+    train_rnn,
+    train_transformer,
+)
 from logicsponge.processmining.test_data import data_name, dataset, dataset_test
 from logicsponge.processmining.utils import compute_perplexity_stats
 
@@ -185,6 +193,7 @@ all_metrics = {
         *[f"soft voting {grams}*" for grams in VOTING_NGRAMS],
         "alergia",
         "LSTM",
+        "transformer"
         "bayesian train",
         "bayesian test",
         "bayesian t+t",
@@ -878,6 +887,113 @@ for iteration in range(n_iterations):
         all_metrics["LSTM"]["mean_actual_delay"].append(None)
         all_metrics["LSTM"]["mean_normalized_error"].append(None)
         all_metrics["LSTM"]["num_delay_predictions"].append(None)
+
+
+
+        # ============================================================
+        # ============================================================
+
+        # Initialize the Transformer model
+        embedding_dim = 128  # Should be divisible by nhead
+        nhead = 8
+        num_encoder_layers = 3
+        num_decoder_layers = 3
+        dim_feedforward = 512
+        dropout = 0.1
+
+        model = TransformerModel(
+            vocab_size=vocab_size,
+            embedding_dim=embedding_dim,
+            nhead=nhead,
+            num_encoder_layers=num_encoder_layers,
+            num_decoder_layers=num_decoder_layers,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            use_one_hot=True  # or False, depending on your preference
+        )
+
+        criterion = nn.CrossEntropyLoss()
+        optimizer = optim.Adam(model.parameters(), lr=0.0001)  # Lower learning rate for Transformer
+
+
+        # Train the Transformer
+        start_time = time.time()
+        model = train_transformer(
+            model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer,
+            batch_size=4, epochs=20  # Smaller batch size for Transformer
+        )
+        end_time = time.time()
+        training_time = end_time - start_time
+
+        # Evaluate the Transformer
+        transformer_stats, transformer_perplexities, transformer_eval_time = evaluate_transformer(
+            model, nn_test_set_transformed, dataset_type="Test", max_k=config["top_k"]
+        )
+        transformer_perplexity_stats = compute_perplexity_stats(transformer_perplexities)
+
+        # Validation checks
+        if (
+            not isinstance(transformer_stats["top_k_correct_preds"], list)
+            or not isinstance(transformer_stats["total_predictions"], int)
+            or not isinstance(transformer_stats["accuracy"], float)
+        ):
+            msg = "Transformer stats are not in the expected format."
+            raise TypeError(msg)
+
+        # Append data to the iteration data dictionary
+        iteration_data["Model"].append("Transformer")
+
+        iteration_data["PP Harmo"].append(transformer_perplexity_stats["pp_harmonic_mean"])
+        iteration_data["PP Arithm"].append(transformer_perplexity_stats["pp_arithmetic_mean"])
+        iteration_data["PP Median"].append(transformer_perplexity_stats["pp_median"])
+        iteration_data["PP Q1"].append(transformer_perplexity_stats["pp_q1"])
+        iteration_data["PP Q3"].append(transformer_perplexity_stats["pp_q3"])
+
+        iteration_data["Correct (%)"].append(transformer_stats["accuracy"] * 100)
+        iteration_data["Wrong (%)"].append(100 - transformer_stats["accuracy"] * 100)
+        iteration_data["Empty (%)"].append(0.0)
+
+        for k in range(1, config["top_k"]):
+            iteration_data[f"Top-{k + 1}"].append(
+                transformer_stats["top_k_correct_preds"][k] / transformer_stats["total_predictions"] * 100
+            )
+
+        iteration_data["Pred Time"].append(transformer_eval_time)
+
+        iteration_data["Good Preds"].append(transformer_stats["correct_predictions"])
+        iteration_data["Tot Preds"].append(transformer_stats["total_predictions"])
+        iteration_data["Nb States"].append(None)
+
+
+        # Add to stats_to_log
+        stats_to_log.append(
+            {
+                "strategy": "Transformer",
+                "strategy_accuracy": transformer_stats["accuracy"] * 100,
+                "strategy_perplexity": transformer_perplexity_stats["pp_harmonic_mean"],
+                "strategy_eval_time": transformer_eval_time,
+            }
+        )
+
+        # Add to all_metrics
+        all_metrics["Transformer"]["accuracies"].append(transformer_stats["accuracy"])
+        all_metrics["Transformer"]["pp_arithmetic_mean"].append(transformer_perplexity_stats["pp_arithmetic_mean"])
+        all_metrics["Transformer"]["pp_harmonic_mean"].append(transformer_perplexity_stats["pp_harmonic_mean"])
+        all_metrics["Transformer"]["pp_median"].append(transformer_perplexity_stats["pp_median"])
+        all_metrics["Transformer"]["pp_q1"].append(transformer_perplexity_stats["pp_q1"])
+        all_metrics["Transformer"]["pp_q3"].append(transformer_perplexity_stats["pp_q3"])
+
+        for k in range(1, config["top_k"]):
+            all_metrics["Transformer"][f"top-{k + 1}"].append(iteration_data[f"Top-{k + 1}"][-1])
+
+        all_metrics["Transformer"]["pred_time"].append(transformer_eval_time)
+        all_metrics["Transformer"]["train_time"].append(training_time)
+
+        all_metrics["Transformer"]["num_states"].append(0)
+        all_metrics["Transformer"]["mean_delay_error"].append(None)
+        all_metrics["Transformer"]["mean_actual_delay"].append(None)
+        all_metrics["Transformer"]["mean_normalized_error"].append(None)
+        all_metrics["Transformer"]["num_delay_predictions"].append(None)
 
     # Create a DataFrame for the iteration and log it
     iteration_df = pd.DataFrame(iteration_data).round(2)

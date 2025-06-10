@@ -1,5 +1,6 @@
 import copy
 import logging
+import math
 import time
 
 import torch
@@ -418,6 +419,319 @@ def evaluate_rnn(
 
     pause_time += time.time() - pause_start_time
 
+    eval_time = time.time() - eval_start_time - pause_time
+
+    return stats, perplexities, eval_time
+
+
+
+
+
+
+
+
+
+
+
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, embedding_dim: int, max_len: int = 5000, device: torch.device | None = None):
+        super().__init__()
+        self.device = device
+
+        pe = torch.zeros(max_len, embedding_dim, device=device)
+        position = torch.arange(0, max_len, dtype=torch.float, device=device).unsqueeze(1)
+
+        div_term = torch.exp(torch.arange(0, embedding_dim, 2, dtype=torch.float, device=device) *
+                           (-math.log(10000.0) / embedding_dim))
+
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+
+        self.register_buffer("pe", pe.unsqueeze(0))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x + self.pe[:, :x.size(1), :] # type: ignore
+
+
+class TransformerModel(nn.Module):
+    device: torch.device | None
+    embedding: nn.Embedding | None
+    use_one_hot: bool
+    vocab_size: int
+    embedding_dim: int
+    pos_encoding: PositionalEncoding
+    transformer: nn.Transformer
+    fc: nn.Linear
+
+    def __init__(
+        self,
+        vocab_size: int,
+        embedding_dim: int,
+        nhead: int = 8,
+        num_encoder_layers: int = 6,
+        num_decoder_layers: int = 6,
+        dim_feedforward: int = 2048,
+        dropout: float = 0.1,
+        use_one_hot: bool = False,
+        device: torch.device | None = None,
+    ):
+        super().__init__()
+        self.device = device
+        self.use_one_hot = use_one_hot
+        self.vocab_size = vocab_size
+        self.embedding_dim = embedding_dim
+
+        # Conditional embedding layer
+        if not use_one_hot:
+            self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0, device=device)
+        else:
+            self.embedding = None
+
+        # Positional encoding
+        self.pos_encoding = PositionalEncoding(embedding_dim, device=device)
+
+        # Transformer
+        self.transformer = nn.Transformer(
+            d_model=embedding_dim,
+            nhead=nhead,
+            num_encoder_layers=num_encoder_layers,
+            num_decoder_layers=num_decoder_layers,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            batch_first=True,
+            device=device
+        )
+
+        # Output layer
+        self.fc = nn.Linear(embedding_dim, vocab_size, device=device)
+
+        # Apply custom weight initialization
+        self.apply(self._init_weights)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not self.use_one_hot and self.embedding is not None:
+            # Use embedding layer
+            x = self.embedding(x) * math.sqrt(self.embedding_dim)
+        else:
+            # Use one-hot encoding and project to embedding dimension
+            x = F.one_hot(x, num_classes=self.vocab_size).float().to(self.device)
+            # Project one-hot to embedding dimension
+            projection = nn.Linear(self.vocab_size, self.embedding_dim, device=self.device)
+            x = projection(x) * math.sqrt(self.embedding_dim)
+
+        # Add positional encoding
+        x = self.pos_encoding(x)
+
+        # For autoregressive generation, we use the decoder with causal mask
+        seq_len = x.size(1)
+        tgt_mask = self.transformer.generate_square_subsequent_mask(seq_len).to(self.device)
+
+        # Use transformer decoder for autoregressive prediction
+        # We use the same sequence as both src and tgt for teacher forcing
+        output = self.transformer.decoder(
+            tgt=x,
+            memory=x,  # Using same sequence as memory
+            tgt_mask=tgt_mask
+        )
+
+        return self.fc(output)
+
+    def _init_weights(self, m: nn.Module) -> None:
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.Embedding) and m is not None:
+            nn.init.uniform_(m.weight, -0.1, 0.1)
+
+
+def train_transformer(model, train_sequences, val_sequences, criterion, optimizer, batch_size, epochs=10, patience=3):
+    """Training function specifically for Transformer model."""
+    dataset = torch.utils.data.TensorDataset(train_sequences)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    best_val_accuracy = 0.0
+    best_model_state = None
+    patience_counter = 0
+
+    for epoch in range(epochs):
+        model.train()
+        epoch_loss = 0
+
+        with tqdm(total=len(dataloader), desc=f"Epoch {epoch + 1}/{epochs}", unit="batch") as pbar:
+            for batch in dataloader:
+                sequences = batch[0]
+
+                # Input is the entire sequence except the last element
+                x_batch = sequences[:, :-1]
+                y_batch = sequences[:, 1:]
+
+                optimizer.zero_grad()
+
+                # Forward pass
+                outputs = model(x_batch)
+
+                # Reshape for loss computation
+                outputs = outputs.view(-1, outputs.shape[-1])
+                y_batch = y_batch.reshape(-1)
+
+                # Create mask for non-padding positions
+                mask = y_batch != 0
+
+                # Apply mask
+                outputs = outputs[mask]
+                y_batch = y_batch[mask]
+
+                # Compute loss
+                loss = criterion(outputs, y_batch)
+
+                # Backward pass
+                loss.backward()
+                optimizer.step()
+
+                epoch_loss += loss.item()
+                pbar.update(1)
+
+        msg = f"Epoch {epoch + 1}/{epochs}, Average Loss: {epoch_loss / len(dataloader):.4f}"
+        logger.info(msg)
+
+        # Evaluate on validation set
+        msg = "Evaluating on validation set..."
+        logger.info(msg)
+        stats, _, _ = evaluate_transformer(model, val_sequences)
+        val_accuracy = stats["accuracy"]
+
+        if not isinstance(val_accuracy, float):
+            msg = "Validation accuracy is not a float. Check the evaluation function."
+            logger.error(msg)
+            raise TypeError(msg)
+
+        # Check for improvement
+        if val_accuracy > best_val_accuracy:
+            best_val_accuracy = val_accuracy
+            best_model_state = copy.deepcopy(model.state_dict())
+            patience_counter = 0
+            msg = f"New best validation accuracy: {val_accuracy * 100:.2f}%"
+            logger.info(msg)
+        else:
+            patience_counter += 1
+            msg = f"Validation accuracy did not improve. Patience counter: {patience_counter}/{patience}"
+            logger.info(msg)
+
+        # Early stopping
+        if patience_counter >= patience:
+            msg = "Early stopping triggered. Restoring best model weights."
+            logger.info(msg)
+            msg = f"Best validation accuracy: {best_val_accuracy * 100:.2f}%"
+            logger.info(msg)
+            model.load_state_dict(best_model_state)
+            break
+
+    # Load best model state
+    if best_model_state:
+        model.load_state_dict(best_model_state)
+    return model
+
+
+def evaluate_transformer(
+    model,
+    sequences: torch.Tensor,
+    dataset_type: str = "Validation",
+    *,
+    per_sequence_perplexity: bool = True,
+    max_k: int = 3,
+) -> tuple[dict[str, float | list[int]], list[float], float]:
+    """Evaluate the Transformer model on a dataset."""
+    eval_start_time = time.time()
+    pause_time = 0.0
+
+    model.eval()
+    correct_predictions = 0
+    total_predictions = 0
+
+    # Initialize list to count top-k correct predictions
+    top_k_correct_preds = [0] * max_k
+
+    total_nll = 0.0
+    token_count = 0
+    perplexities = []
+
+    with torch.no_grad():
+        for sequence in sequences:
+            # Input is all but the last token
+            x_input = sequence[:-1].unsqueeze(0)
+            y_target = sequence[1:].unsqueeze(0)
+
+            outputs = model(x_input)
+
+            # Flatten for comparison
+            predicted_indices = torch.argmax(outputs, dim=-1)
+            predicted_indices = predicted_indices.view(-1)
+            y_target = y_target.view(-1)
+
+            # Create mask to ignore padding
+            mask = y_target != 0
+            masked_targets = y_target[mask]
+
+            # Count correct predictions
+            correct_predictions += (predicted_indices[mask] == masked_targets).sum().item()
+            total_predictions += mask.sum().item()
+
+            pause_start_time = time.time()
+
+            # Top-k predictions
+            _, top_k_indices = torch.topk(outputs, k=max_k, dim=-1)
+            top_k_indices = top_k_indices.view(-1, max_k)
+            log_probs = F.log_softmax(outputs, dim=-1)
+            log_probs = log_probs.view(-1, log_probs.shape[-1])
+            masked_log_probs = log_probs[mask]
+
+            masked_top_k = top_k_indices[mask]
+
+            # Count correct predictions for each k
+            for k in range(max_k):
+                top_k_preds = masked_top_k[:, : (k + 1)]
+                expanded_targets = masked_targets.unsqueeze(1).expand_as(top_k_preds)
+                top_k_correct = (top_k_preds == expanded_targets).any(dim=1).sum().item()
+                top_k_correct_preds[k] += int(top_k_correct)
+
+            # NLL for perplexity
+            token_log_probs = masked_log_probs[torch.arange(len(masked_targets)), masked_targets]
+            sequence_nll = -token_log_probs.sum().item()
+            sequence_length = masked_targets.size(0)
+
+            if per_sequence_perplexity:
+                sequence_perplexity = (
+                    torch.exp(torch.tensor(sequence_nll / sequence_length)).item()
+                    if sequence_length > 0
+                    else float("inf")
+                )
+                perplexities.append(sequence_perplexity)
+
+            total_nll += sequence_nll
+            token_count += sequence_length
+
+            pause_time += time.time() - pause_start_time
+
+    accuracy = correct_predictions / total_predictions if total_predictions > 0 else 0
+
+    pause_start_time = time.time()
+    if not per_sequence_perplexity:
+        perplexities.append(
+            torch.exp(torch.tensor(total_nll / token_count)).item() if token_count > 0 else float("inf")
+        )
+
+    logger.debug("Perplexity: %s", perplexities[-1])
+
+    stats = {
+        "accuracy": accuracy,
+        "total_predictions": total_predictions,
+        "correct_predictions": correct_predictions,
+        "top_k_correct_preds": top_k_correct_preds,
+    }
+
+    pause_time += time.time() - pause_start_time
     eval_time = time.time() - eval_start_time - pause_time
 
     return stats, perplexities, eval_time
