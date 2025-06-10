@@ -643,6 +643,7 @@ for iteration in range(n_iterations):
         logger.info(msg)
 
         evaluation_time = strategy.evaluate(test_data, mode="incremental", debug=(data_name == "Synthetic_Train"))
+        evaluation_time *= SEC_TO_MICRO  # Convert to microseconds
 
         stats = strategy.stats
 
