@@ -58,6 +58,8 @@ from logicsponge.processmining.neural_networks import (
 from logicsponge.processmining.test_data import data_name, dataset, dataset_test
 from logicsponge.processmining.utils import compute_perplexity_stats
 
+SEC_TO_MICRO = 1_000_000
+
 # ============================================================
 # Generate a list of ngrams to test
 # ============================================================
@@ -185,11 +187,11 @@ all_metrics = {
         "fallback ngram_8->...->1",
         "complex fallback",
         "hard voting",
-        *[
-            f"adaptive voting {grams} {select_best_arg}"
-            for select_best_arg in SELECT_BEST_ARGS
-            for grams in VOTING_NGRAMS
-        ],
+        # *[
+        #     f"adaptive voting {grams} {select_best_arg}"
+        #     for select_best_arg in SELECT_BEST_ARGS
+        #     for grams in VOTING_NGRAMS
+        # ],
         *[f"soft voting {grams}" for grams in VOTING_NGRAMS],
         *[f"soft voting {grams}*" for grams in VOTING_NGRAMS],
         "alergia",
@@ -541,14 +543,14 @@ for iteration in range(n_iterations):
         "fallback ngram_8->...->1": (fallback_ngram8to_ooo, test_set_transformed),
         "complex fallback": (complex_fallback, test_set_transformed),
         "hard voting": (hard_voting, test_set_transformed),
-        **adaptive_voting_strategies,
+        # **adaptive_voting_strategies,
         **soft_voting_strategies,
         "alergia": (smm, test_set_transformed),
         **bayesian_strategies,
     }
 
     training_times = dict.fromkeys(strategies, 0.0)
-    training_times["alergia"] = alergia_elapsed_time
+    training_times["alergia"] = alergia_elapsed_time * SEC_TO_MICRO
 
     # ================= Train Process Miners
     miners_start_time = time.time()
@@ -563,6 +565,7 @@ for iteration in range(n_iterations):
             training_times[strategy_name] += end_time - start_time
 
     for strategy_name in strategies:
+        training_times[strategy_name] *= SEC_TO_MICRO  # Convert to microseconds
         training_times[strategy_name] /= len(train_set)
 
     miners_end_time = time.time()
@@ -589,6 +592,7 @@ for iteration in range(n_iterations):
             model.initialize_memory(train_set_transformed + test_set_transformed)
             end_time = time.time()
             training_times[model_name] = end_time - start_time
+        training_times[model_name] *= SEC_TO_MICRO  # Convert to microseconds
 
     bayesian_end_time = time.time()
     elapsed_time = bayesian_end_time - bayesian_start_time
@@ -788,12 +792,13 @@ for iteration in range(n_iterations):
             model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=20
         ) if not SKIP_LSTM else model
         end_time = time.time()
-        training_time = end_time - start_time
+        training_time = (end_time - start_time) * SEC_TO_MICRO  # Convert to microseconds
 
         lstm_stats, lstm_perplexities, lstm_eval_time = evaluate_rnn(
             model, nn_test_set_transformed, dataset_type="Test", max_k=config["top_k"]
         )
         lstm_perplexity_stats = compute_perplexity_stats(lstm_perplexities)
+        lstm_eval_time *= SEC_TO_MICRO  # Convert to microseconds
 
         # if SHOW_DELAYS:
         #     # WARNING: LSTM DOES NOT CALCULATES DELAYS SO FAR ??
@@ -900,13 +905,14 @@ for iteration in range(n_iterations):
             batch_size=8, epochs=20
         )
         end_time = time.time()
-        training_time = end_time - start_time
+        training_time = (end_time - start_time) * SEC_TO_MICRO  # Convert to microseconds
 
         # Evaluate the transformer
         transformer_stats, transformer_perplexities, transformer_eval_time = evaluate_transformer(
             model, nn_test_set_transformed, dataset_type="Test", max_k=config["top_k"]
         )
         transformer_perplexity_stats = compute_perplexity_stats(transformer_perplexities)
+        transformer_eval_time *= SEC_TO_MICRO  # Convert to microseconds
 
         # Validation checks
         if (
