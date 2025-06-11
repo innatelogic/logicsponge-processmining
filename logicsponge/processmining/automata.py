@@ -33,7 +33,8 @@ class Automaton:
         self.initial_state = state_id
 
     def create_state(self, state_id: StateId | None = None) -> StateId:
-        """Create and initializes a new state with the given name and state ID.
+        """
+        Create and initializes a new state with the given name and state ID.
 
         If no state ID is provided, ID is assigned based on current number of states.
         """
@@ -52,7 +53,8 @@ class Automaton:
             self.create_state()
 
     def add_transition(self, *args, **kwargs) -> None:
-        """Abstract method to add a transition between states.
+        """
+        Abstract method to add a transition between states.
 
         Parameters
         ----------

@@ -22,7 +22,8 @@ stop_symbol = DEFAULT_CONFIG["stop_symbol"]
 
 
 def probs_prediction(probs: ProbDistr, config: Config) -> Prediction | None:
-    """Return the top-k activities based on their probabilities.
+    """
+    Return the top-k activities based on their probabilities.
 
     If stop_symbol has a probability of 1.0 and there are no other activities, return None.
     If stop_symbol has a probability of 1.0 and there are other activities, give a uniform distribution to these
@@ -153,6 +154,7 @@ def compute_perplexity_stats(perplexities: list[float]) -> dict[str, float]:
     res["pp_q3"] = q3_perplexity
 
     return res
+
 
 def compute_seq_perplexity(normalized_likelihood: float, *, log_likelihood: bool) -> float:
     """Compute the perplexity of a sequence."""

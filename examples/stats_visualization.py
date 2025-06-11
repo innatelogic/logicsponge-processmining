@@ -1,4 +1,5 @@
-"""Module to visualize the correctness of states based on various factors.
+"""
+Module to visualize the correctness of states based on various factors.
 
 This module reads state statistics data and visualizes correctness metrics
 based on visits, level, and state ID.
@@ -29,7 +30,8 @@ class PerStateStats:
 
 
 def get_latest_stats_file(folder: Path = Path("results")) -> tuple[Path, str]:
-    """Get the latest stats file from the specified folder.
+    """
+    Get the latest stats file from the specified folder.
 
     It considers files matching "stats_batch_*.json" or "stats_streaming_*.json".
 
@@ -80,7 +82,8 @@ def get_latest_stats_file(folder: Path = Path("results")) -> tuple[Path, str]:
 
 
 def load_stats(file_path: Path) -> list[dict]:
-    """Load stats from the specified JSON file.
+    """
+    Load stats from the specified JSON file.
 
     Args:
         file_path (Path): The path to the JSON file.
@@ -94,7 +97,8 @@ def load_stats(file_path: Path) -> list[dict]:
 
 
 def prepare_data_from_per_state_stats(per_state_stats: dict[int, PerStateStats]) -> pd.DataFrame:
-    """Convert per_state_stats dictionary to a pandas DataFrame.
+    """
+    Convert per_state_stats dictionary to a pandas DataFrame.
 
     Args:
         per_state_stats: dictionary mapping state IDs to PerStateStats objects.
@@ -127,10 +131,9 @@ def prepare_data_from_per_state_stats(per_state_stats: dict[int, PerStateStats])
     return pd.DataFrame(data)
 
 
-def extract_global_stats_from_log_data(
-        log_data: list[dict]
-    ) -> dict[str, dict[str, float]]:
-    """Extract global stats from loaded log data.
+def extract_global_stats_from_log_data(log_data: list[dict]) -> dict[str, dict[str, float]]:
+    """
+    Extract global stats from loaded log data.
 
     Args:
         log_data: List of dictionaries containing model stats as loaded from JSON.
@@ -149,11 +152,11 @@ def extract_global_stats_from_log_data(
         # Streaming CSV (transformed) might provide "accuracy" as 0-1.
         # We want final accuracy in global_stats to be 0-1 for plotting.
         final_accuracy = 0.0
-        strategy_acc_val = model_data.get("strategy_accuracy") # From batch (0-100)
+        strategy_acc_val = model_data.get("strategy_accuracy")  # From batch (0-100)
         if strategy_acc_val is not None:
             final_accuracy = strategy_acc_val / 100.0
         else:
-            direct_acc_val = model_data.get("accuracy") # From streaming (0-1)
+            direct_acc_val = model_data.get("accuracy")  # From streaming (0-1)
             if direct_acc_val is not None:
                 final_accuracy = direct_acc_val
             # else final_accuracy remains 0.0
@@ -161,16 +164,15 @@ def extract_global_stats_from_log_data(
         global_stats[strategy_name] = {
             "accuracy": final_accuracy,
             "perplexity": model_data.get(
-                "strategy_perplexity",
-                model_data.get("perplexity", 0.0)
-            ), # Also check direct perplexity
+                "strategy_perplexity", model_data.get("perplexity", 0.0)
+            ),  # Also check direct perplexity
             "evaluation_time": model_data.get(
-                "strategy_eval_time",
-                model_data.get("evaluation_time", 0.0)
-            ), # Also check direct eval_time
+                "strategy_eval_time", model_data.get("evaluation_time", 0.0)
+            ),  # Also check direct eval_time
         }
 
     return global_stats
+
 
 def extract_per_index_stats_from_log_data(log_data: list[dict]) -> dict[str, dict[str, list[float]]]:
     """Extract per_index_stats dictionaries from loaded log data."""
@@ -184,11 +186,11 @@ def extract_per_index_stats_from_log_data(log_data: list[dict]) -> dict[str, dic
         # Streaming CSV (transformed) might provide "accuracy" as 0-1.
         # We want final accuracy in global_stats to be 0-1 for plotting.
         final_accuracy = 0.0
-        strategy_acc_val = index_data.get("strategy_accuracy") # From batch (0-100)
+        strategy_acc_val = index_data.get("strategy_accuracy")  # From batch (0-100)
         if strategy_acc_val is not None:
             final_accuracy = strategy_acc_val / 100.0
         else:
-            direct_acc_val = index_data.get("accuracy") # From streaming (0-1)
+            direct_acc_val = index_data.get("accuracy")  # From streaming (0-1)
             if direct_acc_val is not None:
                 final_accuracy = direct_acc_val
             # else final_accuracy remains 0.0
@@ -200,22 +202,20 @@ def extract_per_index_stats_from_log_data(log_data: list[dict]) -> dict[str, dic
                 "perplexity": [],
                 "evaluation_time": [],
             }
-        per_index_stats[strategy_name]["batch_index"].append(
-            index_data.get("batch_index", 0)
-        )
+        per_index_stats[strategy_name]["batch_index"].append(index_data.get("batch_index", 0))
         per_index_stats[strategy_name]["accuracy"].append(final_accuracy)
-        per_index_stats[strategy_name]["perplexity"].append(index_data.get(
-            "strategy_perplexity",
-            index_data.get("pp_harmonic_mean", 0.0)
-        ))
-        per_index_stats[strategy_name]["evaluation_time"].append(index_data.get(
-            "strategy_eval_time",
-            index_data.get("evaluation_time", 0.0)
-        ))
+        per_index_stats[strategy_name]["perplexity"].append(
+            index_data.get("strategy_perplexity", index_data.get("pp_harmonic_mean", 0.0))
+        )
+        per_index_stats[strategy_name]["evaluation_time"].append(
+            index_data.get("strategy_eval_time", index_data.get("evaluation_time", 0.0))
+        )
     return per_index_stats
 
+
 def extract_per_state_stats_from_log_data(log_data: list[dict]) -> dict[str, dict[int, PerStateStats]]:
-    """Extract per_state_stats dictionaries from loaded log data.
+    """
+    Extract per_state_stats dictionaries from loaded log data.
 
     Args:
         log_data: List of dictionaries containing model stats as loaded from JSON.
@@ -294,7 +294,8 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
     visible_models: list[str] | None = None,
     add_by_state_id: bool = False,
 ) -> None:
-    """Plot state correctness statistics and global model performance based on log data.
+    """
+    Plot state correctness statistics and global model performance based on log data.
 
     Args:
         log_data: list of dictionaries containing model stats as loaded from JSON.
@@ -337,7 +338,7 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
             "yaxis_title": "Correctness Rate",
             "yaxis_range": [0, 1],
             "data_type": "per_state",
-        }
+        },
     }
     if add_by_state_id:
         plot_configs["state_id"] = {
@@ -376,24 +377,27 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
         "data_type": "global",
     }
 
-    initial_plot_key = "visits" # Default plot to show
+    initial_plot_key = "visits"  # Default plot to show
 
     fig = make_subplots(rows=1, cols=1)
 
     colors = [
-        "rgb(31, 119, 180)", "rgb(255, 127, 14)", "rgb(44, 160, 44)", "rgb(214, 39, 40)",
-        "rgb(148, 103, 189)", "rgb(140, 86, 75)", "rgb(227, 119, 194)", "rgb(127, 127, 127)",
-        "rgb(188, 189, 34)", "rgb(23, 190, 207)",
+        "rgb(31, 119, 180)",
+        "rgb(255, 127, 14)",
+        "rgb(44, 160, 44)",
+        "rgb(214, 39, 40)",
+        "rgb(148, 103, 189)",
+        "rgb(140, 86, 75)",
+        "rgb(227, 119, 194)",
+        "rgb(127, 127, 127)",
+        "rgb(188, 189, 34)",
+        "rgb(23, 190, 207)",
     ]
 
-    all_traces_info = [] # Stores {"trace": trace_object, "strategy": name, "plot_key": key}
+    all_traces_info = []  # Stores {"trace": trace_object, "strategy": name, "plot_key": key}
 
-    all_unique_strategy_names = sorted(
-        set(per_strategy_stats.keys()) | set(global_stats_per_strategy.keys())
-    )
-    strategy_color_map = {
-        name: colors[j % len(colors)] for j, name in enumerate(all_unique_strategy_names)
-    }
+    all_unique_strategy_names = sorted(set(per_strategy_stats.keys()) | set(global_stats_per_strategy.keys()))
+    strategy_color_map = {name: colors[j % len(colors)] for j, name in enumerate(all_unique_strategy_names)}
 
     # Add Per-State Traces
     for strategy_name, current_per_state_stats in per_strategy_stats.items():
@@ -409,115 +413,133 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
 
         # Visits Plot
         trace_visits_scatter = go.Scatter(
-            x=df_with_predictions["visits"], y=df_with_predictions["correctness_rate"], mode="markers",
-            name=strategy_name, legendgroup=strategy_name, showlegend=True,
+            x=df_with_predictions["visits"],
+            y=df_with_predictions["correctness_rate"],
+            mode="markers",
+            name=strategy_name,
+            legendgroup=strategy_name,
+            showlegend=True,
             marker={"size": sizes, "color": color, "opacity": 0.6},
-            text=[f"Strategy: {strategy_name}, State ID: {sid}, Level: {lvl}, Visits: {vis}<br>"
-                  f"Correct: {cor}, Wrong: {wrg}, Empty: {emp}, Rate: {rate:.2f}, Failure: {failure:.2f}"
-                  for sid, lvl, vis, cor, wrg, emp, rate, failure in zip(
-                      df_with_predictions["state_id"], df_with_predictions["level"], df_with_predictions["visits"],
-                      df_with_predictions["correct_predictions"], df_with_predictions["wrong_predictions"],
-                      df_with_predictions["empty_predictions"], df_with_predictions["correctness_rate"],
-                      df_with_predictions["failure_rate"], strict=False)],
-            hoverinfo="text", visible=(initial_plot_key == "visits"))
+            text=[
+                f"Strategy: {strategy_name}, State ID: {sid}, Level: {lvl}, Visits: {vis}<br>"
+                f"Correct: {cor}, Wrong: {wrg}, Empty: {emp}, Rate: {rate:.2f}, Failure: {failure:.2f}"
+                for sid, lvl, vis, cor, wrg, emp, rate, failure in zip(
+                    df_with_predictions["state_id"],
+                    df_with_predictions["level"],
+                    df_with_predictions["visits"],
+                    df_with_predictions["correct_predictions"],
+                    df_with_predictions["wrong_predictions"],
+                    df_with_predictions["empty_predictions"],
+                    df_with_predictions["correctness_rate"],
+                    df_with_predictions["failure_rate"],
+                    strict=False,
+                )
+            ],
+            hoverinfo="text",
+            visible=(initial_plot_key == "visits"),
+        )
         fig.add_trace(trace_visits_scatter, row=1, col=1)
         all_traces_info.append(
-            {
-                "trace": trace_visits_scatter,
-                "strategy": strategy_name,
-                "plot_key": "visits",
-                "is_legend_item": True
-            }
+            {"trace": trace_visits_scatter, "strategy": strategy_name, "plot_key": "visits", "is_legend_item": True}
         )
 
         if len(df_with_predictions) > 1:
             trend_visits = add_trend_line(df_with_predictions, color, strategy_name, "visits")
             trend_visits.legendgroup = strategy_name
-            trend_visits.visible = (initial_plot_key == "visits")
+            trend_visits.visible = initial_plot_key == "visits"
             fig.add_trace(trend_visits, row=1, col=1)
             all_traces_info.append(
-                {
-                    "trace": trend_visits,
-                    "strategy": strategy_name,
-                    "plot_key": "visits",
-                    "is_legend_item": False
-                }
+                {"trace": trend_visits, "strategy": strategy_name, "plot_key": "visits", "is_legend_item": False}
             )
 
         # Level Plot
         trace_level_scatter = go.Scatter(
-            x=df_with_predictions["level"], y=df_with_predictions["correctness_rate"], mode="markers",
-            name=strategy_name, legendgroup=strategy_name, showlegend=True,
+            x=df_with_predictions["level"],
+            y=df_with_predictions["correctness_rate"],
+            mode="markers",
+            name=strategy_name,
+            legendgroup=strategy_name,
+            showlegend=True,
             marker={"size": sizes, "color": color, "opacity": 0.6},
-            text=[f"Strategy: {strategy_name}, State ID: {sid}, Level: {lvl}, Visits: {vis}<br>"
-                  f"Correct: {cor}, Wrong: {wrg}, Empty: {emp}, Rate: {rate:.2f}"
-                  for sid, lvl, vis, cor, wrg, emp, rate in zip(
-                      df_with_predictions["state_id"], df_with_predictions["level"], df_with_predictions["visits"],
-                      df_with_predictions["correct_predictions"], df_with_predictions["wrong_predictions"],
-                      df_with_predictions["empty_predictions"], df_with_predictions["correctness_rate"], strict=False)],
-            hoverinfo="text", visible=(initial_plot_key == "level"))
+            text=[
+                f"Strategy: {strategy_name}, State ID: {sid}, Level: {lvl}, Visits: {vis}<br>"
+                f"Correct: {cor}, Wrong: {wrg}, Empty: {emp}, Rate: {rate:.2f}"
+                for sid, lvl, vis, cor, wrg, emp, rate in zip(
+                    df_with_predictions["state_id"],
+                    df_with_predictions["level"],
+                    df_with_predictions["visits"],
+                    df_with_predictions["correct_predictions"],
+                    df_with_predictions["wrong_predictions"],
+                    df_with_predictions["empty_predictions"],
+                    df_with_predictions["correctness_rate"],
+                    strict=False,
+                )
+            ],
+            hoverinfo="text",
+            visible=(initial_plot_key == "level"),
+        )
         fig.add_trace(trace_level_scatter, row=1, col=1)
         all_traces_info.append(
-            {
-                "trace": trace_level_scatter,
-                "strategy": strategy_name,
-                "plot_key": "level",
-                "is_legend_item": False
-            }
+            {"trace": trace_level_scatter, "strategy": strategy_name, "plot_key": "level", "is_legend_item": False}
         )
 
         if len(df_with_predictions) > 1:
             trend_level = add_trend_line(df_with_predictions, color, strategy_name, "level")
             trend_level.legendgroup = strategy_name
-            trend_level.visible = (initial_plot_key == "level")
+            trend_level.visible = initial_plot_key == "level"
             fig.add_trace(trend_level, row=1, col=1)
             all_traces_info.append(
-                {
-                    "trace": trend_level,
-                    "strategy": strategy_name,
-                    "plot_key": "level",
-                    "is_legend_item": False
-                }
+                {"trace": trend_level, "strategy": strategy_name, "plot_key": "level", "is_legend_item": False}
             )
 
         # State ID Plot (if applicable)
         if add_by_state_id:
             trace_state_id_scatter = go.Scatter(
-                x=df_with_predictions["state_id"], y=df_with_predictions["correctness_rate"], mode="markers",
-                name=strategy_name, legendgroup=strategy_name, showlegend=True,
+                x=df_with_predictions["state_id"],
+                y=df_with_predictions["correctness_rate"],
+                mode="markers",
+                name=strategy_name,
+                legendgroup=strategy_name,
+                showlegend=True,
                 marker={"size": sizes, "color": color, "opacity": 0.6},
-                text=
-                    [f"Strategy: {strategy_name}, State ID: {sid}, Level: {lvl}, Visits: {vis}<br>"
-                      f"Correct: {cor}, Wrong: {wrg}, Empty: {emp}, Rate: {rate:.2f}"
-                      for sid, lvl, vis, cor, wrg, emp, rate in zip(
-                          df_with_predictions["state_id"],
-                          df_with_predictions["level"],
-                          df_with_predictions["visits"],
-                          df_with_predictions["correct_predictions"],
-                          df_with_predictions["wrong_predictions"],
-                          df_with_predictions["empty_predictions"],
-                          df_with_predictions["correctness_rate"],
-                          strict=False)],
-                hoverinfo="text", visible=(initial_plot_key == "state_id"))
+                text=[
+                    f"Strategy: {strategy_name}, State ID: {sid}, Level: {lvl}, Visits: {vis}<br>"
+                    f"Correct: {cor}, Wrong: {wrg}, Empty: {emp}, Rate: {rate:.2f}"
+                    for sid, lvl, vis, cor, wrg, emp, rate in zip(
+                        df_with_predictions["state_id"],
+                        df_with_predictions["level"],
+                        df_with_predictions["visits"],
+                        df_with_predictions["correct_predictions"],
+                        df_with_predictions["wrong_predictions"],
+                        df_with_predictions["empty_predictions"],
+                        df_with_predictions["correctness_rate"],
+                        strict=False,
+                    )
+                ],
+                hoverinfo="text",
+                visible=(initial_plot_key == "state_id"),
+            )
             fig.add_trace(trace_state_id_scatter, row=1, col=1)
             all_traces_info.append(
                 {
-                    "trace": trace_state_id_scatter, "strategy": strategy_name, "plot_key": "per_state_id",
-                    "is_legend_item": False
+                    "trace": trace_state_id_scatter,
+                    "strategy": strategy_name,
+                    "plot_key": "per_state_id",
+                    "is_legend_item": False,
                 }
             )
 
             if len(df_with_predictions) > 1:
                 trend_state_id = add_trend_line(df_with_predictions, color, strategy_name, "state_id")
                 trend_state_id.legendgroup = strategy_name
-                trend_state_id.visible = (initial_plot_key == "state_id")
+                trend_state_id.visible = initial_plot_key == "state_id"
                 fig.add_trace(trend_state_id, row=1, col=1)
                 all_traces_info.append(
                     {
                         "trace": trend_state_id,
                         "strategy": strategy_name,
                         "plot_key": "state_id",
-                        "is_legend_item": False
+                        "is_legend_item": False,
                     }
                 )
 
@@ -533,18 +555,21 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
             x=[eval_time],
             y=[accuracy],
             mode="markers",
-            name=strategy_name, legendgroup=strategy_name,
+            name=strategy_name,
+            legendgroup=strategy_name,
             showlegend=True,
             marker={"size": 10, "color": color},
             text=[f"Strategy: {strategy_name}<br>Eval Time: {eval_time:.2f}s<br>Accuracy: {accuracy:.3f}"],
-            hoverinfo="text", visible=(initial_plot_key == "global_accuracy"))
+            hoverinfo="text",
+            visible=(initial_plot_key == "global_accuracy"),
+        )
         fig.add_trace(trace_global_acc, row=1, col=1)
         all_traces_info.append(
             {
                 "trace": trace_global_acc,
                 "strategy": strategy_name,
                 "plot_key": "global_accuracy",
-                "is_legend_item": False
+                "is_legend_item": False,
             }
         )
 
@@ -558,15 +583,18 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
             showlegend=True,
             marker={"size": 10, "color": color},
             text=[f"Strategy: {strategy_name}<br>Eval Time: {eval_time:.2f}s<br>Perplexity: {perplexity:.3f}"],
-            hoverinfo="text", visible=(initial_plot_key == "global_perplexity"))
+            hoverinfo="text",
+            visible=(initial_plot_key == "global_perplexity"),
+        )
         fig.add_trace(trace_global_perp, row=1, col=1)
-        all_traces_info.append({
-            "trace": trace_global_perp,
-            "strategy": strategy_name,
-            "plot_key": "global_perplexity",
-            "is_legend_item": False,
-        })
-
+        all_traces_info.append(
+            {
+                "trace": trace_global_perp,
+                "strategy": strategy_name,
+                "plot_key": "global_perplexity",
+                "is_legend_item": False,
+            }
+        )
 
     # Add Per Index Stats Traces
     if per_index_df is not None:
@@ -579,36 +607,33 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
                 if metric in group.columns:
                     y = group[metric]
                     trace_acc_per_index = go.Scatter(
-                            x=x,
-                            y=y,
-                            mode="lines+markers",
-                            name=strategy_name if i == 0 else None,  # Show legend only in first subplot
-                            legendgroup=strategy_name,
-                            marker={"size": 6, "color": color},
-                            text=[
-                                f"Strategy: {strategy_name}<br>Batch: {b}<br>{metric}: {v:.3f}"
-                                for b, v in zip(x, y, strict=False)
-                            ],
-                            hoverinfo="text"
-                        )
-                    fig.add_trace(
-                        trace_acc_per_index
+                        x=x,
+                        y=y,
+                        mode="lines+markers",
+                        name=strategy_name if i == 0 else None,  # Show legend only in first subplot
+                        legendgroup=strategy_name,
+                        marker={"size": 6, "color": color},
+                        text=[
+                            f"Strategy: {strategy_name}<br>Batch: {b}<br>{metric}: {v:.3f}"
+                            for b, v in zip(x, y, strict=False)
+                        ],
+                        hoverinfo="text",
                     )
+                    fig.add_trace(trace_acc_per_index)
                     all_traces_info.append(
                         {
                             "trace": trace_acc_per_index,
                             "strategy": strategy_name,
                             "plot_key": f"per_index_{metric}",
-                            "is_legend_item": False
+                            "is_legend_item": False,
                         }
                     )
-
 
     # Initial Layout
     initial_config = plot_configs[initial_plot_key]
     fig.update_layout(
         title=initial_config["title"],
-        height=700, # Adjusted height for single plot
+        height=700,  # Adjusted height for single plot
         legend_title="Strategies",
         hovermode="closest",
         xaxis_title=initial_config["xaxis_title"],
@@ -618,7 +643,6 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
         fig.update_yaxes(range=initial_config["yaxis_range"], autorange=None)
     if "yaxis_autorange" in initial_config:
         fig.update_yaxes(autorange=initial_config["yaxis_autorange"], range=None)
-
 
     # Create buttons for plot type selection
     plot_type_buttons = []
@@ -686,27 +710,27 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
 
         args_list.append(layout_update)
 
-        plot_type_buttons.append({
-            "label": config["title"], # Use full title for clarity in dropdown
-            "method": "update",
-            "args": args_list
-        })
+        plot_type_buttons.append(
+            {
+                "label": config["title"],  # Use full title for clarity in dropdown
+                "method": "update",
+                "args": args_list,
+            }
+        )
 
     # Create buttons for strategy selection
     strategy_buttons = []
     # Button for showing all strategies
-    strategy_buttons.append({
-        "label": "All Strategies",
-        "method": "update",
-        "args": [
-            {
-                "visible": [
-                    info["plot_key"] == initial_plot_key for info in all_traces_info
-                ]
-            },
-            {},  # Default to initial plot key
-        ]
-    }) # This needs to be smarter, respecting current plot view
+    strategy_buttons.append(
+        {
+            "label": "All Strategies",
+            "method": "update",
+            "args": [
+                {"visible": [info["plot_key"] == initial_plot_key for info in all_traces_info]},
+                {},  # Default to initial plot key
+            ],
+        }
+    )  # This needs to be smarter, respecting current plot view
 
     # Revised strategy buttons:
     # The strategy buttons should only affect visibility of traces that match the *currently selected plot type*.
@@ -719,11 +743,7 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
     strategy_buttons = []
     all_traces_visible_true = [True] * len(all_traces_info)
     strategy_buttons.append(
-        {
-            "label": "All Strategies",
-            "method": "update",
-            "args": [{"visible": all_traces_visible_true}]
-        }
+        {"label": "All Strategies", "method": "update", "args": [{"visible": all_traces_visible_true}]}
     )
 
     unique_strategies = sorted(all_unique_strategy_names)
@@ -742,18 +762,18 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
                 "buttons": plot_type_buttons,
                 "direction": "down",
                 "showactive": True,
-                "x": 0.5, # Centered
+                "x": 0.5,  # Centered
                 "y": 1.15,
                 "xanchor": "center",
                 "yanchor": "top",
-                "name": "Select Plot Type"
+                "name": "Select Plot Type",
             },
             # Strategy selection dropdown
             {
                 "buttons": strategy_buttons,
                 "direction": "down",
                 "showactive": True,
-                "x": 1.0, # Right
+                "x": 1.0,  # Right
                 "y": 1.15,
                 "xanchor": "right",
                 "yanchor": "top",
@@ -762,7 +782,7 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
             {
                 "type": "buttons",
                 "direction": "right",
-                "x": 0, # Left
+                "x": 0,  # Left
                 "y": 1.15,
                 "buttons": [
                     {"label": "X Linear", "method": "relayout", "args": [xaxis_linear_config]},
@@ -805,7 +825,7 @@ if __name__ == "__main__":
         visible_models = [ngram_name for ngram_name in NGRAM_NAMES if "shorts" not in ngram_name]
         visible_models += ["soft voting", "fallback ngram_8->bag", "bayesian train"]
 
-        plot_stats(log_data) #, visible_models=visible_models)
+        plot_stats(log_data)  # , visible_models=visible_models)
 
     elif stats_mode == "streaming":
         try:
@@ -856,7 +876,7 @@ if __name__ == "__main__":
             print(f"No data processed from streaming file {stats_file} for the dashboard.")
         else:
             print(f"Generating dashboard for streaming data from {stats_file}...")
-            plot_stats(log_data_streaming, per_index_df=df_streaming) #, visible_models=visible_models)
+            plot_stats(log_data_streaming, per_index_df=df_streaming)  # , visible_models=visible_models)
 
     else:
         print(f"Unknown stats mode: {stats_mode}. Expected 'batch' or 'streaming'.")

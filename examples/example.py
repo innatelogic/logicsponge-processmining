@@ -1,4 +1,5 @@
-"""Example of a simple process mining pipeline using LogicSponge.
+"""
+Example of a simple process mining pipeline using LogicSponge.
 
 This example demonstrates how to use LogicSponge to create a process mining pipeline
 that predicts the next activity in a process based on historical data.

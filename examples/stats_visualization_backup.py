@@ -1,4 +1,5 @@
-"""Module to visualize the correctness of states based on various factors.
+"""
+Module to visualize the correctness of states based on various factors.
 
 This module reads state statistics data and visualizes correctness metrics
 based on visits, level, and state ID.
@@ -29,7 +30,8 @@ class PerStateStats:
 
 
 def get_latest_stats_file(folder: Path = Path("results")) -> tuple[Path, str]:
-    """Get the latest stats file from the specified folder.
+    """
+    Get the latest stats file from the specified folder.
 
     It considers files matching "stats_batch_*.json" or "stats_streaming_*.json".
 
@@ -80,7 +82,8 @@ def get_latest_stats_file(folder: Path = Path("results")) -> tuple[Path, str]:
 
 
 def load_stats(file_path: Path) -> list[dict]:
-    """Load stats from the specified JSON file.
+    """
+    Load stats from the specified JSON file.
 
     Args:
         file_path (Path): The path to the JSON file.
@@ -94,7 +97,8 @@ def load_stats(file_path: Path) -> list[dict]:
 
 
 def prepare_data_from_per_state_stats(per_state_stats: dict[int, PerStateStats]) -> pd.DataFrame:
-    """Convert per_state_stats dictionary to a pandas DataFrame.
+    """
+    Convert per_state_stats dictionary to a pandas DataFrame.
 
     Args:
         per_state_stats: dictionary mapping state IDs to PerStateStats objects.
@@ -127,10 +131,9 @@ def prepare_data_from_per_state_stats(per_state_stats: dict[int, PerStateStats])
     return pd.DataFrame(data)
 
 
-def extract_global_stats_from_log_data(
-        log_data: list[dict]
-    ) -> dict[str, dict[str, float]]:
-    """Extract global stats from loaded log data.
+def extract_global_stats_from_log_data(log_data: list[dict]) -> dict[str, dict[str, float]]:
+    """
+    Extract global stats from loaded log data.
 
     Args:
         log_data: List of dictionaries containing model stats as loaded from JSON.
@@ -149,26 +152,31 @@ def extract_global_stats_from_log_data(
         # Streaming CSV (transformed) might provide 'accuracy' as 0-1.
         # We want final accuracy in global_stats to be 0-1 for plotting.
         final_accuracy = 0.0
-        strategy_acc_val = model_data.get("strategy_accuracy") # From batch (0-100)
+        strategy_acc_val = model_data.get("strategy_accuracy")  # From batch (0-100)
         if strategy_acc_val is not None:
             final_accuracy = strategy_acc_val / 100.0
         else:
-            direct_acc_val = model_data.get("accuracy") # From streaming (0-1)
+            direct_acc_val = model_data.get("accuracy")  # From streaming (0-1)
             if direct_acc_val is not None:
                 final_accuracy = direct_acc_val
             # else final_accuracy remains 0.0
 
         global_stats[strategy_name] = {
             "accuracy": final_accuracy,
-            "perplexity": model_data.get("strategy_perplexity", model_data.get("perplexity", 0.0)), # Also check direct perplexity
-            "evaluation_time": model_data.get("strategy_eval_time", model_data.get("evaluation_time", 0.0)), # Also check direct eval_time
+            "perplexity": model_data.get(
+                "strategy_perplexity", model_data.get("perplexity", 0.0)
+            ),  # Also check direct perplexity
+            "evaluation_time": model_data.get(
+                "strategy_eval_time", model_data.get("evaluation_time", 0.0)
+            ),  # Also check direct eval_time
         }
 
     return global_stats
 
 
 def extract_per_state_stats_from_log_data(log_data: list[dict]) -> dict[str, dict[int, PerStateStats]]:
-    """Extract per_state_stats dictionaries from loaded log data.
+    """
+    Extract per_state_stats dictionaries from loaded log data.
 
     Args:
         log_data: List of dictionaries containing model stats as loaded from JSON.
@@ -250,7 +258,8 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
     visible_models: list[str] | None = None,
     add_by_state_id: bool = False,
 ) -> None:
-    """Plot state correctness statistics and global model performance based on log data.
+    """
+    Plot state correctness statistics and global model performance based on log data.
 
     Args:
         log_data: list of dictionaries containing model stats as loaded from JSON.
@@ -292,10 +301,12 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
     if add_by_state_id:
         subplot_titles_list.append("Correctness Rate vs. State ID")
 
-    subplot_titles_list.extend([
-        "Global Accuracy vs. Evaluation Time",
-        "Global Perplexity vs. Evaluation Time",
-    ])
+    subplot_titles_list.extend(
+        [
+            "Global Accuracy vs. Evaluation Time",
+            "Global Perplexity vs. Evaluation Time",
+        ]
+    )
     final_subplot_titles = tuple(subplot_titles_list)
 
     # Create a subplot figure
@@ -325,12 +336,8 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
     trace_info = []  # [(model_name, x_factor, row), ...]
 
     # Create a strategy-to-color map for consistent coloring
-    all_unique_strategy_names = sorted(
-        set(per_strategy_stats.keys()) | set(global_stats_per_strategy.keys())
-    )
-    strategy_color_map = {
-        name: colors[j % len(colors)] for j, name in enumerate(all_unique_strategy_names)
-    }
+    all_unique_strategy_names = sorted(set(per_strategy_stats.keys()) | set(global_stats_per_strategy.keys()))
+    strategy_color_map = {name: colors[j % len(colors)] for j, name in enumerate(all_unique_strategy_names)}
 
     # Create traces for each strategy and factor (per-state stats)
     for strategy_name, current_per_state_stats in per_strategy_stats.items():
@@ -349,7 +356,7 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
         # Calculate marker size based on total predictions (min 5, max 20)
         sizes = 5 + (df_with_predictions["total_predictions"] / df_with_predictions["total_predictions"].max() * 15)
 
-        color = strategy_color_map.get(strategy_name, colors[len(colors) -1]) # Fallback color
+        color = strategy_color_map.get(strategy_name, colors[len(colors) - 1])  # Fallback color
 
         # Factor 1: Visits (Row 1)
         trace1 = go.Scatter(
@@ -358,7 +365,7 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
             mode="markers",
             name=strategy_name,
             legendgroup=strategy_name,
-            showlegend=True, # Show this primary trace in legend
+            showlegend=True,  # Show this primary trace in legend
             marker={
                 "size": sizes,
                 "color": color,
@@ -423,20 +430,20 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
         # Add weighted trend line for visits
         if len(df_with_predictions) > 1:
             means_line_visits = add_trend_line(df_with_predictions, color, strategy_name, "visits")
-            means_line_visits.legendgroup = strategy_name # Ensure trend line is part of the group
+            means_line_visits.legendgroup = strategy_name  # Ensure trend line is part of the group
             # means_line_visits.showlegend = False # Already set in add_trend_line
             fig.add_trace(means_line_visits, row=1, col=1)
             all_traces.append(means_line_visits)
-            trace_info.append((strategy_name, "visits_trend", 1)) # Differentiate trend in trace_info if needed
+            trace_info.append((strategy_name, "visits_trend", 1))  # Differentiate trend in trace_info if needed
 
         # Factor 2: Level (Row 2)
         trace2 = go.Scatter(
             x=df_with_predictions["level"],
             y=df_with_predictions["correctness_rate"],
             mode="markers",
-            name=strategy_name, # Name for hover, legend handled by group
+            name=strategy_name,  # Name for hover, legend handled by group
             legendgroup=strategy_name,
-            showlegend=False, # Don't repeat in legend
+            showlegend=False,  # Don't repeat in legend
             marker={
                 "size": sizes,
                 "color": color,
@@ -478,9 +485,9 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
                 x=df_with_predictions["state_id"],
                 y=df_with_predictions["correctness_rate"],
                 mode="markers",
-                name=strategy_name, # Name for hover
+                name=strategy_name,  # Name for hover
                 legendgroup=strategy_name,
-                showlegend=False, # Don't repeat in legend
+                showlegend=False,  # Don't repeat in legend
                 marker={
                     "size": sizes,
                     "color": color,
@@ -521,7 +528,7 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
     global_stats_perplexity_row = num_per_state_rows + 2
 
     for strategy_name, stats in global_stats_per_strategy.items():
-        color = strategy_color_map.get(strategy_name, colors[len(colors) -1]) # Fallback color
+        color = strategy_color_map.get(strategy_name, colors[len(colors) - 1])  # Fallback color
         eval_time = stats.get("evaluation_time", 0)
         accuracy = stats.get("accuracy", 0)
         perplexity = stats.get("perplexity", 0)
@@ -533,9 +540,9 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
             x=[eval_time],
             y=[accuracy],
             mode="markers",
-            name=strategy_name, # Name for hover
+            name=strategy_name,  # Name for hover
             legendgroup=strategy_name,
-            showlegend=False, # Already in legend from per-state plots
+            showlegend=False,  # Already in legend from per-state plots
             marker={"size": 10, "color": color},
             text=[f"Strategy: {strategy_name}<br>Eval Time: {eval_time:.2f}s<br>Accuracy: {accuracy:.3f}"],
             hoverinfo="text",
@@ -550,9 +557,9 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
             x=[eval_time],
             y=[perplexity],
             mode="markers",
-            name=strategy_name, # Name for hover
+            name=strategy_name,  # Name for hover
             legendgroup=strategy_name,
-            showlegend=False, # Already in legend
+            showlegend=False,  # Already in legend
             marker={"size": 10, "color": color},
             text=[f"Strategy: {strategy_name}<br>Eval Time: {eval_time:.2f}s<br>Perplexity: {perplexity:.3f}"],
             hoverinfo="text",
@@ -565,7 +572,7 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
     # Update layout
     fig.update_layout(
         title="State Correctness Analysis & Global Model Performance",
-        height=max(900, 220 * total_rows), # Dynamic height
+        height=max(900, 220 * total_rows),  # Dynamic height
         legend_title="Strategies",
         hovermode="closest",
     )
@@ -578,12 +585,11 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
     fig.update_xaxes(title_text="Evaluation Time (s)", row=global_stats_accuracy_row, col=1)
     fig.update_xaxes(title_text="Evaluation Time (s)", row=global_stats_perplexity_row, col=1)
 
-
     # Y-axis titles
     for r in range(1, num_per_state_rows + 1):
         fig.update_yaxes(title_text="Correctness Rate", range=[0, 1], row=r, col=1)
     fig.update_yaxes(title_text="Accuracy", range=[0, 1], row=global_stats_accuracy_row, col=1)
-    fig.update_yaxes(title_text="Perplexity", row=global_stats_perplexity_row, col=1) # Auto-range for perplexity
+    fig.update_yaxes(title_text="Perplexity", row=global_stats_perplexity_row, col=1)  # Auto-range for perplexity
 
     # Create buttons for strategy selection
     buttons = []
@@ -625,7 +631,7 @@ def plot_stats(  # noqa: C901, PLR0915, PLR0912
                 "type": "buttons",
                 "direction": "right",
                 "x": 0,
-                "y": 1.15 if total_rows <= 3 else 1.08, # Adjust y to prevent overlap if many rows
+                "y": 1.15 if total_rows <= 3 else 1.08,  # Adjust y to prevent overlap if many rows
                 "buttons": [
                     {
                         "label": "Toggle X Log",

@@ -1,9 +1,10 @@
+import copy
+import logging
+import math
+import time
+
 import torch
 import torch.nn.functional as F
-import logging
-import copy
-import time
-import math
 from torch import nn
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
@@ -215,7 +216,7 @@ def train_rnn(model, train_sequences, val_sequences, criterion, optimizer, batch
     best_val_accuracy = 0.0
     best_model_state = None
     patience_counter = 0
-    model_device = model.device # Get model's device once
+    model_device = model.device  # Get model's device once
 
     for epoch in range(epochs):
         model.train()
@@ -251,7 +252,7 @@ def train_rnn(model, train_sequences, val_sequences, criterion, optimizer, batch
                 y_batch_masked = y_batch[mask]
 
                 # Compute the loss only for non-padding positions
-                if outputs_masked.size(0) > 0: # Ensure there are non-padded targets
+                if outputs_masked.size(0) > 0:  # Ensure there are non-padded targets
                     loss = criterion(outputs_masked, y_batch_masked)
 
                     # Backward pass and optimization
@@ -312,7 +313,8 @@ def evaluate_rnn(
     per_sequence_perplexity: bool = True,
     max_k: int = 3,
 ) -> tuple[dict[str, float | list[int]], list[float], float]:
-    """Evaluate the LSTM model on a dataset (train, test, or validation).
+    """
+    Evaluate the LSTM model on a dataset (train, test, or validation).
 
     Returns accuracy.
     """
@@ -322,7 +324,7 @@ def evaluate_rnn(
     model.eval()  # Set the model to evaluation mode
     correct_predictions = 0
     total_predictions = 0
-    model_device = model.device # Get model's device once
+    model_device = model.device  # Get model's device once
 
     # Initialize list to count top-k correct predictions
     top_k_correct_preds = [0] * max_k
@@ -332,7 +334,7 @@ def evaluate_rnn(
     perplexities = []
 
     with torch.no_grad():
-        for i in range(sequences.size(0)): # Iterate through sequences by index
+        for i in range(sequences.size(0)):  # Iterate through sequences by index
             single_sequence_trace = sequences[i]
 
             # Input is all but the last token, target is the sequence shifted by one
@@ -345,7 +347,6 @@ def evaluate_rnn(
             if model_device is not None:
                 x_input = x_input.to(model_device)
                 y_target = y_target.to(model_device)
-
 
             outputs = model(x_input)
 
@@ -439,14 +440,84 @@ def evaluate_rnn(
     return stats, perplexities, eval_time
 
 
+class SimpleTransformerModel(nn.Module):
+    device: torch.device | None
+    embedding: nn.Embedding | None
+    use_one_hot: bool
+    vocab_size: int
+    embedding_dim: int
+    pos_embedding: nn.Parameter
+    transformer: nn.TransformerEncoder
+    fc: nn.Linear
 
+    def __init__(
+        self,
+        vocab_size: int,
+        embedding_dim: int,
+        hidden_dim: int,
+        output_dim: int,
+        use_one_hot: bool = False,
+        device: torch.device | None = None,
+        max_seq_len: int = 512,  # You can adjust this if needed
+    ):
+        super().__init__()
+        self.device = device
+        self.use_one_hot = use_one_hot
+        self.vocab_size = vocab_size
+        self.embedding_dim = embedding_dim
 
+        # Conditional embedding layer
+        if not use_one_hot:
+            self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0, device=device)
+        else:
+            self.embedding = None
 
+        # Input dimension
+        input_dim = vocab_size if use_one_hot else embedding_dim
 
+        # Positional encoding: learnable [1, max_seq_len, input_dim]
+        self.pos_embedding = nn.Parameter(torch.zeros(1, max_seq_len, input_dim, device=device))
 
+        # Transformer encoder
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=input_dim,
+            nhead=1,
+            dim_feedforward=hidden_dim,
+            batch_first=True,
+            device=device,
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=2)
 
+        # Output layer
+        self.fc = nn.Linear(input_dim, output_dim, device=device)
 
+        # Custom initialization
+        self.apply(self._init_weights)
 
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not self.use_one_hot and self.embedding is not None:
+            x = self.embedding(x)
+        else:
+            x = F.one_hot(x, num_classes=self.vocab_size).float().to(self.device)
+
+        # Add positional encoding (crop to match sequence length)
+        seq_len = x.size(1)
+        x = x + self.pos_embedding[:, :seq_len, :]
+
+        # Pass through transformer
+        x = self.transformer(x)
+
+        return self.fc(x)
+
+    def _init_weights(self, m: nn.Module) -> None:
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.Embedding) and m is not None:
+            nn.init.uniform_(m.weight, -0.1, 0.1)
+        elif isinstance(m, nn.Parameter):
+            nn.init.normal_(m, mean=0.0, std=0.02)
 
 
 class PositionalEncoding(nn.Module):
@@ -457,8 +528,9 @@ class PositionalEncoding(nn.Module):
         pe = torch.zeros(max_len, embedding_dim, device=device)
         position = torch.arange(0, max_len, dtype=torch.float, device=device).unsqueeze(1)
 
-        div_term = torch.exp(torch.arange(0, embedding_dim, 2, dtype=torch.float, device=device) *
-                           (-math.log(10000.0) / embedding_dim))
+        div_term = torch.exp(
+            torch.arange(0, embedding_dim, 2, dtype=torch.float, device=device) * (-math.log(10000.0) / embedding_dim)
+        )
 
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
@@ -466,7 +538,7 @@ class PositionalEncoding(nn.Module):
         self.register_buffer("pe", pe.unsqueeze(0))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x + self.pe[:, :x.size(1), :] # type: ignore
+        return x + self.pe[:, : x.size(1), :]  # type: ignore
 
 
 class TransformerModel(nn.Module):
@@ -478,7 +550,7 @@ class TransformerModel(nn.Module):
     pos_encoding: PositionalEncoding
     transformer: nn.Transformer
     fc: nn.Linear
-    input_projection: nn.Linear | None # Added for one-hot projection
+    input_projection: nn.Linear | None  # Added for one-hot projection
 
     def __init__(
         self,
@@ -503,7 +575,7 @@ class TransformerModel(nn.Module):
         if not use_one_hot:
             self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0, device=device)
         else:
-            self.embedding = None # Ensure embedding is None if using one-hot
+            self.embedding = None  # Ensure embedding is None if using one-hot
             self.input_projection = nn.Linear(vocab_size, embedding_dim, device=device)
 
         # Positional encoding
@@ -518,7 +590,7 @@ class TransformerModel(nn.Module):
             dim_feedforward=dim_feedforward,
             dropout=dropout,
             batch_first=True,
-            device=device
+            device=device,
         )
 
         # Output layer
@@ -527,7 +599,7 @@ class TransformerModel(nn.Module):
         # Apply custom weight initialization
         self.apply(self._init_weights)
 
-    def forward(self, token_indices: torch.Tensor) -> torch.Tensor: # Renamed x to token_indices
+    def forward(self, token_indices: torch.Tensor) -> torch.Tensor:  # Renamed x to token_indices
         # token_indices shape: (batch, seq_len)
         current_device = self.device if self.device is not None else token_indices.device
 
@@ -547,7 +619,7 @@ class TransformerModel(nn.Module):
             x_embedded = self.input_projection(x_one_hot) * math.sqrt(self.embedding_dim)
 
         # Add positional encoding
-        x_processed = self.pos_encoding(x_embedded) # Shape: (batch, seq_len, embedding_dim)
+        x_processed = self.pos_encoding(x_embedded)  # Shape: (batch, seq_len, embedding_dim)
 
         # Create causal mask for the decoder's self-attention.
         seq_len = x_processed.size(1)
@@ -563,14 +635,14 @@ class TransformerModel(nn.Module):
             tgt_mask=causal_mask,
             src_key_padding_mask=padding_mask,
             tgt_key_padding_mask=padding_mask,
-            memory_key_padding_mask=padding_mask
+            memory_key_padding_mask=padding_mask,
         )
         # transformer_output shape: (batch, seq_len, embedding_dim)
 
         return self.fc(transformer_output)
 
     def _init_weights(self, m: nn.Module) -> None:
-        if isinstance(m, nn.Linear): # Covers self.fc and self.input_projection
+        if isinstance(m, nn.Linear):  # Covers self.fc and self.input_projection
             nn.init.xavier_uniform_(m.weight)
             if m.bias is not None:
                 nn.init.constant_(m.bias, 0)
@@ -586,7 +658,7 @@ def train_transformer(model, train_sequences, val_sequences, criterion, optimize
     best_val_accuracy = 0.0
     best_model_state = None
     patience_counter = 0
-    model_device = model.device # Get model's device once
+    model_device = model.device  # Get model's device once
 
     for epoch in range(epochs):
         model.train()
@@ -595,7 +667,7 @@ def train_transformer(model, train_sequences, val_sequences, criterion, optimize
         with tqdm(total=len(dataloader), desc=f"Epoch {epoch + 1}/{epochs}", unit="batch") as pbar:
             for batch in dataloader:
                 sequences = batch[0]
-                model_device = model.device # Get model's device
+                model_device = model.device  # Get model's device
 
                 # Input is the entire sequence except the last element
                 x_batch = sequences[:, :-1]
@@ -622,7 +694,7 @@ def train_transformer(model, train_sequences, val_sequences, criterion, optimize
                 y_batch_masked = y_batch[mask]
 
                 # Compute loss
-                if outputs_masked.size(0) > 0: # Ensure there are non-padded targets
+                if outputs_masked.size(0) > 0:  # Ensure there are non-padded targets
                     loss = criterion(outputs_masked, y_batch_masked)
 
                     # Backward pass
@@ -688,7 +760,7 @@ def evaluate_transformer(
     model.eval()
     correct_predictions = 0
     total_predictions = 0
-    model_device = model.device # Get model's device once
+    model_device = model.device  # Get model's device once
 
     # Initialize list to count top-k correct predictions
     top_k_correct_preds = [0] * max_k
@@ -698,7 +770,7 @@ def evaluate_transformer(
     perplexities = []
 
     with torch.no_grad():
-        for i in range(sequences.size(0)): # Iterate through sequences by index
+        for i in range(sequences.size(0)):  # Iterate through sequences by index
             single_sequence_trace = sequences[i]
 
             # Input is all but the last token
@@ -711,7 +783,6 @@ def evaluate_transformer(
             if model_device is not None:
                 x_input = x_input.to(model_device)
                 y_target = y_target.to(model_device)
-
 
             outputs = model(x_input)
 

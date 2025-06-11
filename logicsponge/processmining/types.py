@@ -9,6 +9,7 @@ from typing import Any, TypedDict
 
 CaseId = str | tuple[str, ...]
 
+
 class StateId(int):
     """A class representing a state identifier."""
 
@@ -31,9 +32,10 @@ class StateId(int):
         """Return a string representation of the StateId."""
         return f"StateId({int(self)}, in_recovery={self.in_recovery})"
 
+
 ComposedState = Any  # QUESTION: Is there a way to write this? ComposedState = StateId | tuple[ComposedState, ...]
 
-ActivityName = str | tuple[str, ...] # QUESTION: why tuple[str, ...]?
+ActivityName = str | tuple[str, ...]  # QUESTION: why tuple[str, ...]?
 
 Prediction = dict[str, Any]
 
@@ -43,7 +45,8 @@ ActivityDelays = dict[ActivityName, timedelta]
 
 
 class Metrics(TypedDict):
-    """A dictionary type for storing metrics related to process mining.
+    """
+    A dictionary type for storing metrics related to process mining.
 
     Attributes:
         probs (ProbDistr): Probability distribution of activities.
@@ -59,7 +62,7 @@ class Metrics(TypedDict):
 
 def empty_metrics() -> Metrics:
     """Return an empty metrics object."""
-    return Metrics(state_id=None, probs={}, predicted_delays={}) # , likelihoods={})
+    return Metrics(state_id=None, probs={}, predicted_delays={})  # , likelihoods={})
 
 
 class Config(TypedDict, total=True):
@@ -77,7 +80,8 @@ class Config(TypedDict, total=True):
 
 
 class RequiredEvent(TypedDict):
-    """A dictionary type for storing required event attributes.
+    """
+    A dictionary type for storing required event attributes.
 
     Attributes:
         case_id (CaseId): Unique identifier for the case.
@@ -92,7 +96,8 @@ class RequiredEvent(TypedDict):
 
 
 class Event(RequiredEvent, total=False):
-    """A dictionary type for storing event attributes.
+    """
+    A dictionary type for storing event attributes.
 
     Attributes:
         attributes (dict[str, Any]): Additional attributes of the event.

@@ -25,7 +25,8 @@ np.random.seed(123)
 
 
 def interleave_sequences(sequences: list[list[Event]], random_index=True) -> list[Event]:  # noqa: FBT002
-    """Takes a list of sequences (list of lists) and returns a shuffled version
+    """
+    Takes a list of sequences (list of lists) and returns a shuffled version
     while preserving the order within each sequence.
     """
     # Create a copy of sequences to avoid modifying the original list
@@ -63,7 +64,8 @@ def add_input_symbols(data: list[list[Event]], inp: str) -> list[list[tuple[str,
 
 
 def add_start_to_sequences(data: list[list[Event]], start_symbol: ActivityName) -> list[list[Event]]:
-    """Prepends a start event with the case_id of the first event in each sequence.
+    """
+    Prepends a start event with the case_id of the first event in each sequence.
     Assumes that each sequence in data is non-empty.
     """
     if not all(seq for seq in data):
@@ -74,7 +76,8 @@ def add_start_to_sequences(data: list[list[Event]], start_symbol: ActivityName) 
 
 
 def add_stop_to_sequences(data: list[list[Event]], stop_symbol: ActivityName) -> list[list[Event]]:
-    """Appends a stop event with the case_id of the first event in each sequence.
+    """
+    Appends a stop event with the case_id of the first event in each sequence.
     Assumes that each sequence in data is non-empty.
     """
     if not all(seq for seq in data):
@@ -234,7 +237,8 @@ class FileHandler:
                 logger.info(msg)
 
     def handle_file(self, file_type: str, url: str, filename: str, doi: str | None = None) -> str:
-        """Main method to handle downloading and processing files based on their type.
+        """
+        Main method to handle downloading and processing files based on their type.
         Handles:
         - CSV: Direct download.
         - XES: Download and process.
@@ -287,7 +291,8 @@ class FileHandler:
 
 
 def handle_keys(keys: list[str], row: dict[str, Any]) -> str | tuple[str, ...]:
-    """Handles the case and activity keys, returning either a single value or a tuple of values.
+    """
+    Handles the case and activity keys, returning either a single value or a tuple of values.
     Ensures the return type matches the expected CaseId or ActivityName.
     """
     if len(keys) == 1:
@@ -298,7 +303,8 @@ def handle_keys(keys: list[str], row: dict[str, Any]) -> str | tuple[str, ...]:
 
 
 def parse_timestamp(raw_timestamp):
-    """Parse a timestamp string in various formats, handling naive and aware datetimes.
+    """
+    Parse a timestamp string in various formats, handling naive and aware datetimes.
 
     Parameters
     ----------

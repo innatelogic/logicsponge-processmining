@@ -64,11 +64,11 @@ SEC_TO_MICRO = 1_000_000
 # ============================================================
 # Generate a list of ngrams to test
 # ============================================================
-VOTING_NGRAMS = [(2, 3, 4), (2, 3, 5, 8), (2, 3, 4, 5)] # (2, 3, 5, 6), (2, 3, 5, 7), (2, 3, 4, 7)
+VOTING_NGRAMS = [(2, 3, 4), (2, 3, 5, 8), (2, 3, 4, 5)]  # (2, 3, 5, 6), (2, 3, 5, 7), (2, 3, 4, 7)
 
-SELECT_BEST_ARGS = ["prob"] # ["acc", "prob", "prob x acc"]
+SELECT_BEST_ARGS = ["prob"]  # ["acc", "prob", "prob x acc"]
 
-WINDOW_RANGE = [0, 1, 2, 3, 4, 5, 6, 7, 8] #, 9, 10, 12, 14, 16]
+WINDOW_RANGE = [0, 1, 2, 3, 4, 5, 6, 7, 8]  # , 9, 10, 12, 14, 16]
 
 NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 # ] + [
@@ -245,7 +245,6 @@ for iteration in range(n_iterations):
     VAL_EVENTS = sum(len(lst) for lst in val_set_transformed)
     TEST_EVENTS = sum(len(lst) for lst in test_set_transformed)
 
-
     # ============================================================
     # Initialize Process Miners
     # ============================================================
@@ -273,9 +272,7 @@ for iteration in range(n_iterations):
         else:
             # Use the default NGram algorithm without recovery
             NGRAM_MODELS[ngram_name] = BasicMiner(
-                algorithm=NGram(
-                    window_length=window_length, recover_lengths=[]
-                ),
+                algorithm=NGram(window_length=window_length, recover_lengths=[]),
                 config=config,
             )
         # logger.debug(f"Stats of {ngram_name}: {NGRAM_MODELS[ngram_name].stats}")
@@ -347,40 +344,14 @@ for iteration in range(n_iterations):
 
     complex_fallback = Fallback(
         models=[
+            BasicMiner(algorithm=NGram(window_length=9, min_total_visits=10, min_max_prob=0.9)),
+            BasicMiner(algorithm=NGram(window_length=8, min_total_visits=10, min_max_prob=0.9)),
+            BasicMiner(algorithm=NGram(window_length=7, min_total_visits=10, min_max_prob=0.8)),
+            BasicMiner(algorithm=NGram(window_length=6, min_total_visits=10, min_max_prob=0.7)),
+            BasicMiner(algorithm=NGram(window_length=5, min_total_visits=10, min_max_prob=0.6)),
+            BasicMiner(algorithm=NGram(window_length=4, min_total_visits=10, min_max_prob=0.0)),
             BasicMiner(
-                algorithm=NGram(
-                    window_length=9, min_total_visits=10, min_max_prob=0.9
-                )
-            ),
-            BasicMiner(
-                algorithm=NGram(
-                    window_length=8, min_total_visits=10, min_max_prob=0.9
-                )
-            ),
-            BasicMiner(
-                algorithm=NGram(
-                    window_length=7, min_total_visits=10, min_max_prob=0.8
-                )
-            ),
-            BasicMiner(
-                algorithm=NGram(
-                    window_length=6, min_total_visits=10, min_max_prob=0.7
-                )
-            ),
-            BasicMiner(
-                algorithm=NGram(
-                    window_length=5, min_total_visits=10, min_max_prob=0.6
-                )
-            ),
-            BasicMiner(
-                algorithm=NGram(
-                    window_length=4, min_total_visits=10, min_max_prob=0.0
-                )
-            ),
-            BasicMiner(
-                algorithm=NGram(
-                    window_length=3, min_total_visits=10, min_max_prob=0.0
-                ),
+                algorithm=NGram(window_length=3, min_total_visits=10, min_max_prob=0.0),
             ),
             BasicMiner(algorithm=NGram(window_length=2, min_total_visits=10, min_max_prob=0.0)),
             BasicMiner(algorithm=NGram(window_length=1)),
@@ -410,19 +381,18 @@ for iteration in range(n_iterations):
                 BasicMiner(algorithm=NGram(window_length=grams[0], min_total_visits=10)),
                 BasicMiner(algorithm=NGram(window_length=grams[1], min_total_visits=10)),
                 BasicMiner(algorithm=NGram(window_length=grams[2], min_total_visits=10)),
-            ] + (
-                [
-                    BasicMiner(algorithm=NGram(window_length=grams[optional_num_ngrams], min_total_visits=10))
-                ]
-                if len(grams) > optional_num_ngrams else []
+            ]
+            + (
+                [BasicMiner(algorithm=NGram(window_length=grams[optional_num_ngrams], min_total_visits=10))]
+                if len(grams) > optional_num_ngrams
+                else []
             ),
             select_best=select_best_arg,
-            config=config
+            config=config,
         )
         for grams in VOTING_NGRAMS
         for select_best_arg in SELECT_BEST_ARGS
     ]
-
 
     # soft_voting = SoftVoting(
     #     models=[
@@ -437,44 +407,40 @@ for iteration in range(n_iterations):
     #     config=config,
     # )
 
-    soft_voting_list = (
-        [
-            SoftVoting(
-                models=[
-                    BasicMiner(algorithm=Bag()),
-                    BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-                    BasicMiner(algorithm=NGram(window_length=grams[0])),
-                    BasicMiner(algorithm=NGram(window_length=grams[1])),
-                    BasicMiner(algorithm=NGram(window_length=grams[2])),
-                ] + (
-                    [
-                        BasicMiner(algorithm=NGram(window_length=grams[optional_num_ngrams]))
-                    ] if len(grams) > optional_num_ngrams else []
-                ),
-                config=config,
-            )
-            for grams in VOTING_NGRAMS
-        ]
-        +
-        [
-            SoftVoting(
-                models=[
-                    BasicMiner(algorithm=Bag()),
-                    BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-                    BasicMiner(algorithm=NGram(window_length=grams[0], min_total_visits=10)),
-                    BasicMiner(algorithm=NGram(window_length=grams[1], min_total_visits=10)),
-                    BasicMiner(algorithm=NGram(window_length=grams[2], min_total_visits=10)),
-                ]
-                + (
-                    [
-                        BasicMiner(algorithm=NGram(window_length=grams[optional_num_ngrams], min_total_visits=10))
-                    ]
-                    if len(grams) > optional_num_ngrams else []
-                ),
-            )
-            for grams in VOTING_NGRAMS
-        ]
-    )
+    soft_voting_list = [
+        SoftVoting(
+            models=[
+                BasicMiner(algorithm=Bag()),
+                BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
+                BasicMiner(algorithm=NGram(window_length=grams[0])),
+                BasicMiner(algorithm=NGram(window_length=grams[1])),
+                BasicMiner(algorithm=NGram(window_length=grams[2])),
+            ]
+            + (
+                [BasicMiner(algorithm=NGram(window_length=grams[optional_num_ngrams]))]
+                if len(grams) > optional_num_ngrams
+                else []
+            ),
+            config=config,
+        )
+        for grams in VOTING_NGRAMS
+    ] + [
+        SoftVoting(
+            models=[
+                BasicMiner(algorithm=Bag()),
+                BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
+                BasicMiner(algorithm=NGram(window_length=grams[0], min_total_visits=10)),
+                BasicMiner(algorithm=NGram(window_length=grams[1], min_total_visits=10)),
+                BasicMiner(algorithm=NGram(window_length=grams[2], min_total_visits=10)),
+            ]
+            + (
+                [BasicMiner(algorithm=NGram(window_length=grams[optional_num_ngrams], min_total_visits=10))]
+                if len(grams) > optional_num_ngrams
+                else []
+            ),
+        )
+        for grams in VOTING_NGRAMS
+    ]
 
     relativize = Relativize(
         models=[
@@ -523,11 +489,11 @@ for iteration in range(n_iterations):
 
     soft_voting_strategies1 = {
         f"soft voting {grams}": (soft_voting_test, test_set_transformed)
-        for grams, soft_voting_test in zip(VOTING_NGRAMS, soft_voting_list[:len(VOTING_NGRAMS)], strict=False)
+        for grams, soft_voting_test in zip(VOTING_NGRAMS, soft_voting_list[: len(VOTING_NGRAMS)], strict=False)
     }
     soft_voting_strategies2 = {
         f"soft voting {grams}*": (soft_voting_test, test_set_transformed)
-        for grams, soft_voting_test in zip(VOTING_NGRAMS, soft_voting_list[len(VOTING_NGRAMS):], strict=False)
+        for grams, soft_voting_test in zip(VOTING_NGRAMS, soft_voting_list[len(VOTING_NGRAMS) :], strict=False)
     }
     soft_voting_strategies = {**soft_voting_strategies1, **soft_voting_strategies2}
     bayesian_strategies = {model_name: (model, test_set_transformed) for model_name, model in BAYESIAN_MODELS.items()}
@@ -597,14 +563,14 @@ for iteration in range(n_iterations):
             model.initialize_memory(train_set_transformed + test_set_transformed)
             end_time = time.time()
             training_times[model_name] = (end_time - start_time) / (TRAIN_EVENTS + TEST_EVENTS)
-    
+
     bayesian_end_time = time.time()
     elapsed_time = bayesian_end_time - bayesian_start_time
     msg = f"Training time for Bayesian Classifiers: {elapsed_time:.4f} seconds"
     logger.info(msg)
 
     for strategy_name in strategies:
-        training_times[strategy_name] *= SEC_TO_MICRO # Convert to microseconds
+        training_times[strategy_name] *= SEC_TO_MICRO  # Convert to microseconds
 
     # ============================================================
     # Evaluation
@@ -649,7 +615,12 @@ for iteration in range(n_iterations):
         msg = f"Evaluating {strategy_name}..."
         logger.info(msg)
 
-        evaluation_time = strategy.evaluate(test_data, mode="incremental", debug=(data_name == "Synthetic_Train"), compute_perplexity="hard" not in strategy_name)
+        evaluation_time = strategy.evaluate(
+            test_data,
+            mode="incremental",
+            debug=(data_name == "Synthetic_Train"),
+            compute_perplexity="hard" not in strategy_name,
+        )
         evaluation_time *= SEC_TO_MICRO / TEST_EVENTS
 
         stats = strategy.stats
@@ -676,7 +647,7 @@ for iteration in range(n_iterations):
                 "strategy_accuracy": correct_percentage,
                 "strategy_perplexity": stats["pp_harmonic_mean"],
                 "strategy_eval_time": evaluation_time,
-                "per_state_stats": per_state_stats
+                "per_state_stats": per_state_stats,
             }
         )
 
@@ -796,9 +767,13 @@ for iteration in range(n_iterations):
 
         # Train the LSTM on the train set with batch size and sequence-to-sequence targets
         start_time = time.time()
-        model = train_rnn(
-            model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=20
-        ) if not SKIP_LSTM else model
+        model = (
+            train_rnn(
+                model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=20
+            )
+            if not SKIP_LSTM
+            else model
+        )
         end_time = time.time()
         training_time = (end_time - start_time) * SEC_TO_MICRO / (TRAIN_EVENTS + VAL_EVENTS)
 
@@ -847,7 +822,6 @@ for iteration in range(n_iterations):
         iteration_data["Tot Preds"].append(lstm_stats["total_predictions"])
         iteration_data["Nb States"].append(None)
 
-
         stats_to_log.append(
             {
                 "strategy": "LSTM",
@@ -876,8 +850,6 @@ for iteration in range(n_iterations):
         all_metrics["LSTM"]["mean_normalized_error"].append(None)
         all_metrics["LSTM"]["num_delay_predictions"].append(None)
 
-
-
         # ============================================================
         # ============================================================
 
@@ -900,19 +872,21 @@ for iteration in range(n_iterations):
             dim_feedforward=dim_feedforward,
             dropout=dropout,
             device=device,
-            use_one_hot=True  # or False, depending on your preference
+            use_one_hot=True,  # or False, depending on your preference
         )
 
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.Adam(model.parameters(), lr=0.0001)  # Lower learning rate for transformer
 
-
         # Train the transformer
         start_time = time.time()
-        model = train_transformer(
-            model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer,
-            batch_size=8, epochs=20
-        ) if not SKIP_TRANSFORMER else model
+        model = (
+            train_transformer(
+                model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=20
+            )
+            if not SKIP_TRANSFORMER
+            else model
+        )
         end_time = time.time()
         training_time = (end_time - start_time) * SEC_TO_MICRO / (TRAIN_EVENTS + VAL_EVENTS)
 
@@ -956,7 +930,6 @@ for iteration in range(n_iterations):
         iteration_data["Good Preds"].append(transformer_stats["correct_predictions"])
         iteration_data["Tot Preds"].append(transformer_stats["total_predictions"])
         iteration_data["Nb States"].append(None)
-
 
         # Add to stats_to_log
         stats_to_log.append(

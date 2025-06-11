@@ -28,7 +28,7 @@ from logicsponge.processmining.models import (
     NeuralNetworkMiner,
     SoftVoting,
 )
-from logicsponge.processmining.neural_networks import LSTMModel, TransformerModel
+from logicsponge.processmining.neural_networks import LSTMModel, SimpleTransformerModel, TransformerModel
 from logicsponge.processmining.streaming import (
     AddStartSymbol,
     CSVStatsWriter,
@@ -86,9 +86,12 @@ start_symbol = DEFAULT_CONFIG["start_symbol"]
 # ============================================================
 # Generate a list of ngrams to test
 # ============================================================
-SOFT_VOTING_NGRAMS = [(2, 3, 5, 8), (2, 3, 4, 5)] # (2, 3, 6, 8), (2, 3, 5, 6), (2, 3, 4, 6), (2, 3, 6, 7), (2, 3, 7, 8), (2, 3, 6, 8)
+SOFT_VOTING_NGRAMS = [
+    (2, 3, 5, 8),
+    (2, 3, 4, 5),
+]  # (2, 3, 6, 8), (2, 3, 5, 6), (2, 3, 4, 6), (2, 3, 6, 7), (2, 3, 7, 8), (2, 3, 6, 8)
 
-WINDOW_RANGE = [0, 1, 2, 3, 4, 5, 6, 7, 8] #, 9, 10, 12, 14, 16]
+WINDOW_RANGE = [0, 1, 2, 3, 4, 5, 6, 7, 8]  # , 9, 10, 12, 14, 16]
 
 NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 # ] + [
@@ -116,9 +119,7 @@ for ngram_name in NGRAM_NAMES:
     # Assuming recovery options are not used in streaming for simplicity, matching current streaming file structure
     NGRAM_MODELS[ngram_name] = StreamingActivityPredictor(
         strategy=BasicMiner(
-            algorithm=NGram(
-                window_length=window_length, recover_lengths=[]
-            ),
+            algorithm=NGram(window_length=window_length, recover_lengths=[]),
             config=config,
         )
     )
@@ -297,18 +298,17 @@ adaptive_voting = StreamingActivityPredictor(
 )
 
 # Initialize LSTMs
-
 vocab_size = 50  # An upper bound on the number of activities
 embedding_dim = 50
 hidden_dim = 128
 output_dim = vocab_size
-model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, device=device, use_one_hot=True)
+model_lstm = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, device=device, use_one_hot=True)
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+optimizer = optim.Adam(model_lstm.parameters(), lr=0.001)
 
 lstm = StreamingActivityPredictor(
     strategy=NeuralNetworkMiner(
-        model=model,
+        model=model_lstm,
         criterion=criterion,
         optimizer=optimizer,
         batch_size=8,
@@ -324,7 +324,7 @@ num_decoder_layers = 2
 dim_feedforward = 128
 dropout = 0.1
 
-model = TransformerModel(
+model_transformer = TransformerModel(
     vocab_size=vocab_size,
     embedding_dim=embedding_dim,
     nhead=nhead,
@@ -332,14 +332,31 @@ model = TransformerModel(
     num_decoder_layers=num_decoder_layers,
     dim_feedforward=dim_feedforward,
     dropout=dropout,
-    use_one_hot=True
+    use_one_hot=True,
 )
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.0001)  # Lower learning rate for transformer
+optimizer = optim.Adam(model_transformer.parameters(), lr=0.0001)  # Lower learning rate for transformer
 
 transformer = StreamingActivityPredictor(
     strategy=NeuralNetworkMiner(
-        model=model,
+        model=model_transformer,
+        criterion=criterion,
+        optimizer=optimizer,
+        batch_size=8,
+        config=config,
+    )
+)
+
+# Init simple transformer model
+model_simpletransformer = SimpleTransformerModel(
+    vocab_size, embedding_dim, hidden_dim, output_dim, device=device, use_one_hot=True
+)
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model_simpletransformer.parameters(), lr=0.0001)  # Lower learning rate for transformer
+
+simpletransformer = StreamingActivityPredictor(
+    strategy=NeuralNetworkMiner(
+        model=model_simpletransformer,
         criterion=criterion,
         optimizer=optimizer,
         batch_size=8,
@@ -369,9 +386,10 @@ models = [
     "adaptive_voting",
     "soft_voting",
     "soft_voting_star",
-    *list(soft_voting_predictors.keys()), # Add all soft_voting predictor names
+    *list(soft_voting_predictors.keys()),  # Add all soft_voting predictor names
     "lstm",
     "transformer",
+    "simpletransformer",
 ]
 
 
@@ -400,7 +418,13 @@ delay_attributes = [
 
 delay_list = [f"{model}.{attribute}" for model in models for attribute in delay_attributes]
 
-all_attributes = ["index", *metrics_list, *train_latency_list, *predict_latency_list, *latency_mean_list] #, *delay_list]
+all_attributes = [
+    "index",
+    *metrics_list,
+    *train_latency_list,
+    *predict_latency_list,
+    *latency_mean_list,
+]  # , *delay_list]
 
 streamer = IteratorStreamer(data_iterator=dataset)
 
@@ -411,7 +435,7 @@ def start_filter(item: DataItem) -> bool:
 
 
 # len_dataset = 15214
-len_dataset = 262200 # BPI Challenge 2012
+len_dataset = 262200  # BPI Challenge 2012
 # len_dataset = 65000
 # len_dataset = 1202267
 # len_dataset = 2514266
@@ -477,12 +501,18 @@ sponge = (
             * DataItemFilter(data_item_filter=start_filter)
             * Evaluation("lstm")
         )
-        # | (
-        #     AddStartSymbol(start_symbol=start_symbol)
-        #     * transformer
-        #     * DataItemFilter(data_item_filter=start_filter)
-        #     * Evaluation("transformer")
-        # )
+        | (
+            AddStartSymbol(start_symbol=start_symbol)
+            * simpletransformer
+            * DataItemFilter(data_item_filter=start_filter)
+            * Evaluation("simpletransformer")
+        )
+        | (
+            AddStartSymbol(start_symbol=start_symbol)
+            * transformer
+            * DataItemFilter(data_item_filter=start_filter)
+            * Evaluation("transformer")
+        )
     )
     * ls.MergeToSingleStream()
     * ls.Flatten()

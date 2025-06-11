@@ -14,7 +14,7 @@ from logicsponge.processmining.models import (
     StreamingMiner,
 )
 from logicsponge.processmining.types import ActivityName, Event
-from logicsponge.processmining.utils import compute_perplexity_stats, compute_seq_perplexity, metrics_prediction
+from logicsponge.processmining.utils import metrics_prediction
 
 logger = logging.getLogger(__name__)
 
@@ -81,27 +81,22 @@ class DataPreparation(ls.FunctionTerm):
         self.activity_keys = activity_keys
 
     def f(self, item: DataItem) -> DataItem:
-        """Process the input DataItem to output a new DataItem containing only case and activity keys.
+        """
+        Process the input DataItem to output a new DataItem containing only case and activity keys.
 
         - Combines values from case_keys into a single case_id (as a tuple or single value).
         - Combines values from activity_keys into a single activity (as a tuple or single value).
         """
         # Construct the new DataItem with case_id and activity values
         return DataItem(
-            {"case_id": handle_keys(self.case_keys, item), "activity": handle_keys(self.activity_keys, item)} # type: ignore
+            {"case_id": handle_keys(self.case_keys, item), "activity": handle_keys(self.activity_keys, item)}  # type: ignore
         )
 
 
 class StreamingActivityPredictor(ls.FunctionTerm):
     """Streaming activity predictor."""
 
-    def __init__(
-            self,
-            *args,
-            strategy: StreamingMiner,
-            compute_metrics: bool = False,
-            **kwargs
-        ):
+    def __init__(self, *args, strategy: StreamingMiner, compute_metrics: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
         self.strategy = strategy
         # self.case_ids = set()
@@ -219,16 +214,13 @@ class Evaluation(ls.FunctionTerm):
         if item["prediction"] is None:
             self.missing_predictions += 1
         else:
-            if self.top_activities and item["activity"] in item["prediction"]["top_k_activities"]:
-                    self.correct_predictions += 1
-            elif item["activity"] == item["prediction"]["activity"]:
+            if (self.top_activities and item["activity"] in item["prediction"]["top_k_activities"]) or item["activity"] == item["prediction"]["activity"]:
                 self.correct_predictions += 1
 
             if item["activity"] in item["prediction"]["top_k_activities"]:
                 self.top_k_correct_preds += 1
 
         self.total_predictions += 1
-
 
         # ######
         #         stats = strategy.stats
@@ -286,9 +278,7 @@ class Evaluation(ls.FunctionTerm):
             mean_normalized_error = None
 
         accuracy = self.correct_predictions / self.total_predictions * 100 if self.total_predictions > 0 else 0
-        top_k_accuracy = (
-            self.top_k_correct_preds / self.total_predictions * 100 if self.total_predictions > 0 else 0
-        )
+        top_k_accuracy = self.top_k_correct_preds / self.total_predictions * 100 if self.total_predictions > 0 else 0
 
         return DataItem(
             {
@@ -362,22 +352,17 @@ class PrintEval(ls.FunctionTerm):
 
 
 class CSVStatsWriter(ls.FunctionTerm):
-    """Write evaluation statistics from eval_to_table's DataFrame to a CSV file.
+    """
+    Write evaluation statistics from eval_to_table's DataFrame to a CSV file.
 
     Receives a DataItem, generates a DataFrame using eval_to_table,
     and writes each row of the DataFrame to the CSV file,
     optionally adding a batch index from the DataItem.
     """
 
-    def __init__(
-            self,
-            *args,
-            csv_path: Path,
-            append: bool = True,
-            batch_index_col_name: str = "batch_index",
-            **kwargs
-        ):
-        """Initialize the CSV writer.
+    def __init__(self, *args, csv_path: Path, append: bool = True, batch_index_col_name: str = "batch_index", **kwargs):
+        """
+        Initialize the CSV writer.
 
         Args:
             csv_path: Path to the CSV file where stats will be written.
@@ -419,7 +404,7 @@ class CSVStatsWriter(ls.FunctionTerm):
             for record in records_to_write:
                 record[self.batch_index_col_name] = batch_idx
 
-        if not records_to_write: # Should be caught by df_to_save.empty check
+        if not records_to_write:  # Should be caught by df_to_save.empty check
             return item
 
         # Determine file mode and if header needs to be written
@@ -445,14 +430,12 @@ class CSVStatsWriter(ls.FunctionTerm):
                 if needs_header:
                     writer.writeheader()
 
-                writer.writerows(records_to_write) # type: ignore
+                writer.writerows(records_to_write)  # type: ignore
         except OSError as e:
             logger.exception("Error writing to CSV file %s. %s", self.csv_path, e)
         except Exception as e:
             logger.exception(
-                "An unexpected error occurred in CSVStatsWriter while writing to %s: %s",
-                {self.csv_path},
-                e
+                "An unexpected error occurred in CSVStatsWriter while writing to %s: %s", {self.csv_path}, e
             )
 
         # Return the original DataItem, allowing it to continue in the pipeline

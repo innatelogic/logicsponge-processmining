@@ -29,7 +29,8 @@ logger = logging.getLogger(__name__)
 
 
 class BayesianClassifier:
-    """Bayesian Classifier for predicting the next activity in a sequence of events.
+    """
+    Bayesian Classifier for predicting the next activity in a sequence of events.
 
     This class implements a simple Bayesian classifier that uses the frequency of
     activity sequences to predict the next activity. It is designed to work with
@@ -37,11 +38,11 @@ class BayesianClassifier:
     """
 
     def __init__(
-            self,
-            config: dict | None = None,
-            *,
-            single_occurence_allowed: bool = True,
-        ) -> None:
+        self,
+        config: dict | None = None,
+        *,
+        single_occurence_allowed: bool = True,
+    ) -> None:
         """Initialize the BayesianClassifier with the given configuration."""
         if config is None:
             config = {}
@@ -167,7 +168,7 @@ class BayesianClassifier:
                 else:
                     seq_perplexity = float("inf")
 
-            perplexities.append(seq_perplexity if compute_perplexity else float("inf")) # type: ignore
+            perplexities.append(seq_perplexity if compute_perplexity else float("inf"))  # type: ignore
             pause_time += time.time() - pause_start_time
 
         eval_time = time.time() - eval_start_time - pause_time
@@ -246,13 +247,7 @@ class BaseStructure(PDFA, ABC):
     min_max_prob: float
     modified_cases: set[CaseId]
 
-    def __init__(
-            self,
-            *args,
-            min_total_visits: int = 1,
-            min_max_prob: float = 0.0,
-            **kwargs
-        ) -> None:
+    def __init__(self, *args, min_total_visits: int = 1, min_max_prob: float = 0.0, **kwargs) -> None:
         """Initialize the BaseStructure."""
         super().__init__(*args, **kwargs)
 
@@ -278,7 +273,8 @@ class BaseStructure(PDFA, ABC):
         return list(self.state_info.keys())
 
     def create_state(self, state_id: StateId | None = None) -> StateId:
-        """Overwrite Automata method.
+        """
+        Overwrite Automata method.
 
         Creates and initializes a new state with the given state ID.
         If no state ID is provided, ID is assigned based on current number of states.
@@ -387,7 +383,8 @@ class BaseStructure(PDFA, ABC):
         """Update DFA tree structure of the process miner object by adding a new activity to case."""
 
     def _sequence_likelihood(self, sequence: list[Event]) -> float:
-        """Return the likelihood of a sequence of events.
+        """
+        Return the likelihood of a sequence of events.
 
         WARNING: INCORRECT IMPLEMENTATION!!!
         """
@@ -514,7 +511,6 @@ class BaseStructure(PDFA, ABC):
     #         return 0.0
     #     return self.get_probabilities(prev_state).get(activity, 0.0)
 
-
     def state_act_likelihood(self, state: StateId, next_activity: ActivityName) -> float:
         """Return the likelihood of the given activity given a current state."""
         # Check if the activity is valid for the current state
@@ -534,9 +530,7 @@ class BaseStructure(PDFA, ABC):
         return self.get_probabilities(state).get(next_activity, 0.0)
 
     def state_act_likelihoods(
-        self,
-        state: StateId | None,
-        eligible_activities: list[ActivityName]
+        self, state: StateId | None, eligible_activities: list[ActivityName]
     ) -> dict[ActivityName, float]:
         """Return the likelihood of the given activities given a current state."""
         likelihoods = {}
@@ -669,7 +663,8 @@ class NGram(BaseStructure):
         )
 
     def follow_path(self, sequence: list[ActivityName]) -> StateId:
-        """Follows the given activity sequence starting from the root (initial state).
+        """
+        Follows the given activity sequence starting from the root (initial state).
 
         If necessary, creates new states along the path. Does not modify state
         and activity frequency counts.
@@ -747,9 +742,7 @@ class NGram(BaseStructure):
             # If the next state is None, we need to try to recover it
             # by checking the access string of the current state
             access_string = (
-                self.state_info[state]["access_string"] + (activity,)
-                if state is not None
-                else (str(activity),)
+                self.state_info[state]["access_string"] + (activity,) if state is not None else (str(activity),)
             )
             access_string = access_string[-self.window_length :]
 
@@ -780,7 +773,7 @@ class NGram(BaseStructure):
         #     else next_state
         # )
 
-        if (self.state_info[state]["level"] == self.window_length and next_state is None):
+        if self.state_info[state]["level"] == self.window_length and next_state is None:
             full_access_string = self.state_info[state]["access_string"] + (activity,)
             access_string = full_access_string[-self.window_length :]
 
@@ -809,23 +802,23 @@ class NGram(BaseStructure):
         for i in trunc_recover_lengths:
             access_string = () if i == 0 else full_access_string[-i:]
             next_state = self.access_strings.get(access_string, None)
-            logger.debug(f"[{i}] State: {state} - Activity: {activity} - {next_state}") # noqa: G004
+            logger.debug(f"[{i}] State: {state} - Activity: {activity} - {next_state}")  # noqa: G004
             if next_state is not None and self.state_info[next_state]["total_visits"] > 0:
                 return next_state
 
             logger.error(
-                f"[!!!]   Recovery failed with access string {full_access_string}", # noqa: G004
-                f"for state {state} and activity {activity}"
+                f"[!!!]   Recovery failed with access string {full_access_string}",  # noqa: G004
+                f"for state {state} and activity {activity}",
             )
         # Get number of active visits
         if len(self.recover_lengths) > 1:
             total_visits = self.state_info[state]["total_visits"]
             level = self.state_info[state]["level"]
             logger.debug(
-                f"Total visits for state {state}: {total_visits}    -   Level: {level}  / {self.window_length}" # noqa: G004
+                f"Total visits for state {state}: {total_visits}    -   Level: {level}  / {self.window_length}"  # noqa: G004
             )
 
-        logger.debug(f"Recovery failed with access string for state {state} and activity {activity}") # noqa: G004
+        logger.debug(f"Recovery failed with access string for state {state} and activity {activity}")  # noqa: G004
         return None
 
     # def sequence_metrics(self, sequence: list[Event]) -> Metrics:
