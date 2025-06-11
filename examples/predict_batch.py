@@ -60,39 +60,41 @@ from logicsponge.processmining.utils import compute_perplexity_stats
 SEC_TO_MICRO = 1_000_000
 
 
-def lstm_model():
+def lstm_model() -> tuple[LSTMModel, optim.Optimizer, nn.Module]:
+    """Initialize and return an LSTM model, optimizer, and loss function."""
     vocab_size = 50  # Assume an upper bound on the number of activities
     embedding_dim = 50
 
     hidden_dim = 128
     output_dim = vocab_size  # Output used to predict the next activity
 
-    model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, device=device, use_one_hot=True)
+    model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, use_one_hot=True, device=device)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     return model, optimizer, criterion
 
 
-def transformer_model():
+def transformer_model() -> tuple[TransformerModel, optim.Optimizer, nn.Module]:
+    """Initialize and return a Transformer model, optimizer, and loss function."""
     vocab_size = 50  # Assume an upper bound on the number of activities
     embedding_dim = 50
 
     hidden_dim = 128
     output_dim = vocab_size  # Output used to predict the next activity
 
-    model = TransformerModel(vocab_size, embedding_dim, hidden_dim, output_dim, device=device, use_one_hot=True)
+    model = TransformerModel(vocab_size, embedding_dim, hidden_dim, output_dim, use_one_hot=True, device=device)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     return model, optimizer, criterion
 
 
-def process_neural_model(
+def process_neural_model(  # noqa: PLR0913
     name: str,
     iteration_data: dict,
     all_metrics: dict,
-    nn_train_set_transformed,
-    nn_val_set_transformed,
-    nn_test_set_transformed,
+    nn_train_set_transformed: torch.Tensor,
+    nn_val_set_transformed: torch.Tensor,
+    nn_test_set_transformed: torch.Tensor,
     epochs: int = 20,
 ) -> None:
     """Train and evaluate a NN model."""
@@ -114,7 +116,7 @@ def process_neural_model(
     training_time = (end_time - start_time) * SEC_TO_MICRO / (TRAIN_EVENTS + VAL_EVENTS)
 
     stats, perplexities, eval_time = evaluate_rnn(
-        model, nn_test_set_transformed, dataset_type="Test", max_k=config["top_k"]
+        model, nn_test_set_transformed, max_k=config["top_k"]
     )
     perplexity_stats = compute_perplexity_stats(perplexities)
     eval_time *= SEC_TO_MICRO / TEST_EVENTS
