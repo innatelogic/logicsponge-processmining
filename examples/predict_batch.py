@@ -52,14 +52,131 @@ from logicsponge.processmining.neural_networks import (
     PreprocessData,
     TransformerModel,
     evaluate_rnn,
-    evaluate_transformer,
     train_rnn,
-    train_transformer,
 )
 from logicsponge.processmining.test_data import data_name, dataset, dataset_test
 from logicsponge.processmining.utils import compute_perplexity_stats
 
 SEC_TO_MICRO = 1_000_000
+
+
+def lstm_model():
+    vocab_size = 50  # Assume an upper bound on the number of activities
+    embedding_dim = 50
+
+    hidden_dim = 128
+    output_dim = vocab_size  # Output used to predict the next activity
+
+    model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, device=device, use_one_hot=True)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    return model, optimizer, criterion
+
+
+def transformer_model():
+    vocab_size = 50  # Assume an upper bound on the number of activities
+    embedding_dim = 50
+
+    hidden_dim = 128
+    output_dim = vocab_size  # Output used to predict the next activity
+
+    model = TransformerModel(vocab_size, embedding_dim, hidden_dim, output_dim, device=device, use_one_hot=True)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    return model, optimizer, criterion
+
+
+def process_neural_model(
+    name: str,
+    iteration_data: dict,
+    all_metrics: dict,
+    nn_train_set_transformed,
+    nn_val_set_transformed,
+    nn_test_set_transformed,
+    epochs: int = 20,
+) -> None:
+    """Train and evaluate a NN model."""
+    match name:
+        case "LSTM":
+            model, optimizer, criterion = lstm_model()
+        case "transformer":
+            model, optimizer, criterion = transformer_model()
+        case _:
+            msg = "Unknown NN model."
+            raise ValueError(msg)
+
+    # Train the LSTM on the train set with batch size and sequence-to-sequence targets
+    start_time = time.time()
+    model = train_rnn(
+        model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=epochs
+    )
+    end_time = time.time()
+    training_time = (end_time - start_time) * SEC_TO_MICRO / (TRAIN_EVENTS + VAL_EVENTS)
+
+    stats, perplexities, eval_time = evaluate_rnn(
+        model, nn_test_set_transformed, dataset_type="Test", max_k=config["top_k"]
+    )
+    perplexity_stats = compute_perplexity_stats(perplexities)
+    eval_time *= SEC_TO_MICRO / TEST_EVENTS
+
+    if (
+        not isinstance(stats["top_k_correct_preds"], list)
+        or not isinstance(stats["total_predictions"], int)
+        or not isinstance(stats["accuracy"], float)
+    ):
+        msg = f"{name} stats are not in the expected format."
+        raise TypeError(msg)
+    # Append data to the iteration data dictionary
+    iteration_data["Model"].append(name)
+
+    iteration_data["PP Harmo"].append(perplexity_stats["pp_harmonic_mean"])
+    iteration_data["PP Arithm"].append(perplexity_stats["pp_arithmetic_mean"])
+    iteration_data["PP Median"].append(perplexity_stats["pp_median"])
+    iteration_data["PP Q1"].append(perplexity_stats["pp_q1"])
+    iteration_data["PP Q3"].append(perplexity_stats["pp_q3"])
+
+    iteration_data["Correct (%)"].append(stats["accuracy"] * 100)
+    iteration_data["Wrong (%)"].append(100 - stats["accuracy"] * 100)
+    iteration_data["Empty (%)"].append(0.0)
+
+    for k in range(1, config["top_k"]):
+        iteration_data[f"Top-{k + 1}"].append(stats["top_k_correct_preds"][k] / stats["total_predictions"] * 100)
+
+    iteration_data["Pred Time"].append(eval_time)
+    iteration_data["Train Time"].append(training_time)
+
+    iteration_data["Good Preds"].append(stats["correct_predictions"])
+    iteration_data["Tot Preds"].append(stats["total_predictions"])
+    iteration_data["Nb States"].append(None)
+
+    stats_to_log.append(
+        {
+            "strategy": name,
+            "strategy_accuracy": stats["accuracy"] * 100,
+            "strategy_perplexity": perplexity_stats["pp_harmonic_mean"],
+            "strategy_eval_time": eval_time,
+            # "per_state_stats": None
+        }
+    )
+
+    all_metrics[name]["accuracies"].append(stats["accuracy"])
+    all_metrics[name]["pp_arithmetic_mean"].append(perplexity_stats["pp_arithmetic_mean"])
+    all_metrics[name]["pp_harmonic_mean"].append(perplexity_stats["pp_harmonic_mean"])
+    all_metrics[name]["pp_median"].append(perplexity_stats["pp_median"])
+    all_metrics[name]["pp_q1"].append(perplexity_stats["pp_q1"])
+    all_metrics[name]["pp_q3"].append(perplexity_stats["pp_q3"])
+    for k in range(1, config["top_k"]):
+        all_metrics[name][f"top-{k + 1}"].append(iteration_data[f"Top-{k + 1}"][-1])
+
+    all_metrics[name]["pred_time"].append(eval_time)
+    all_metrics[name]["train_time"].append(training_time)
+
+    all_metrics[name]["num_states"].append(0)
+    all_metrics[name]["mean_delay_error"].append(None)
+    all_metrics[name]["mean_actual_delay"].append(None)
+    all_metrics[name]["mean_normalized_error"].append(None)
+    all_metrics[name]["num_delay_predictions"].append(None)
+
 
 # ============================================================
 # Generate a list of ngrams to test
@@ -127,8 +244,6 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 NN_TRAINING = True
-SKIP_LSTM = False
-SKIP_TRANSFORMER = True
 SHOW_DELAYS = False
 
 # ============================================================
@@ -155,7 +270,7 @@ data_test = transform_to_seqs(dataset_test)
 n_iterations = 5
 
 # Store metrics across iterations
-all_metrics = {
+all_metrics: dict = {
     name: {
         "accuracies": [],
         "pp_arithmetic_mean": [],
@@ -577,7 +692,7 @@ for iteration in range(n_iterations):
     # ============================================================
 
     # Store the statistics for each iteration and also print them out
-    iteration_data = {
+    iteration_data: dict = {
         "Model": [],
         "PP Arithm": [],
         "PP Harmo": [],
@@ -742,9 +857,6 @@ for iteration in range(n_iterations):
 
     # LSTM Evaluation
     if NN_TRAINING:
-        msg = "Training and evaluating LSTM model..."
-        logger.info(msg)
-
         # For RNNs: Append START symbol
         nn_train_set_transformed = add_start_to_sequences(train_set_transformed, start_symbol)
         nn_val_set_transformed = add_start_to_sequences(val_set_transformed, start_symbol)
@@ -754,212 +866,17 @@ for iteration in range(n_iterations):
         nn_val_set_transformed = nn_processor.preprocess_data(nn_val_set_transformed)
         nn_test_set_transformed = nn_processor.preprocess_data(nn_test_set_transformed)
 
-        vocab_size = 50  # Assume an upper bound on the number of activities
-
-        # Initialize the model, criterion, and optimizer
-        embedding_dim = 50
-        hidden_dim = 128
-        output_dim = vocab_size  # Output used to predict the next activity
-
-        model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, device=device, use_one_hot=True)
-        criterion = nn.CrossEntropyLoss()
-        optimizer = optim.Adam(model.parameters(), lr=0.001)
-
-        # Train the LSTM on the train set with batch size and sequence-to-sequence targets
-        start_time = time.time()
-        model = (
-            train_rnn(
-                model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=20
+        for name in ["LSTM", "transformer"]:
+            msg = f"Training and evaluating {name} model..."
+            logger.info(msg)
+            process_neural_model(
+                name=name,
+                iteration_data=iteration_data,
+                all_metrics=all_metrics,
+                nn_train_set_transformed=nn_train_set_transformed,
+                nn_val_set_transformed=nn_val_set_transformed,
+                nn_test_set_transformed=nn_test_set_transformed,
             )
-            if not SKIP_LSTM
-            else model
-        )
-        end_time = time.time()
-        training_time = (end_time - start_time) * SEC_TO_MICRO / (TRAIN_EVENTS + VAL_EVENTS)
-
-        lstm_stats, lstm_perplexities, lstm_eval_time = evaluate_rnn(
-            model, nn_test_set_transformed, dataset_type="Test", max_k=config["top_k"]
-        )
-        lstm_perplexity_stats = compute_perplexity_stats(lstm_perplexities)
-        lstm_eval_time *= SEC_TO_MICRO / TEST_EVENTS
-
-        # if SHOW_DELAYS:
-        #     # WARNING: LSTM DOES NOT CALCULATES DELAYS SO FAR ??
-        #     all_metrics["LSTM"]["mean_delay_error"].append(mean_delay_error)
-        #     all_metrics["LSTM"]["mean_actual_delay"].append(mean_actual_delay)
-        #     all_metrics["LSTM"]["mean_normalized_error"].append(mean_normalized_error)
-        #     all_metrics["LSTM"]["num_delay_predictions"].append(delay_count)
-
-        if (
-            not isinstance(lstm_stats["top_k_correct_preds"], list)
-            or not isinstance(lstm_stats["total_predictions"], int)
-            or not isinstance(lstm_stats["accuracy"], float)
-        ):
-            msg = "LSTM stats are not in the expected format."
-            raise TypeError(msg)
-        # Append data to the iteration data dictionary
-        iteration_data["Model"].append("LSTM")
-
-        iteration_data["PP Harmo"].append(lstm_perplexity_stats["pp_harmonic_mean"])
-        iteration_data["PP Arithm"].append(lstm_perplexity_stats["pp_arithmetic_mean"])
-        iteration_data["PP Median"].append(lstm_perplexity_stats["pp_median"])
-        iteration_data["PP Q1"].append(lstm_perplexity_stats["pp_q1"])
-        iteration_data["PP Q3"].append(lstm_perplexity_stats["pp_q3"])
-
-        iteration_data["Correct (%)"].append(lstm_stats["accuracy"] * 100)
-        iteration_data["Wrong (%)"].append(100 - lstm_stats["accuracy"] * 100)
-        iteration_data["Empty (%)"].append(0.0)
-
-        for k in range(1, config["top_k"]):
-            iteration_data[f"Top-{k + 1}"].append(
-                lstm_stats["top_k_correct_preds"][k] / lstm_stats["total_predictions"] * 100
-            )
-
-        iteration_data["Pred Time"].append(lstm_eval_time)
-        iteration_data["Train Time"].append(training_time)
-
-        iteration_data["Good Preds"].append(lstm_stats["correct_predictions"])
-        iteration_data["Tot Preds"].append(lstm_stats["total_predictions"])
-        iteration_data["Nb States"].append(None)
-
-        stats_to_log.append(
-            {
-                "strategy": "LSTM",
-                "strategy_accuracy": lstm_stats["accuracy"] * 100,
-                "strategy_perplexity": lstm_perplexity_stats["pp_harmonic_mean"],
-                "strategy_eval_time": lstm_eval_time,
-                # "per_state_stats": None
-            }
-        )
-
-        all_metrics["LSTM"]["accuracies"].append(lstm_stats["accuracy"])
-        all_metrics["LSTM"]["pp_arithmetic_mean"].append(lstm_perplexity_stats["pp_arithmetic_mean"])
-        all_metrics["LSTM"]["pp_harmonic_mean"].append(lstm_perplexity_stats["pp_harmonic_mean"])
-        all_metrics["LSTM"]["pp_median"].append(lstm_perplexity_stats["pp_median"])
-        all_metrics["LSTM"]["pp_q1"].append(lstm_perplexity_stats["pp_q1"])
-        all_metrics["LSTM"]["pp_q3"].append(lstm_perplexity_stats["pp_q3"])
-        for k in range(1, config["top_k"]):
-            all_metrics["LSTM"][f"top-{k + 1}"].append(iteration_data[f"Top-{k + 1}"][-1])
-
-        all_metrics["LSTM"]["pred_time"].append(lstm_eval_time)
-        all_metrics["LSTM"]["train_time"].append(training_time)
-
-        all_metrics["LSTM"]["num_states"].append(0)
-        all_metrics["LSTM"]["mean_delay_error"].append(None)
-        all_metrics["LSTM"]["mean_actual_delay"].append(None)
-        all_metrics["LSTM"]["mean_normalized_error"].append(None)
-        all_metrics["LSTM"]["num_delay_predictions"].append(None)
-
-        # ============================================================
-        # ============================================================
-
-        # Initialize the transformer model
-        msg = "Training and evaluating transformer model..."
-        logger.info(msg)
-
-        nhead = 2
-        num_encoder_layers = 2
-        num_decoder_layers = 2
-        dim_feedforward = 128
-        dropout = 0.1
-
-        model = TransformerModel(
-            vocab_size=vocab_size,
-            embedding_dim=embedding_dim,
-            nhead=nhead,
-            num_encoder_layers=num_encoder_layers,
-            num_decoder_layers=num_decoder_layers,
-            dim_feedforward=dim_feedforward,
-            dropout=dropout,
-            device=device,
-            use_one_hot=True,  # or False, depending on your preference
-        )
-
-        criterion = nn.CrossEntropyLoss()
-        optimizer = optim.Adam(model.parameters(), lr=0.0001)  # Lower learning rate for transformer
-
-        # Train the transformer
-        start_time = time.time()
-        model = (
-            train_transformer(
-                model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=20
-            )
-            if not SKIP_TRANSFORMER
-            else model
-        )
-        end_time = time.time()
-        training_time = (end_time - start_time) * SEC_TO_MICRO / (TRAIN_EVENTS + VAL_EVENTS)
-
-        # Evaluate the transformer
-        transformer_stats, transformer_perplexities, transformer_eval_time = evaluate_transformer(
-            model, nn_test_set_transformed, dataset_type="Test", max_k=config["top_k"]
-        )
-        transformer_perplexity_stats = compute_perplexity_stats(transformer_perplexities)
-        transformer_eval_time *= SEC_TO_MICRO / TEST_EVENTS
-
-        # Validation checks
-        if (
-            not isinstance(transformer_stats["top_k_correct_preds"], list)
-            or not isinstance(transformer_stats["total_predictions"], int)
-            or not isinstance(transformer_stats["accuracy"], float)
-        ):
-            msg = "transformer stats are not in the expected format."
-            raise TypeError(msg)
-
-        # Append data to the iteration data dictionary
-        iteration_data["Model"].append("transformer")
-
-        iteration_data["PP Harmo"].append(transformer_perplexity_stats["pp_harmonic_mean"])
-        iteration_data["PP Arithm"].append(transformer_perplexity_stats["pp_arithmetic_mean"])
-        iteration_data["PP Median"].append(transformer_perplexity_stats["pp_median"])
-        iteration_data["PP Q1"].append(transformer_perplexity_stats["pp_q1"])
-        iteration_data["PP Q3"].append(transformer_perplexity_stats["pp_q3"])
-
-        iteration_data["Correct (%)"].append(transformer_stats["accuracy"] * 100)
-        iteration_data["Wrong (%)"].append(100 - transformer_stats["accuracy"] * 100)
-        iteration_data["Empty (%)"].append(0.0)
-
-        for k in range(1, config["top_k"]):
-            iteration_data[f"Top-{k + 1}"].append(
-                transformer_stats["top_k_correct_preds"][k] / transformer_stats["total_predictions"] * 100
-            )
-
-        iteration_data["Pred Time"].append(transformer_eval_time)
-        iteration_data["Train Time"].append(training_time)
-
-        iteration_data["Good Preds"].append(transformer_stats["correct_predictions"])
-        iteration_data["Tot Preds"].append(transformer_stats["total_predictions"])
-        iteration_data["Nb States"].append(None)
-
-        # Add to stats_to_log
-        stats_to_log.append(
-            {
-                "strategy": "transformer",
-                "strategy_accuracy": transformer_stats["accuracy"] * 100,
-                "strategy_perplexity": transformer_perplexity_stats["pp_harmonic_mean"],
-                "strategy_eval_time": transformer_eval_time,
-            }
-        )
-
-        # Add to all_metrics
-        all_metrics["transformer"]["accuracies"].append(transformer_stats["accuracy"])
-        all_metrics["transformer"]["pp_arithmetic_mean"].append(transformer_perplexity_stats["pp_arithmetic_mean"])
-        all_metrics["transformer"]["pp_harmonic_mean"].append(transformer_perplexity_stats["pp_harmonic_mean"])
-        all_metrics["transformer"]["pp_median"].append(transformer_perplexity_stats["pp_median"])
-        all_metrics["transformer"]["pp_q1"].append(transformer_perplexity_stats["pp_q1"])
-        all_metrics["transformer"]["pp_q3"].append(transformer_perplexity_stats["pp_q3"])
-
-        for k in range(1, config["top_k"]):
-            all_metrics["transformer"][f"top-{k + 1}"].append(iteration_data[f"Top-{k + 1}"][-1])
-
-        all_metrics["transformer"]["pred_time"].append(transformer_eval_time)
-        all_metrics["transformer"]["train_time"].append(training_time)
-
-        all_metrics["transformer"]["num_states"].append(0)
-        all_metrics["transformer"]["mean_delay_error"].append(None)
-        all_metrics["transformer"]["mean_actual_delay"].append(None)
-        all_metrics["transformer"]["mean_normalized_error"].append(None)
-        all_metrics["transformer"]["num_delay_predictions"].append(None)
 
     # Create a DataFrame for the iteration and log it
     iteration_df = pd.DataFrame(iteration_data).round(2)
@@ -977,7 +894,7 @@ for iteration in range(n_iterations):
 with stats_file_path.open("w") as f:
     json.dump(stats_to_log, f, indent=4)
 
-results = {
+results: dict = {
     "Model": [],
     "Mean Accuracy (%)": [],
     "Std": [],
