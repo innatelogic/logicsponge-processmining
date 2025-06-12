@@ -1,5 +1,5 @@
 import csv
-import logging  # noqa: D100
+import logging
 import time
 from collections.abc import Iterator
 from datetime import timedelta
@@ -14,7 +14,7 @@ from logicsponge.processmining.models import (
     StreamingMiner,
 )
 from logicsponge.processmining.types import ActivityName, Event
-from logicsponge.processmining.utils import compute_perplexity_stats, compute_seq_perplexity, metrics_prediction
+from logicsponge.processmining.utils import metrics_prediction
 
 logger = logging.getLogger(__name__)
 
@@ -81,27 +81,22 @@ class DataPreparation(ls.FunctionTerm):
         self.activity_keys = activity_keys
 
     def f(self, item: DataItem) -> DataItem:
-        """Process the input DataItem to output a new DataItem containing only case and activity keys.
+        """
+        Process the input DataItem to output a new DataItem containing only case and activity keys.
 
         - Combines values from case_keys into a single case_id (as a tuple or single value).
         - Combines values from activity_keys into a single activity (as a tuple or single value).
         """
         # Construct the new DataItem with case_id and activity values
         return DataItem(
-            {"case_id": handle_keys(self.case_keys, item), "activity": handle_keys(self.activity_keys, item)}
+            {"case_id": handle_keys(self.case_keys, item), "activity": handle_keys(self.activity_keys, item)}  # type: ignore
         )
 
 
 class StreamingActivityPredictor(ls.FunctionTerm):
     """Streaming activity predictor."""
 
-    def __init__(
-            self,
-            *args,
-            strategy: StreamingMiner,
-            compute_metrics: bool = False,
-            **kwargs
-        ):
+    def __init__(self, *args, strategy: StreamingMiner, compute_metrics: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
         self.strategy = strategy
         # self.case_ids = set()
@@ -114,13 +109,17 @@ class StreamingActivityPredictor(ls.FunctionTerm):
             case_id = item["case_id"]
 
             start_time = time.time()
-
             metrics = self.strategy.case_metrics(case_id)
             prediction = metrics_prediction(metrics, self.strategy.config)
-            likelihood = self.strategy.state_act_likelihood(metrics["state_id"], item["activity"])
+            predict_latency = time.time() - start_time  # time taken to compute prediction
+
+            # pause_time = time.time()
+            # likelihood = self.strategy.state_act_likelihood(metrics["state_id"], item["activity"])
+            # start_time += time.time() - pause_time  # Adjust start time to account for the pause
 
             # prediction = self.strategy.case_predictions.get(item["case_id"], None)
 
+            start_time_training = time.time()
             event: Event = {
                 "case_id": item["case_id"],
                 "activity": item["activity"],
@@ -128,6 +127,7 @@ class StreamingActivityPredictor(ls.FunctionTerm):
             }
 
             self.strategy.update(event)
+            training_latency = time.time() - start_time_training  # time taken to update the model
 
             end_time = time.time()
             latency = (end_time - start_time) * 1000  # latency in milliseconds (ms)
@@ -154,8 +154,10 @@ class StreamingActivityPredictor(ls.FunctionTerm):
                     "case_id": item["case_id"],
                     "activity": item["activity"],  # actual activity
                     "prediction": prediction,  # containing predicted activity
-                    "likelihood": likelihood,
+                    "likelihood": 0.0,
                     "latency": latency,
+                    "predict_latency": predict_latency * 1_000_000,
+                    "train_latency": training_latency * 1_000_000,
                     "delay_error": delay_error,
                     "actual_delay": actual_delay,
                     "predicted_delay": predicted_delay,
@@ -169,8 +171,13 @@ class Evaluation(ls.FunctionTerm):
         super().__init__(*args, **kwargs)
         self.top_activities = top_activities
         self.correct_predictions = 0
+        self.top_k_correct_preds = 0
         self.total_predictions = 0
         self.missing_predictions = 0
+
+        self.predict_latency_sum = 0
+        self.train_latency_sum = 0
+
         self.latency_sum = 0
         self.latency_max = 0
         self.last_timestamps = {}  # records last timestamps for every case
@@ -182,7 +189,7 @@ class Evaluation(ls.FunctionTerm):
 
         self.likelihoods: dict[int, float] = {}
         self.sequence_lengths: dict[int, int] = {}
-        self.perplexities: dict[int, float] = {}
+        # self.perplexities: dict[int, float] = {}
 
     def f(self, item: DataItem) -> DataItem:
         if item["case_id"] not in self.sequence_lengths:
@@ -192,25 +199,28 @@ class Evaluation(ls.FunctionTerm):
         self.likelihoods[item["case_id"]] *= item["likelihood"]
         self.sequence_lengths[item["case_id"]] += 1
 
-        # Compute perplexity
-        normalized_likelihood = self.likelihoods[item["case_id"]] ** (1 / self.sequence_lengths[item["case_id"]])
-        self.perplexities[item["case_id"]] = compute_seq_perplexity(normalized_likelihood, log_likelihood=False)
+        # # Compute perplexity
+        # normalized_likelihood = self.likelihoods[item["case_id"]] ** (1 / self.sequence_lengths[item["case_id"]])
+        # self.perplexities[item["case_id"]] = compute_seq_perplexity(normalized_likelihood, log_likelihood=False)
 
-        perplexity_stats = compute_perplexity_stats(list(self.perplexities.values()))
+        # perplexity_stats = compute_perplexity_stats(list(self.perplexities.values()))
 
         self.latency_sum += item["latency"]
         self.latency_max = max(item["latency"], self.latency_max)
 
+        self.predict_latency_sum += item["predict_latency"]
+        self.train_latency_sum += item["train_latency"]
+
         if item["prediction"] is None:
             self.missing_predictions += 1
-        elif self.top_activities:
-            if item["activity"] in item["prediction"]["top_k_activities"]:
+        else:
+            if (self.top_activities and item["activity"] in item["prediction"]["top_k_activities"]) or item["activity"] == item["prediction"]["activity"]:
                 self.correct_predictions += 1
-        elif item["activity"] == item["prediction"]["activity"]:
-            self.correct_predictions += 1
+
+            if item["activity"] in item["prediction"]["top_k_activities"]:
+                self.top_k_correct_preds += 1
 
         self.total_predictions += 1
-
 
         # ######
         #         stats = strategy.stats
@@ -268,6 +278,7 @@ class Evaluation(ls.FunctionTerm):
             mean_normalized_error = None
 
         accuracy = self.correct_predictions / self.total_predictions * 100 if self.total_predictions > 0 else 0
+        top_k_accuracy = self.top_k_correct_preds / self.total_predictions * 100 if self.total_predictions > 0 else 0
 
         return DataItem(
             {
@@ -275,14 +286,18 @@ class Evaluation(ls.FunctionTerm):
                 "correct_predictions": self.correct_predictions,
                 "total_predictions": self.total_predictions,
                 "missing_predictions": self.missing_predictions,
+                "top_k_correct_preds": self.top_k_correct_preds,
                 "accuracy": accuracy,
+                "top_k_accuracy": top_k_accuracy,
+                "predict_latency_mean": self.predict_latency_sum / self.total_predictions,
+                "train_latency_mean": self.train_latency_sum / self.total_predictions,
                 "latency_mean": self.latency_sum / self.total_predictions,
                 "latency_max": self.latency_max,
                 "mean_delay_error": mean_delay_error,
                 "mean_actual_delay": mean_actual_delay,
                 "mean_normalized_error": mean_normalized_error,
                 "delay_predictions": self.delay_count,
-                **perplexity_stats,
+                # **perplexity_stats,
             }
         )
 
@@ -337,22 +352,17 @@ class PrintEval(ls.FunctionTerm):
 
 
 class CSVStatsWriter(ls.FunctionTerm):
-    """Write evaluation statistics from eval_to_table's DataFrame to a CSV file.
+    """
+    Write evaluation statistics from eval_to_table's DataFrame to a CSV file.
 
     Receives a DataItem, generates a DataFrame using eval_to_table,
     and writes each row of the DataFrame to the CSV file,
     optionally adding a batch index from the DataItem.
     """
 
-    def __init__(
-            self,
-            *args,
-            csv_path: Path,
-            append: bool = True,
-            batch_index_col_name: str = "batch_index",
-            **kwargs
-        ):
-        """Initialize the CSV writer.
+    def __init__(self, *args, csv_path: Path, append: bool = True, batch_index_col_name: str = "batch_index", **kwargs):
+        """
+        Initialize the CSV writer.
 
         Args:
             csv_path: Path to the CSV file where stats will be written.
@@ -394,7 +404,7 @@ class CSVStatsWriter(ls.FunctionTerm):
             for record in records_to_write:
                 record[self.batch_index_col_name] = batch_idx
 
-        if not records_to_write: # Should be caught by df_to_save.empty check
+        if not records_to_write:  # Should be caught by df_to_save.empty check
             return item
 
         # Determine file mode and if header needs to be written
@@ -420,14 +430,12 @@ class CSVStatsWriter(ls.FunctionTerm):
                 if needs_header:
                     writer.writeheader()
 
-                writer.writerows(records_to_write)
+                writer.writerows(records_to_write)  # type: ignore
         except OSError as e:
             logger.exception("Error writing to CSV file %s. %s", self.csv_path, e)
         except Exception as e:
             logger.exception(
-                "An unexpected error occurred in CSVStatsWriter while writing to %s: %s",
-                {self.csv_path},
-                e
+                "An unexpected error occurred in CSVStatsWriter while writing to %s: %s", {self.csv_path}, e
             )
 
         # Return the original DataItem, allowing it to continue in the pipeline

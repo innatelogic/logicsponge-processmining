@@ -1,4 +1,5 @@
-"""Module for streaming miners.
+"""
+Module for streaming miners.
 
 This module contains the implementation of various streaming miners,
 including the BasicMiner, MultiMiner, HardVoting, SoftVoting, AdaptiveVoting,
@@ -23,7 +24,7 @@ from tqdm import tqdm
 
 from logicsponge.processmining.config import update_config
 from logicsponge.processmining.data_utils import add_input_symbols_sequence
-from logicsponge.processmining.neural_networks import LSTMModel, RNNModel
+from logicsponge.processmining.neural_networks import LSTMModel, RNNModel, TransformerModel
 from logicsponge.processmining.types import (
     ActivityDelays,
     ActivityName,
@@ -245,9 +246,11 @@ class StreamingMiner(ABC):
         mode: str = "incremental",
         *,
         log_likelihood: bool = False,
-        debug: bool = False, # noqa: ARG002
+        compute_perplexity: bool = False,
+        debug: bool = False,  # noqa: ARG002
     ) -> float:
-        """Evaluate in batch mode.
+        """
+        Evaluate in batch mode.
 
         Evaluate the dataset either incrementally or by full sequence.
 
@@ -277,7 +280,7 @@ class StreamingMiner(ABC):
 
             current_state = self.initial_state
             metrics = empty_metrics()
-            likelihood = 0.0 if log_likelihood else 1.0
+            likelihood = 0.0 if (log_likelihood or not compute_perplexity) else 1.0
 
             for i in range(len(sequence)):
                 if current_state is None:
@@ -306,14 +309,15 @@ class StreamingMiner(ABC):
 
                 pause_start_time = time.time()
 
-                logger.debug("      [Before] Likelihood: %s", likelihood)
-                if log_likelihood:
-                    likelihood += math.log(self.state_act_likelihood(current_state, actual_next_activity))
-                    # likelihood += metrics["likelihoods"].get(actual_next_activity, 0.0)
-                else:
-                    likelihood *= self.state_act_likelihood(current_state, actual_next_activity)
-                    # likelihood *= metrics["likelihoods"].get(actual_next_activity, 0.0)
-                logger.debug("      [After] Likelihood: %s", likelihood)
+                if compute_perplexity:
+                    logger.debug("      [Before] Likelihood: %s", likelihood)
+                    if log_likelihood:
+                        likelihood += math.log(self.state_act_likelihood(current_state, actual_next_activity))
+                        # likelihood += metrics["likelihoods"].get(actual_next_activity, 0.0)
+                    else:
+                        likelihood *= self.state_act_likelihood(current_state, actual_next_activity)
+                        # likelihood *= metrics["likelihoods"].get(actual_next_activity, 0.0)
+                    logger.debug("      [After] Likelihood: %s", likelihood)
 
                 # likelihood *= (
                 #     metrics["likelihood"]
@@ -336,14 +340,18 @@ class StreamingMiner(ABC):
                     current_state = self.next_state(current_state, actual_next_activity)
                     logger.debug("Next state: %s", current_state)
 
-            # Normalize by the length of the sequence
-            if log_likelihood:
-                normalized_likelihood = likelihood / len(sequence) if len(sequence) > 0 else likelihood
-            else:
-                normalized_likelihood = likelihood ** (1 / len(sequence)) if len(sequence) > 0 else likelihood
+            if compute_perplexity:
+                # Normalize by the length of the sequence
+                if log_likelihood:
+                    normalized_likelihood = likelihood / len(sequence) if len(sequence) > 0 else likelihood
+                else:
+                    normalized_likelihood = likelihood ** (1 / len(sequence)) if len(sequence) > 0 else likelihood
 
-            seq_perplexity = compute_seq_perplexity(normalized_likelihood, log_likelihood=log_likelihood)
-            perplexities.append(seq_perplexity)
+                seq_perplexity = compute_seq_perplexity(normalized_likelihood, log_likelihood=log_likelihood)
+            else:
+                seq_perplexity = float("nan")
+
+            perplexities.append(seq_perplexity if compute_perplexity else likelihood)
 
             logger.debug("Pred. sequence: %s", predicted_sequence.replace(self.config["stop_symbol"].__str__(), "S"))
             logger.debug("Sequence likelihood: %s", likelihood)
@@ -399,13 +407,11 @@ class StreamingMiner(ABC):
         """Return the likelihood of the given activity given a current state."""
 
     def state_act_likelihoods(
-        self,
-        state: StateId | None,
-        eligible_activities: list[ActivityName]
+        self, state: StateId | None, wanted_activities: list[ActivityName]
     ) -> dict[ActivityName, float]:
-        """Return the likelihood of the given activities given a current state."""
+        """Return the likelihood of the wanted activities given a current state."""
         likelihoods = {}
-        for activity in eligible_activities:
+        for activity in wanted_activities:
             likelihoods[activity] = self.state_act_likelihood(state, activity)
         return likelihoods
 
@@ -439,7 +445,6 @@ class BasicMiner(StreamingMiner):
     def get_state_from_case(self, case_id: CaseId) -> StateId:
         """Return the state of the algorithm based on the case ID."""
         return self.algorithm.get_state_from_case(case_id)
-
 
     def get_num_states(self) -> int:
         """Return the number of states in the algorithm."""
@@ -627,7 +632,8 @@ class HardVoting(MultiMiner):
         super().__init__(*args, **kwargs)
 
     def state_act_likelihood(self, state: ComposedState | None, next_activity: ActivityName) -> float:
-        """Return the likelihood of the sequence based on the metrics from the models.
+        """
+        Return the likelihood of the sequence based on the metrics from the models.
 
         Calculates the total probability that the predicted activity will be the
         dominant outcome when considering all possible voting combinations
@@ -639,7 +645,8 @@ class HardVoting(MultiMiner):
             return 0.0
 
         def get_winning_probability(vote_combination: tuple[ActivityName, ...]) -> float:
-            """Determine if the predicted activity wins given a specific vote combination.
+            """
+            Determine if the predicted activity wins given a specific vote combination.
 
             Return the probability of this combination occurring.
             """
@@ -697,7 +704,8 @@ class HardVoting(MultiMiner):
         return total_probability
 
     def voting_probs(self, probs_list: list[ProbDistr]) -> ProbDistr:
-        """Perform hard voting based on the most frequent activity in the predictions and return the winning activity.
+        """
+        Perform hard voting based on the most frequent activity in the predictions and return the winning activity.
 
         As a probability dictionary with a probability of 1.0.
         If there is a tie, select the activity based on the first occurrence in the order of the models.
@@ -761,7 +769,6 @@ class HardVoting(MultiMiner):
             # likelihoods=self.state_act_likelihoods(state, activity_list)
         )
 
-
     def case_metrics(self, case_id: CaseId) -> Metrics:
         """Return the hard voting of predictions from the ensemble."""
         # Non optimal, but it is convenient to call state_act_likelihood for the likelihood computation
@@ -816,7 +823,8 @@ class SoftVoting(MultiMiner):
         self.prob_weights = prob_weights
 
     def state_act_likelihood(self, state: ComposedState | None, next_activity: ActivityName) -> float:
-        """Return the likelihood of the sequence based on the metrics from the models.
+        """
+        Return the likelihood of the sequence based on the metrics from the models.
 
         Calculates the total probability that the predicted activity will be the
         dominant outcome when considering all possible voting combinations
@@ -852,7 +860,8 @@ class SoftVoting(MultiMiner):
         return combined_probs
 
     def voting_likelihood(self, metrics: Metrics) -> float:
-        """Return the likelihood of the sequence based on the metrics from the models.
+        """
+        Return the likelihood of the sequence based on the metrics from the models.
 
         Calculates the total probability that the predicted activity will be the
         dominant outcome when considering all possible voting combinations
@@ -885,10 +894,6 @@ class SoftVoting(MultiMiner):
             # likelihoods=self.state_act_likelihoods(state, activity_list)
         )
 
-
-
-
-
     def case_metrics(self, case_id: CaseId) -> Metrics:
         """Return the hard voting of predictions from the ensemble."""
         # Non optimal, but it is convenient to call state_act_likelihood for the likelihood computation
@@ -909,7 +914,6 @@ class SoftVoting(MultiMiner):
             # likelihoods=self.state_act_likelihoods(state, activity_list)
         )
 
-
     def sequence_metrics(self, sequence: list[Event]) -> Metrics:
         """Return the majority vote."""
         msg = "Soft voting is not implemented for sequences."
@@ -925,7 +929,8 @@ class SoftVoting(MultiMiner):
 
 
 class AdaptiveVoting(MultiMiner):
-    """Selects the best model for each prediction.
+    """
+    Selects the best model for each prediction.
 
     Args:
         select_best (str): The criterion to select the best model.
@@ -989,7 +994,8 @@ class AdaptiveVoting(MultiMiner):
         return accuracies.index(max(accuracies))
 
     def state_act_likelihood(self, state: ComposedState | None, next_activity: ActivityName) -> float:
-        """Return the likelihood of the sequence based on the metrics from the models.
+        """
+        Return the likelihood of the sequence based on the metrics from the models.
 
         Calculates the total probability that the predicted activity will be the
         dominant outcome when considering all possible voting combinations
@@ -1000,9 +1006,7 @@ class AdaptiveVoting(MultiMiner):
 
         # Get the best model
         best_model_index = (
-            self.select_best_model()
-            if self.select_best == "acc"
-            else self.get_best_model_metrics(state)[0]
+            self.select_best_model() if self.select_best == "acc" else self.get_best_model_metrics(state)[0]
         )
 
         return (
@@ -1031,14 +1035,9 @@ class AdaptiveVoting(MultiMiner):
             enumerate(all_state_metrics),
             key=lambda x: (
                 (max(x[1]["probs"].values()) if x[1]["probs"] else 0.0)
-                * (
-                    self.correct_predictions[x[0]]
-                    if self.select_best == "prob x acc"
-                    else 1.0
-                )
+                * (self.correct_predictions[x[0]] if self.select_best == "prob x acc" else 1.0)
             ),
         )
-
 
     def state_metrics(self, state: ComposedState | None) -> Metrics:
         """Return the probability distribution from the model with the best accuracy so far."""
@@ -1119,7 +1118,8 @@ class Fallback(MultiMiner):
         super().__init__(*args, **kwargs)
 
     def state_metrics(self, state: ComposedState | None) -> Metrics:
-        """Return the first non-{} probabilities from the models, cascading through the models in order.
+        """
+        Return the first non-{} probabilities from the models, cascading through the models in order.
 
         Each model gets its corresponding state from the ComposedState.
         """
@@ -1180,7 +1180,8 @@ class Fallback(MultiMiner):
         return empty_metrics()
 
     def sequence_metrics(self, sequence: list[Event]) -> Metrics:
-        """Return the first non-empty probabilities from the models for the given sequence.
+        """
+        Return the first non-empty probabilities from the models for the given sequence.
 
         Cascading through the models in order.
         """
@@ -1308,7 +1309,8 @@ class Alergia(BasicMiner):
 
     @staticmethod
     def get_probability_distribution(state: ComposedState) -> ProbDistr:
-        """Return the probability distribution of the state.
+        """
+        Return the probability distribution of the state.
 
         The state should be a probabilistic automaton.
         """
@@ -1329,7 +1331,8 @@ class Alergia(BasicMiner):
         """Methods not used in this subclass."""
 
     def state_metrics(self, state: ComposedState) -> Metrics:
-        """Return the probability distribution of the state.
+        """
+        Return the probability distribution of the state.
 
         The state should be a probabilistic automaton.
         """
@@ -1346,7 +1349,8 @@ class Alergia(BasicMiner):
         return empty_metrics()
 
     def sequence_metrics(self, sequence: list[Event]) -> Metrics:
-        """Return the probability distribution of the state.
+        """
+        Return the probability distribution of the state.
 
         The state should be a probabilistic automaton.
         """
@@ -1382,14 +1386,8 @@ class NeuralNetworkMiner(StreamingMiner):
     device: torch.device | None
 
     def __init__(
-            self,
-            *args,
-            model: RNNModel | LSTMModel,
-            batch_size: int,
-            optimizer,
-            criterion,
-            **kwargs
-        ) -> None:
+        self, *args, model: RNNModel | LSTMModel | TransformerModel, batch_size: int, optimizer, criterion, **kwargs
+    ) -> None:
         super().__init__(*args, **kwargs)
         self.device = model.device
         self.model = model.to(device=self.device)  # The neural network, make sure it's at the device
@@ -1427,7 +1425,8 @@ class NeuralNetworkMiner(StreamingMiner):
         return set()
 
     def update(self, event: Event) -> None:
-        """Add an activity to the sequence corresponding to the case_id.
+        """
+        Add an activity to the sequence corresponding to the case_id.
 
         Dynamically update the activity_to_idx mapping if a new activity is encountered.
         """
@@ -1494,7 +1493,8 @@ class NeuralNetworkMiner(StreamingMiner):
         return loss.item()
 
     def select_batch(self, case_id: CaseId) -> list[list[int]]:
-        """Select a batch of sequences, using a round-robin approach.
+        """
+        Select a batch of sequences, using a round-robin approach.
 
         Only select sequences that have at least two tokens (input + target).
         """
@@ -1536,7 +1536,8 @@ class NeuralNetworkMiner(StreamingMiner):
         return [self.get_sequence(cid) for cid in batch_case_ids]
 
     def case_metrics(self, case_id: CaseId) -> Metrics:
-        """Predict the next activity for a given case_id.
+        """
+        Predict the next activity for a given case_id.
 
         Return the top-k most likely activities along with the probability
         of the top activity.
@@ -1557,7 +1558,8 @@ class NeuralNetworkMiner(StreamingMiner):
         )
 
     def sequence_metrics(self, sequence: list[Event]) -> Metrics:
-        """Predict the next activity for a given sequence of activities and return the top-k most likely activities...
+        """
+        Predict the next activity for a given sequence of activities and return the top-k most likely activities...
 
         ...along with the
         probability of the top activity.
