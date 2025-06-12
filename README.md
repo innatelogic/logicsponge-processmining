@@ -20,6 +20,16 @@ We recommend starting with our [logicsponge tutorial](https://github.com/innatel
 pip install logicsponge-processmining
 ```
 
+# Testing
+To run some prepared examples, you can use the following commands:
+
+```sh
+python examples/predict_streaming.py # for streaming event-log prediction
+python examples/predict_batch.py # for batch event-log prediction
+```
+
+Results will be stored in a directory named `results`.
+
 # Event-log prediction
 
 Event-log prediction involves anticipating events given historical data about a process. In the streaming case, we receive a sequence of events, where each event is a pair
