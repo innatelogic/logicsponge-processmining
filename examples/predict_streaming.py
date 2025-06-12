@@ -28,7 +28,7 @@ from logicsponge.processmining.models import (
     NeuralNetworkMiner,
     SoftVoting,
 )
-from logicsponge.processmining.neural_networks import LSTMModel, SimpleTransformerModel, TransformerModel
+from logicsponge.processmining.neural_networks import LSTMModel, TransformerModel
 from logicsponge.processmining.streaming import (
     AddStartSymbol,
     CSVStatsWriter,
@@ -317,21 +317,15 @@ lstm = StreamingActivityPredictor(
 )
 
 
-# Initialize tranformer model
-nhead = 2
-num_encoder_layers = 2
-num_decoder_layers = 2
-dim_feedforward = 128
-dropout = 0.1
+# Initialize transformer model
+hidden_dim = 128
+output_dim = vocab_size  # Output used to predict the next activity
 
 model_transformer = TransformerModel(
     vocab_size=vocab_size,
     embedding_dim=embedding_dim,
-    nhead=nhead,
-    num_encoder_layers=num_encoder_layers,
-    num_decoder_layers=num_decoder_layers,
-    dim_feedforward=dim_feedforward,
-    dropout=dropout,
+    hidden_dim=hidden_dim,
+    output_dim=output_dim,
     use_one_hot=True,
 )
 criterion = nn.CrossEntropyLoss()
@@ -340,23 +334,6 @@ optimizer = optim.Adam(model_transformer.parameters(), lr=0.0001)  # Lower learn
 transformer = StreamingActivityPredictor(
     strategy=NeuralNetworkMiner(
         model=model_transformer,
-        criterion=criterion,
-        optimizer=optimizer,
-        batch_size=8,
-        config=config,
-    )
-)
-
-# Init simple transformer model
-model_simpletransformer = SimpleTransformerModel(
-    vocab_size, embedding_dim, hidden_dim, output_dim, device=device, use_one_hot=True
-)
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model_simpletransformer.parameters(), lr=0.0001)  # Lower learning rate for transformer
-
-simpletransformer = StreamingActivityPredictor(
-    strategy=NeuralNetworkMiner(
-        model=model_simpletransformer,
         criterion=criterion,
         optimizer=optimizer,
         batch_size=8,
@@ -500,12 +477,6 @@ sponge = (
             * lstm
             * DataItemFilter(data_item_filter=start_filter)
             * Evaluation("lstm")
-        )
-        | (
-            AddStartSymbol(start_symbol=start_symbol)
-            * simpletransformer
-            * DataItemFilter(data_item_filter=start_filter)
-            * Evaluation("simpletransformer")
         )
         | (
             AddStartSymbol(start_symbol=start_symbol)
