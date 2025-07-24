@@ -366,8 +366,8 @@ models = [
     *list(soft_voting_predictors.keys()),  # Add all soft_voting predictor names
     "lstm",
     "transformer",
-    "simpletransformer",
 ]
+
 
 
 metrics_attributes = [
