@@ -76,7 +76,7 @@ class RNNModel(nn.Module):
             x (torch.Tensor): Input tensor of shape (batch_size, seq_len), where each element is an activity index.
 
         Returns:
-            torch.Tensor: Output tensor of shape (batch_size, seq_len, output_dim), 
+            torch.Tensor: Output tensor of shape (batch_size, seq_len, output_dim),
             where each element is the predicted activity.
 
         """
@@ -169,7 +169,7 @@ class LSTMModel(nn.Module):
             x (torch.Tensor): Input tensor of shape (batch_size, seq_len), where each element is an activity index.
 
         Returns:
-            torch.Tensor: Output tensor of shape (batch_size, seq_len, output_dim), 
+            torch.Tensor: Output tensor of shape (batch_size, seq_len, output_dim),
             where each element is the predicted activity.
 
         """
@@ -316,7 +316,7 @@ class TransformerModel(nn.Module):
         # (i.e., prevent attending)
 
         # Pass through transformer with mask
-        x = self.transformer(x, mask=mask) 417a69178c0f628198768de3b51202cddcbfaf85
+        x = self.transformer(x, mask=mask)
 
         return self.fc(x)
 
@@ -406,15 +406,15 @@ class PreprocessData:
 
 
 def train_rnn(
-        model: LSTMModel | TransformerModel,
-        train_sequences: torch.Tensor,
-        val_sequences: torch.Tensor,
-        criterion: nn.Module,
-        optimizer: torch.optim.Optimizer,
-        batch_size: int,
-        epochs: int = 10,
-        patience: int = 3,
-    ) -> LSTMModel | TransformerModel:
+    model: LSTMModel | TransformerModel,
+    train_sequences: torch.Tensor,
+    val_sequences: torch.Tensor,
+    criterion: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    batch_size: int,
+    epochs: int = 10,
+    patience: int = 3,
+) -> LSTMModel | TransformerModel:
     """
     Train the RNN model on the training set and evaluate on the validation set.
 
@@ -648,4 +648,3 @@ def evaluate_rnn(
     eval_time = time.time() - eval_start_time - pause_time
 
     return stats, perplexities, eval_time
-
