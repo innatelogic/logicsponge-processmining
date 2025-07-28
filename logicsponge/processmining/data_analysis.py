@@ -1,5 +1,6 @@
-import pandas as pd
 from pathlib import Path
+
+import pandas as pd
 
 # Load your CSV file
 # Build the path as an absolute path from the directory of this file

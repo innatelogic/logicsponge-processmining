@@ -12,6 +12,7 @@ import pandas as pd
 import torch
 from aalpy.learning_algs import run_Alergia
 from torch import nn, optim
+from tqdm import tqdm
 
 # ruff: noqa: E402
 logging.basicConfig(
@@ -46,18 +47,147 @@ from logicsponge.processmining.models import (
     Relativize,
     SoftVoting,
 )
-from logicsponge.processmining.neural_networks import LSTMModel, PreprocessData, evaluate_rnn, train_rnn
+from logicsponge.processmining.neural_networks import (
+    LSTMModel,
+    PreprocessData,
+    TransformerModel,
+    evaluate_rnn,
+    train_rnn,
+)
 from logicsponge.processmining.test_data import data_name, dataset, dataset_test
 from logicsponge.processmining.utils import compute_perplexity_stats
+
+SEC_TO_MICRO = 1_000_000
+
+
+def lstm_model() -> tuple[LSTMModel, optim.Optimizer, nn.Module]:
+    """Initialize and return an LSTM model, optimizer, and loss function."""
+    vocab_size = 50  # Assume an upper bound on the number of activities
+    embedding_dim = 50
+
+    hidden_dim = 128
+    output_dim = vocab_size  # Output used to predict the next activity
+
+    model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, use_one_hot=True, device=device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    return model, optimizer, criterion
+
+
+def transformer_model() -> tuple[TransformerModel, optim.Optimizer, nn.Module]:
+    """Initialize and return a Transformer model, optimizer, and loss function."""
+    vocab_size = 50  # Assume an upper bound on the number of activities
+    embedding_dim = 50
+
+    hidden_dim = 128
+    output_dim = vocab_size  # Output used to predict the next activity
+
+    model = TransformerModel(vocab_size, embedding_dim, hidden_dim, output_dim, use_one_hot=True, device=device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    return model, optimizer, criterion
+
+
+def process_neural_model(  # noqa: PLR0913
+    name: str,
+    iteration_data: dict,
+    all_metrics: dict,
+    nn_train_set_transformed: torch.Tensor,
+    nn_val_set_transformed: torch.Tensor,
+    nn_test_set_transformed: torch.Tensor,
+    epochs: int = 20,
+) -> None:
+    """Train and evaluate a NN model."""
+    match name:
+        case "LSTM":
+            model, optimizer, criterion = lstm_model()
+        case "transformer":
+            model, optimizer, criterion = transformer_model()
+        case _:
+            msg = "Unknown NN model."
+            raise ValueError(msg)
+
+    # Train the LSTM on the train set with batch size and sequence-to-sequence targets
+    start_time = time.time()
+    model = train_rnn(
+        model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=epochs
+    )
+    end_time = time.time()
+    training_time = (end_time - start_time) * SEC_TO_MICRO / (TRAIN_EVENTS + VAL_EVENTS)
+
+    stats, perplexities, eval_time = evaluate_rnn(
+        model, nn_test_set_transformed, max_k=config["top_k"]
+    )
+    perplexity_stats = compute_perplexity_stats(perplexities)
+    eval_time *= SEC_TO_MICRO / TEST_EVENTS
+
+    if (
+        not isinstance(stats["top_k_correct_preds"], list)
+        or not isinstance(stats["total_predictions"], int)
+        or not isinstance(stats["accuracy"], float)
+    ):
+        msg = f"{name} stats are not in the expected format."
+        raise TypeError(msg)
+    # Append data to the iteration data dictionary
+    iteration_data["Model"].append(name)
+
+    iteration_data["PP Harmo"].append(perplexity_stats["pp_harmonic_mean"])
+    iteration_data["PP Arithm"].append(perplexity_stats["pp_arithmetic_mean"])
+    iteration_data["PP Median"].append(perplexity_stats["pp_median"])
+    iteration_data["PP Q1"].append(perplexity_stats["pp_q1"])
+    iteration_data["PP Q3"].append(perplexity_stats["pp_q3"])
+
+    iteration_data["Correct (%)"].append(stats["accuracy"] * 100)
+    iteration_data["Wrong (%)"].append(100 - stats["accuracy"] * 100)
+    iteration_data["Empty (%)"].append(0.0)
+
+    for k in range(1, config["top_k"]):
+        iteration_data[f"Top-{k + 1}"].append(stats["top_k_correct_preds"][k] / stats["total_predictions"] * 100)
+
+    iteration_data["Pred Time"].append(eval_time)
+    iteration_data["Train Time"].append(training_time)
+
+    iteration_data["Good Preds"].append(stats["correct_predictions"])
+    iteration_data["Tot Preds"].append(stats["total_predictions"])
+    iteration_data["Nb States"].append(None)
+
+    stats_to_log.append(
+        {
+            "strategy": name,
+            "strategy_accuracy": stats["accuracy"] * 100,
+            "strategy_perplexity": perplexity_stats["pp_harmonic_mean"],
+            "strategy_eval_time": eval_time,
+            # "per_state_stats": None
+        }
+    )
+
+    all_metrics[name]["accuracies"].append(stats["accuracy"])
+    all_metrics[name]["pp_arithmetic_mean"].append(perplexity_stats["pp_arithmetic_mean"])
+    all_metrics[name]["pp_harmonic_mean"].append(perplexity_stats["pp_harmonic_mean"])
+    all_metrics[name]["pp_median"].append(perplexity_stats["pp_median"])
+    all_metrics[name]["pp_q1"].append(perplexity_stats["pp_q1"])
+    all_metrics[name]["pp_q3"].append(perplexity_stats["pp_q3"])
+    for k in range(1, config["top_k"]):
+        all_metrics[name][f"top-{k + 1}"].append(iteration_data[f"Top-{k + 1}"][-1])
+
+    all_metrics[name]["pred_time"].append(eval_time)
+    all_metrics[name]["train_time"].append(training_time)
+
+    all_metrics[name]["num_states"].append(0)
+    all_metrics[name]["mean_delay_error"].append(None)
+    all_metrics[name]["mean_actual_delay"].append(None)
+    all_metrics[name]["mean_normalized_error"].append(None)
+    all_metrics[name]["num_delay_predictions"].append(None)
+
 
 # ============================================================
 # Generate a list of ngrams to test
 # ============================================================
-VOTING_NGRAMS = [(2, 3, 4), (2, 3, 5, 6), (2, 3, 5, 7), (2, 3, 5, 8), (2, 3, 4, 5), (2, 3, 4, 7)]
+VOTING_NGRAMS = [(2, 3, 4), (2, 3, 5, 8), (2, 3, 4, 5)]  # (2, 3, 5, 6), (2, 3, 5, 7), (2, 3, 4, 7)
 
-SELECT_BEST_ARGS = ["prob"] # ["acc", "prob", "prob x acc"]
+SELECT_BEST_ARGS = ["prob"]  # ["acc", "prob", "prob x acc"]
 
-WINDOW_RANGE = [0, 1, 2, 3, 4, 5, 6, 7, 8] #, 9, 10, 12, 14, 16]
+WINDOW_RANGE = [0, 1, 2, 3, 4, 5, 6, 7, 8]  # , 9, 10, 12, 14, 16]
 
 NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 # ] + [
@@ -101,12 +231,10 @@ if torch.backends.mps.is_available():
     # device = torch.device("mps")
     device = torch.device("cpu")
     logger.info("Using cpu.")
-
 elif torch.cuda.is_available():
     msg = f"Using cuda: {torch.cuda.get_device_name(0)}."
     logger.info(msg)
     device = torch.device("cuda")
-
 else:
     device = torch.device("cpu")
     logger.info("Using cpu.")
@@ -117,7 +245,7 @@ torch.cuda.manual_seed(123)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-NN_TRAINING = False
+NN_TRAINING = True
 SHOW_DELAYS = False
 
 # ============================================================
@@ -141,11 +269,10 @@ data_test = transform_to_seqs(dataset_test)
 # Define the number of iterations
 # ============================================================
 
-# n_iterations = 5
-n_iterations = 2
+n_iterations = 5
 
 # Store metrics across iterations
-all_metrics = {
+all_metrics: dict = {
     name: {
         "accuracies": [],
         "pp_arithmetic_mean": [],
@@ -168,23 +295,24 @@ all_metrics = {
         "bag",
         *list(NGRAM_NAMES),
         "fallback fpt->ngram",
-        "fallback ngram_8->ngram_2",
-        "fallback ngram_8->ngram_3",
-        "fallback ngram_8->ngram_4",
-        "fallback ngram_10->ngram_2",
-        "fallback ngram_13->ngram_2",
-        "fallback ngram_8->...->1",
-        "complex fallback",
+        # "fallback ngram_8->ngram_2",
+        # "fallback ngram_8->ngram_3",
+        # "fallback ngram_8->ngram_4",
+        # "fallback ngram_10->ngram_2",
+        # "fallback ngram_13->ngram_2",
+        # "fallback ngram_8->...->1",
+        # "complex fallback",
         "hard voting",
-        *[
-            f"adaptive voting {grams} {select_best_arg}"
-            for select_best_arg in SELECT_BEST_ARGS
-            for grams in VOTING_NGRAMS
-        ],
+        # *[
+        #     f"adaptive voting {grams} {select_best_arg}"
+        #     for select_best_arg in SELECT_BEST_ARGS
+        #     for grams in VOTING_NGRAMS
+        # ],
         *[f"soft voting {grams}" for grams in VOTING_NGRAMS],
         *[f"soft voting {grams}*" for grams in VOTING_NGRAMS],
         "alergia",
         "LSTM",
+        "transformer",
         "bayesian train",
         "bayesian test",
         "bayesian t+t",
@@ -230,6 +358,10 @@ for iteration in range(n_iterations):
 
     alergia_train_set_transformed = add_input_symbols(train_set_transformed, "in")
 
+    TRAIN_EVENTS = sum(len(lst) for lst in train_set_transformed)
+    VAL_EVENTS = sum(len(lst) for lst in val_set_transformed)
+    TEST_EVENTS = sum(len(lst) for lst in test_set_transformed)
+
     # ============================================================
     # Initialize Process Miners
     # ============================================================
@@ -257,9 +389,7 @@ for iteration in range(n_iterations):
         else:
             # Use the default NGram algorithm without recovery
             NGRAM_MODELS[ngram_name] = BasicMiner(
-                algorithm=NGram(
-                    window_length=window_length, recover_lengths=[]
-                ),
+                algorithm=NGram(window_length=window_length, recover_lengths=[]),
                 config=config,
             )
         # logger.debug(f"Stats of {ngram_name}: {NGRAM_MODELS[ngram_name].stats}")
@@ -331,40 +461,14 @@ for iteration in range(n_iterations):
 
     complex_fallback = Fallback(
         models=[
+            BasicMiner(algorithm=NGram(window_length=9, min_total_visits=10, min_max_prob=0.9)),
+            BasicMiner(algorithm=NGram(window_length=8, min_total_visits=10, min_max_prob=0.9)),
+            BasicMiner(algorithm=NGram(window_length=7, min_total_visits=10, min_max_prob=0.8)),
+            BasicMiner(algorithm=NGram(window_length=6, min_total_visits=10, min_max_prob=0.7)),
+            BasicMiner(algorithm=NGram(window_length=5, min_total_visits=10, min_max_prob=0.6)),
+            BasicMiner(algorithm=NGram(window_length=4, min_total_visits=10, min_max_prob=0.0)),
             BasicMiner(
-                algorithm=NGram(
-                    window_length=9, min_total_visits=10, min_max_prob=0.9
-                )
-            ),
-            BasicMiner(
-                algorithm=NGram(
-                    window_length=8, min_total_visits=10, min_max_prob=0.9
-                )
-            ),
-            BasicMiner(
-                algorithm=NGram(
-                    window_length=7, min_total_visits=10, min_max_prob=0.8
-                )
-            ),
-            BasicMiner(
-                algorithm=NGram(
-                    window_length=6, min_total_visits=10, min_max_prob=0.7
-                )
-            ),
-            BasicMiner(
-                algorithm=NGram(
-                    window_length=5, min_total_visits=10, min_max_prob=0.6
-                )
-            ),
-            BasicMiner(
-                algorithm=NGram(
-                    window_length=4, min_total_visits=10, min_max_prob=0.0
-                )
-            ),
-            BasicMiner(
-                algorithm=NGram(
-                    window_length=3, min_total_visits=10, min_max_prob=0.0
-                ),
+                algorithm=NGram(window_length=3, min_total_visits=10, min_max_prob=0.0),
             ),
             BasicMiner(algorithm=NGram(window_length=2, min_total_visits=10, min_max_prob=0.0)),
             BasicMiner(algorithm=NGram(window_length=1)),
@@ -394,19 +498,18 @@ for iteration in range(n_iterations):
                 BasicMiner(algorithm=NGram(window_length=grams[0], min_total_visits=10)),
                 BasicMiner(algorithm=NGram(window_length=grams[1], min_total_visits=10)),
                 BasicMiner(algorithm=NGram(window_length=grams[2], min_total_visits=10)),
-            ] + (
-                [
-                    BasicMiner(algorithm=NGram(window_length=grams[optional_num_ngrams], min_total_visits=10))
-                ]
-                if len(grams) > optional_num_ngrams else []
+            ]
+            + (
+                [BasicMiner(algorithm=NGram(window_length=grams[optional_num_ngrams], min_total_visits=10))]
+                if len(grams) > optional_num_ngrams
+                else []
             ),
             select_best=select_best_arg,
-            config=config
+            config=config,
         )
         for grams in VOTING_NGRAMS
         for select_best_arg in SELECT_BEST_ARGS
     ]
-
 
     # soft_voting = SoftVoting(
     #     models=[
@@ -421,44 +524,40 @@ for iteration in range(n_iterations):
     #     config=config,
     # )
 
-    soft_voting_list = (
-        [
-            SoftVoting(
-                models=[
-                    BasicMiner(algorithm=Bag()),
-                    BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-                    BasicMiner(algorithm=NGram(window_length=grams[0])),
-                    BasicMiner(algorithm=NGram(window_length=grams[1])),
-                    BasicMiner(algorithm=NGram(window_length=grams[2])),
-                ] + (
-                    [
-                        BasicMiner(algorithm=NGram(window_length=grams[optional_num_ngrams]))
-                    ] if len(grams) > optional_num_ngrams else []
-                ),
-                config=config,
-            )
-            for grams in VOTING_NGRAMS
-        ]
-        +
-        [
-            SoftVoting(
-                models=[
-                    BasicMiner(algorithm=Bag()),
-                    BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-                    BasicMiner(algorithm=NGram(window_length=grams[0], min_total_visits=10)),
-                    BasicMiner(algorithm=NGram(window_length=grams[1], min_total_visits=10)),
-                    BasicMiner(algorithm=NGram(window_length=grams[2], min_total_visits=10)),
-                ]
-                + (
-                    [
-                        BasicMiner(algorithm=NGram(window_length=grams[optional_num_ngrams], min_total_visits=10))
-                    ]
-                    if len(grams) > optional_num_ngrams else []
-                ),
-            )
-            for grams in VOTING_NGRAMS
-        ]
-    )
+    soft_voting_list = [
+        SoftVoting(
+            models=[
+                BasicMiner(algorithm=Bag()),
+                BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
+                BasicMiner(algorithm=NGram(window_length=grams[0])),
+                BasicMiner(algorithm=NGram(window_length=grams[1])),
+                BasicMiner(algorithm=NGram(window_length=grams[2])),
+            ]
+            + (
+                [BasicMiner(algorithm=NGram(window_length=grams[optional_num_ngrams]))]
+                if len(grams) > optional_num_ngrams
+                else []
+            ),
+            config=config,
+        )
+        for grams in VOTING_NGRAMS
+    ] + [
+        SoftVoting(
+            models=[
+                BasicMiner(algorithm=Bag()),
+                BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
+                BasicMiner(algorithm=NGram(window_length=grams[0], min_total_visits=10)),
+                BasicMiner(algorithm=NGram(window_length=grams[1], min_total_visits=10)),
+                BasicMiner(algorithm=NGram(window_length=grams[2], min_total_visits=10)),
+            ]
+            + (
+                [BasicMiner(algorithm=NGram(window_length=grams[optional_num_ngrams], min_total_visits=10))]
+                if len(grams) > optional_num_ngrams
+                else []
+            ),
+        )
+        for grams in VOTING_NGRAMS
+    ]
 
     relativize = Relativize(
         models=[
@@ -476,20 +575,6 @@ for iteration in range(n_iterations):
         "bayesian test nonsingle": BayesianClassifier(single_occurence_allowed=False, config=config),
         "bayesian t+t nonsingle": BayesianClassifier(single_occurence_allowed=False, config=config),
     }
-    # bayesian_classifier_train = BayesianClassifier(config=config)
-    # bayesian_classifier_train.initialize_memory(train_set_transformed)
-
-    # bayesian_classifier_test = BayesianClassifier(config=config)
-    # bayesian_classifier_test.initialize_memory(test_set_transformed)
-
-    # bayesian_classifier_train_test = BayesianClassifier(config=config)
-    # bayesian_classifier_train_test.initialize_memory(train_set_transformed + test_set_transformed)
-
-    # bayesian_classifier_test_nonsingle = BayesianClassifier(single_occurence_allowed=False, config=config)
-    # bayesian_classifier_test_nonsingle.initialize_memory(test_set_transformed)
-
-    # bayesian_classifier_train_test_nonsingle = BayesianClassifier(single_occurence_allowed=False, config=config)
-    # bayesian_classifier_train_test_nonsingle.initialize_memory(train_set_transformed + test_set_transformed)
 
     # ============= Train Alergia
     alergia_start_time = time.time()
@@ -521,11 +606,11 @@ for iteration in range(n_iterations):
 
     soft_voting_strategies1 = {
         f"soft voting {grams}": (soft_voting_test, test_set_transformed)
-        for grams, soft_voting_test in zip(VOTING_NGRAMS, soft_voting_list[:len(VOTING_NGRAMS)], strict=False)
+        for grams, soft_voting_test in zip(VOTING_NGRAMS, soft_voting_list[: len(VOTING_NGRAMS)], strict=False)
     }
     soft_voting_strategies2 = {
         f"soft voting {grams}*": (soft_voting_test, test_set_transformed)
-        for grams, soft_voting_test in zip(VOTING_NGRAMS, soft_voting_list[len(VOTING_NGRAMS):], strict=False)
+        for grams, soft_voting_test in zip(VOTING_NGRAMS, soft_voting_list[len(VOTING_NGRAMS) :], strict=False)
     }
     soft_voting_strategies = {**soft_voting_strategies1, **soft_voting_strategies2}
     bayesian_strategies = {model_name: (model, test_set_transformed) for model_name, model in BAYESIAN_MODELS.items()}
@@ -537,15 +622,15 @@ for iteration in range(n_iterations):
         # "ngram_15": (ngram_15, retain_sequences_of_length_x_than(test_set_transformed, 10, mode="lower")),
         # "ngram_18": (ngram_18, retain_sequences_of_length_x_than(test_set_transformed, 10, mode="lower")),
         "fallback fpt->ngram": (fallback, test_set_transformed),
-        "fallback ngram_8->ngram_2": (fallback_ngram8to2, test_set_transformed),
-        "fallback ngram_8->ngram_3": (fallback_ngram8to3, test_set_transformed),
-        "fallback ngram_8->ngram_4": (fallback_ngram8to4, test_set_transformed),
-        "fallback ngram_10->ngram_2": (fallback_ngram10to2, test_set_transformed),
-        "fallback ngram_13->ngram_2": (fallback_ngram13to2, test_set_transformed),
-        "fallback ngram_8->...->1": (fallback_ngram8to_ooo, test_set_transformed),
-        "complex fallback": (complex_fallback, test_set_transformed),
+        # "fallback ngram_8->ngram_2": (fallback_ngram8to2, test_set_transformed),
+        # "fallback ngram_8->ngram_3": (fallback_ngram8to3, test_set_transformed),
+        # "fallback ngram_8->ngram_4": (fallback_ngram8to4, test_set_transformed),
+        # "fallback ngram_10->ngram_2": (fallback_ngram10to2, test_set_transformed),
+        # "fallback ngram_13->ngram_2": (fallback_ngram13to2, test_set_transformed),
+        # "fallback ngram_8->...->1": (fallback_ngram8to_ooo, test_set_transformed),
+        # "complex fallback": (complex_fallback, test_set_transformed),
         "hard voting": (hard_voting, test_set_transformed),
-        **adaptive_voting_strategies,
+        # **adaptive_voting_strategies,
         **soft_voting_strategies,
         "alergia": (smm, test_set_transformed),
         **bayesian_strategies,
@@ -557,7 +642,7 @@ for iteration in range(n_iterations):
     # ================= Train Process Miners
     miners_start_time = time.time()
 
-    for event in train_set:
+    for event in tqdm(train_set, desc="Processing events"):
         for strategy_name, (strategy, _) in strategies.items():
             if "alergia" in strategy_name or "bayesian" in strategy_name:
                 continue
@@ -566,30 +651,10 @@ for iteration in range(n_iterations):
             end_time = time.time()
             training_times[strategy_name] += end_time - start_time
 
-        # fpt.update(event)
-        # bag.update(event)
-
-        # for ngram_model in NGRAM_MODELS.values():
-        #     ngram_model.update(event)
-
-        # fallback.update(event)
-        # fallback_ngram8to2.update(event)
-        # fallback_ngram8to3.update(event)
-        # fallback_ngram8to4.update(event)
-
-        # fallback_ngram10to2.update(event)
-        # fallback_ngram13to2.update(event)
-        # fallback_ngram8to_ooo.update(event)
-
-        # complex_fallback.update(event)
-        # hard_voting.update(event)
-        # adaptive_voting_acc.update(event)
-        # adaptive_voting_prob.update(event)
-        # adaptive_voting_probxacc.update(event)
-        # soft_voting.update(event)
-
-        # for soft_voting_test in soft_voting_list:
-        #     soft_voting_test.update(event)
+    for strategy_name in strategies:
+        if "alergia" in strategy_name or "bayesian" in strategy_name:
+            continue
+        training_times[strategy_name] /= len(train_set)
 
     miners_end_time = time.time()
     elapsed_time = miners_end_time - miners_start_time
@@ -604,29 +669,32 @@ for iteration in range(n_iterations):
             start_time = time.time()
             model.initialize_memory(train_set_transformed)
             end_time = time.time()
-            training_times[model_name] = end_time - start_time
+            training_times[model_name] = (end_time - start_time) / TRAIN_EVENTS
         elif "test" in model_name:
             start_time = time.time()
             model.initialize_memory(test_set_transformed)
             end_time = time.time()
-            training_times[model_name] = end_time - start_time
+            training_times[model_name] = (end_time - start_time) / TEST_EVENTS
         elif "t+t" in model_name:
             start_time = time.time()
             model.initialize_memory(train_set_transformed + test_set_transformed)
             end_time = time.time()
-            training_times[model_name] = end_time - start_time
+            training_times[model_name] = (end_time - start_time) / (TRAIN_EVENTS + TEST_EVENTS)
 
     bayesian_end_time = time.time()
     elapsed_time = bayesian_end_time - bayesian_start_time
     msg = f"Training time for Bayesian Classifiers: {elapsed_time:.4f} seconds"
     logger.info(msg)
 
+    for strategy_name in strategies:
+        training_times[strategy_name] *= SEC_TO_MICRO  # Convert to microseconds
+
     # ============================================================
     # Evaluation
     # ============================================================
 
     # Store the statistics for each iteration and also print them out
-    iteration_data = {
+    iteration_data: dict = {
         "Model": [],
         "PP Arithm": [],
         "PP Harmo": [],
@@ -639,6 +707,7 @@ for iteration in range(n_iterations):
         "Top-2": [],
         "Top-3": [],
         "Pred Time": [],
+        "Train Time": [],
         "Good Preds": [],
         "Tot Preds": [],
         "Nb States": [],
@@ -651,15 +720,25 @@ for iteration in range(n_iterations):
     #     iteration_data[f"Top-{k+1}"] = []
 
     for strategy_name, (strategy, test_data) in strategies.items():
-        if "hard" in strategy_name:
-            continue
+        # if "hard" in strategy_name:
+        #     continue
+        # if "bayesian" in strategy_name:
+        #     continue
+        # if "voting" in strategy_name or "ngram" in strategy_name:
+        #     continue
         # if not strategy_name.startswith("ngram_"):
         #     continue
 
         msg = f"Evaluating {strategy_name}..."
         logger.info(msg)
 
-        evaluation_time = strategy.evaluate(test_data, mode="incremental", debug=(data_name == "Synthetic_Train"))
+        evaluation_time = strategy.evaluate(
+            test_data,
+            mode="incremental",
+            debug=(data_name == "Synthetic_Train"),
+            compute_perplexity="hard" not in strategy_name,
+        )
+        evaluation_time *= SEC_TO_MICRO / TEST_EVENTS
 
         stats = strategy.stats
 
@@ -685,7 +764,7 @@ for iteration in range(n_iterations):
                 "strategy_accuracy": correct_percentage,
                 "strategy_perplexity": stats["pp_harmonic_mean"],
                 "strategy_eval_time": evaluation_time,
-                "per_state_stats": per_state_stats
+                "per_state_stats": per_state_stats,
             }
         )
 
@@ -714,6 +793,7 @@ for iteration in range(n_iterations):
             iteration_data[f"Top-{k + 1}"].append(top_k_accuracies[k])
 
         iteration_data["Pred Time"].append(evaluation_time)
+        iteration_data["Train Time"].append(training_times[strategy_name])
 
         iteration_data["Good Preds"].append(stats["correct_predictions"])
         iteration_data["Tot Preds"].append(total)
@@ -788,96 +868,17 @@ for iteration in range(n_iterations):
         nn_val_set_transformed = nn_processor.preprocess_data(nn_val_set_transformed)
         nn_test_set_transformed = nn_processor.preprocess_data(nn_test_set_transformed)
 
-        vocab_size = 50  # Assume an upper bound on the number of activities
-
-        # Initialize the model, criterion, and optimizer
-        embedding_dim = 50
-        hidden_dim = 128
-        output_dim = vocab_size  # Output used to predict the next activity
-
-        model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, use_one_hot=True)
-        criterion = nn.CrossEntropyLoss()
-        optimizer = optim.Adam(model.parameters(), lr=0.001)
-
-        # Train the LSTM on the train set with batch size and sequence-to-sequence targets
-        start_time = time.time()
-        model = train_rnn(
-            model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=20
-        )
-        end_time = time.time()
-        training_time = end_time - start_time
-
-        lstm_stats, lstm_perplexities, lstm_eval_time = evaluate_rnn(
-            model, nn_test_set_transformed, dataset_type="Test", max_k=config["top_k"]
-        )
-        lstm_perplexity_stats = compute_perplexity_stats(lstm_perplexities)
-
-        # if SHOW_DELAYS:
-        #     # WARNING: LSTM DOES NOT CALCULATES DELAYS SO FAR ??
-        #     all_metrics["LSTM"]["mean_delay_error"].append(mean_delay_error)
-        #     all_metrics["LSTM"]["mean_actual_delay"].append(mean_actual_delay)
-        #     all_metrics["LSTM"]["mean_normalized_error"].append(mean_normalized_error)
-        #     all_metrics["LSTM"]["num_delay_predictions"].append(delay_count)
-
-        if (
-            not isinstance(lstm_stats["top_k_correct_preds"], list)
-            or not isinstance(lstm_stats["total_predictions"], int)
-            or not isinstance(lstm_stats["accuracy"], float)
-        ):
-            msg = "LSTM stats are not in the expected format."
-            raise TypeError(msg)
-        # Append data to the iteration data dictionary
-        iteration_data["Model"].append("LSTM")
-
-        iteration_data["PP Harmo"].append(lstm_perplexity_stats["pp_harmonic_mean"])
-        iteration_data["PP Arithm"].append(lstm_perplexity_stats["pp_arithmetic_mean"])
-        iteration_data["PP Median"].append(lstm_perplexity_stats["pp_median"])
-        iteration_data["PP Q1"].append(lstm_perplexity_stats["pp_q1"])
-        iteration_data["PP Q3"].append(lstm_perplexity_stats["pp_q3"])
-
-        iteration_data["Correct (%)"].append(lstm_stats["accuracy"] * 100)
-        iteration_data["Wrong (%)"].append(100 - lstm_stats["accuracy"] * 100)
-        iteration_data["Empty (%)"].append(0.0)
-
-        for k in range(1, config["top_k"]):
-            iteration_data[f"Top-{k + 1}"].append(
-                lstm_stats["top_k_correct_preds"][k] / lstm_stats["total_predictions"] * 100
+        for name in ["LSTM", "transformer"]:
+            msg = f"Training and evaluating {name} model..."
+            logger.info(msg)
+            process_neural_model(
+                name=name,
+                iteration_data=iteration_data,
+                all_metrics=all_metrics,
+                nn_train_set_transformed=nn_train_set_transformed,
+                nn_val_set_transformed=nn_val_set_transformed,
+                nn_test_set_transformed=nn_test_set_transformed,
             )
-
-        iteration_data["Pred Time"].append(lstm_eval_time)
-
-        iteration_data["Good Preds"].append(lstm_stats["correct_predictions"])
-        iteration_data["Tot Preds"].append(lstm_stats["total_predictions"])
-        iteration_data["Nb States"].append(None)
-
-
-        stats_to_log.append(
-            {
-                "strategy": "LSTM",
-                "strategy_accuracy": lstm_stats["accuracy"] * 100,
-                "strategy_perplexity": lstm_perplexity_stats["pp_harmonic_mean"],
-                "strategy_eval_time": lstm_eval_time,
-                # "per_state_stats": None
-            }
-        )
-
-        all_metrics["LSTM"]["accuracies"].append(lstm_stats["accuracy"])
-        all_metrics["LSTM"]["pp_arithmetic_mean"].append(lstm_perplexity_stats["pp_arithmetic_mean"])
-        all_metrics["LSTM"]["pp_harmonic_mean"].append(lstm_perplexity_stats["pp_harmonic_mean"])
-        all_metrics["LSTM"]["pp_median"].append(lstm_perplexity_stats["pp_median"])
-        all_metrics["LSTM"]["pp_q1"].append(lstm_perplexity_stats["pp_q1"])
-        all_metrics["LSTM"]["pp_q3"].append(lstm_perplexity_stats["pp_q3"])
-        for k in range(1, config["top_k"]):
-            all_metrics["LSTM"][f"top-{k + 1}"].append(iteration_data[f"Top-{k + 1}"][-1])
-
-        all_metrics["LSTM"]["pred_time"].append(lstm_eval_time)
-        all_metrics["LSTM"]["train_time"].append(training_time)
-
-        all_metrics["LSTM"]["num_states"].append(0)
-        all_metrics["LSTM"]["mean_delay_error"].append(None)
-        all_metrics["LSTM"]["mean_actual_delay"].append(None)
-        all_metrics["LSTM"]["mean_normalized_error"].append(None)
-        all_metrics["LSTM"]["num_delay_predictions"].append(None)
 
     # Create a DataFrame for the iteration and log it
     iteration_df = pd.DataFrame(iteration_data).round(2)
@@ -895,7 +896,7 @@ for iteration in range(n_iterations):
 with stats_file_path.open("w") as f:
     json.dump(stats_to_log, f, indent=4)
 
-results = {
+results: dict = {
     "Model": [],
     "Mean Accuracy (%)": [],
     "Std": [],
@@ -947,11 +948,11 @@ for model_name, stats in all_metrics.items():
     results["Std"].append(std_acc)
 
     if len(stats["num_states"]) > 0 and None not in stats["num_states"]:
-        mean_num_states = np.mean(stats["num_states"])
+        final_num_states = stats["num_states"][-1]
     else:
-        mean_num_states = None
+        final_num_states = None
 
-    results["States"].append(mean_num_states)
+    results["States"].append(final_num_states)
 
     if len(stats["mean_delay_error"]) > 0 and None not in stats["mean_delay_error"]:
         mean_delay_error = timedelta(seconds=float(np.mean(stats["mean_delay_error"])))

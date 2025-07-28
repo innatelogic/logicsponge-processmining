@@ -11,7 +11,7 @@ import pandas as pd
 from logicsponge.processmining.automata import PDFA
 from logicsponge.processmining.config import DEFAULT_CONFIG
 from logicsponge.processmining.data_utils import FileHandler, handle_keys, interleave_sequences, parse_timestamp
-from logicsponge.processmining.types import Event
+from logicsponge.processmining.types import Event, StateId
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,8 @@ DATA = "file"
 def csv_row_iterator(
     file_path: str, delimiter: str = ",", chunksize: int = 1000, dtypes: dict[str, str] | None = None
 ) -> Iterator[dict[str, Any]]:
-    """Create an iterator that yields rows from a large CSV file.
+    """
+    Create an iterator that yields rows from a large CSV file.
 
     Args:
         file_path (str): Path to the CSV file.
@@ -321,13 +322,13 @@ if DATA == "PDFA":
     pdfa.add_activities(["init", "a", "b"])
 
     pdfa.create_states(2)
-    pdfa.set_initial_state(0)
+    pdfa.set_initial_state(StateId(0))
 
-    pdfa.transitions[0]["init"] = 1
-    pdfa.transitions[1]["a"] = 1
-    pdfa.transitions[1]["b"] = 1
+    pdfa.transitions[StateId(0)]["init"] = 1
+    pdfa.transitions[StateId(1)]["a"] = 1
+    pdfa.transitions[StateId(1)]["b"] = 1
 
-    pdfa.set_probs(0, {stop_symbol: 0.0, "init": 1.0, "a": 0.0, "b": 0.0})
-    pdfa.set_probs(1, {stop_symbol: 0.01, "init": 0.0, "a": 0.495, "b": 0.495})
+    pdfa.set_probs(StateId(0), {stop_symbol: 0.0, "init": 1.0, "a": 0.0, "b": 0.0})
+    pdfa.set_probs(StateId(1), {stop_symbol: 0.01, "init": 0.0, "a": 0.495, "b": 0.495})
 
     dataset = iter(interleave_sequences(pdfa.simulate(100000)))
