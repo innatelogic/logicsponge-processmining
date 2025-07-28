@@ -5,8 +5,8 @@ import logging
 import time
 
 import torch
-import torch.utils.data
 import torch.nn.functional as F  # noqa: N812
+import torch.utils.data
 from torch import nn
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
@@ -124,7 +124,7 @@ class LSTMModel(nn.Module):
         *,
         use_one_hot: bool = False,
         device: torch.device | None = None,
-    ):
+    ) -> None:
         """
         Initialize the LSTM model.
 
