@@ -156,6 +156,7 @@ cython_debug/
 
 # Downloaded and synthetic data for process mining
 /examples/data/
+/results/
 
 .vscode/
 data/
