@@ -1,0 +1,4852 @@
+[
+    {
+        "strategy": "fpt",
+        "strategy_accuracy": 13.333333333333334,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 7.6896541721218234,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 7,
+                "correct_predictions": 4,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 4,
+                "correct_predictions": 2,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 7,
+                "correct_predictions": 0,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 3,
+                "correct_predictions": 0,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "bag",
+        "strategy_accuracy": 13.740458015267176,
+        "strategy_perplexity": 7.307307834298442,
+        "strategy_eval_time": 7.026798122531765,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 26
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 12,
+                "correct_predictions": 3,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 3
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 11,
+                "correct_predictions": 1,
+                "wrong_predictions": 10,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 25
+            }
+        }
+    },
+    {
+        "strategy": "ngram_1",
+        "strategy_accuracy": 9.090909090909092,
+        "strategy_perplexity": 4.24609018498924,
+        "strategy_eval_time": 11.027514279543698,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 72,
+                "correct_predictions": 10,
+                "wrong_predictions": 62,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 84
+            }
+        }
+    },
+    {
+        "strategy": "ngram_2",
+        "strategy_accuracy": 22.105263157894736,
+        "strategy_perplexity": 5.01551491061097,
+        "strategy_eval_time": 14.10861591716389,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 37,
+                "correct_predictions": 8,
+                "wrong_predictions": 29,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 28
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 36,
+                "correct_predictions": 6,
+                "wrong_predictions": 30,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 26
+            }
+        }
+    },
+    {
+        "strategy": "ngram_3",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 7.139355381800914,
+        "strategy_eval_time": 13.967136760334393,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 11,
+                "correct_predictions": 3,
+                "wrong_predictions": 8,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 13
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 17,
+                "correct_predictions": 3,
+                "wrong_predictions": 14,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 9,
+                "correct_predictions": 0,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 10,
+                "correct_predictions": 3,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 17,
+                "correct_predictions": 5,
+                "wrong_predictions": 12,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 2
+            }
+        }
+    },
+    {
+        "strategy": "ngram_4",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.773307935190144,
+        "strategy_eval_time": 9.107065724802542,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 3,
+                "correct_predictions": 1,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 5
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_5",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 9.004886333759014,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_6",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 9.89568102490771,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_7",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 10.532337230640453,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_8",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 11.289512718116844,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_9",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 11.737530048076923,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "fallback fpt->ngram",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 17.31285682091346,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "hard voting",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 0.0,
+        "strategy_eval_time": 38.92248803442651,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 4)",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 6.097569665079416,
+        "strategy_eval_time": 36.551402165339546,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 5, 8)",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 6.0570069947278995,
+        "strategy_eval_time": 38.56093018919557,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 4, 5)",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 6.0570069947278995,
+        "strategy_eval_time": 36.36800325833834,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 4)*",
+        "strategy_accuracy": 17.272727272727273,
+        "strategy_perplexity": 7.081127193472586,
+        "strategy_eval_time": 29.207585932134272,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 5, 8)*",
+        "strategy_accuracy": 17.272727272727273,
+        "strategy_perplexity": 7.07561204327407,
+        "strategy_eval_time": 27.876633864182693,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 4, 5)*",
+        "strategy_accuracy": 17.272727272727273,
+        "strategy_perplexity": 7.07561204327407,
+        "strategy_eval_time": 29.003227150047216,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "alergia",
+        "strategy_accuracy": 24.175824175824175,
+        "strategy_perplexity": Infinity,
+        "strategy_eval_time": 4.849591097988925,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "fpt",
+        "strategy_accuracy": 13.333333333333334,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 5.934264633681748,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 7,
+                "correct_predictions": 4,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 4,
+                "correct_predictions": 2,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 7,
+                "correct_predictions": 0,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 3,
+                "correct_predictions": 0,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "bag",
+        "strategy_accuracy": 13.740458015267176,
+        "strategy_perplexity": 7.307307834298442,
+        "strategy_eval_time": 6.078363774896978,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 26
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 12,
+                "correct_predictions": 3,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 3
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 11,
+                "correct_predictions": 1,
+                "wrong_predictions": 10,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 25
+            }
+        }
+    },
+    {
+        "strategy": "ngram_1",
+        "strategy_accuracy": 9.090909090909092,
+        "strategy_perplexity": 4.24609018498924,
+        "strategy_eval_time": 9.615342695634444,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 72,
+                "correct_predictions": 10,
+                "wrong_predictions": 62,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 84
+            }
+        }
+    },
+    {
+        "strategy": "ngram_2",
+        "strategy_accuracy": 22.105263157894736,
+        "strategy_perplexity": 5.01551491061097,
+        "strategy_eval_time": 10.283438713995965,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 37,
+                "correct_predictions": 8,
+                "wrong_predictions": 29,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 28
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 36,
+                "correct_predictions": 6,
+                "wrong_predictions": 30,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 26
+            }
+        }
+    },
+    {
+        "strategy": "ngram_3",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 7.139355381800914,
+        "strategy_eval_time": 9.452903663719093,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 11,
+                "correct_predictions": 3,
+                "wrong_predictions": 8,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 13
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 17,
+                "correct_predictions": 3,
+                "wrong_predictions": 14,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 9,
+                "correct_predictions": 0,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 10,
+                "correct_predictions": 3,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 17,
+                "correct_predictions": 5,
+                "wrong_predictions": 12,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 2
+            }
+        }
+    },
+    {
+        "strategy": "ngram_4",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.773307935190144,
+        "strategy_eval_time": 10.70787618448446,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 3,
+                "correct_predictions": 1,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 5
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_5",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 9.578662914234203,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_6",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 8.70882809817136,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_7",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 8.611888675899296,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_8",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 8.428489768898094,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_9",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 11.001314435686384,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "fallback fpt->ngram",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 16.6997804746523,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "hard voting",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 0.0,
+        "strategy_eval_time": 40.55473830673721,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 4)",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 6.097569665079416,
+        "strategy_eval_time": 31.555091941749655,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 5, 8)",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 6.0570069947278995,
+        "strategy_eval_time": 39.20020637931405,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 4, 5)",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 6.0570069947278995,
+        "strategy_eval_time": 39.73992316277472,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 4)*",
+        "strategy_accuracy": 17.272727272727273,
+        "strategy_perplexity": 7.081127193472586,
+        "strategy_eval_time": 25.450528322995364,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 5, 8)*",
+        "strategy_accuracy": 17.272727272727273,
+        "strategy_perplexity": 7.07561204327407,
+        "strategy_eval_time": 32.04764900626717,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 4, 5)*",
+        "strategy_accuracy": 17.272727272727273,
+        "strategy_perplexity": 7.07561204327407,
+        "strategy_eval_time": 26.86269990690462,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "alergia",
+        "strategy_accuracy": 24.175824175824175,
+        "strategy_perplexity": Infinity,
+        "strategy_eval_time": 4.401573768028846,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "fpt",
+        "strategy_accuracy": 13.333333333333334,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 5.606766585465316,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 7,
+                "correct_predictions": 4,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 4,
+                "correct_predictions": 2,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 7,
+                "correct_predictions": 0,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 3,
+                "correct_predictions": 0,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "bag",
+        "strategy_accuracy": 13.740458015267176,
+        "strategy_perplexity": 7.307307834298442,
+        "strategy_eval_time": 8.004052298409599,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 26
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 12,
+                "correct_predictions": 3,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 3
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 11,
+                "correct_predictions": 1,
+                "wrong_predictions": 10,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 25
+            }
+        }
+    },
+    {
+        "strategy": "ngram_1",
+        "strategy_accuracy": 9.090909090909092,
+        "strategy_perplexity": 4.24609018498924,
+        "strategy_eval_time": 9.61010272686298,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 72,
+                "correct_predictions": 10,
+                "wrong_predictions": 62,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 84
+            }
+        }
+    },
+    {
+        "strategy": "ngram_2",
+        "strategy_accuracy": 22.105263157894736,
+        "strategy_perplexity": 5.01551491061097,
+        "strategy_eval_time": 10.40133801135388,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 37,
+                "correct_predictions": 8,
+                "wrong_predictions": 29,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 28
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 36,
+                "correct_predictions": 6,
+                "wrong_predictions": 30,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 26
+            }
+        }
+    },
+    {
+        "strategy": "ngram_3",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 7.139355381800914,
+        "strategy_eval_time": 9.259024819174966,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 11,
+                "correct_predictions": 3,
+                "wrong_predictions": 8,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 13
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 17,
+                "correct_predictions": 3,
+                "wrong_predictions": 14,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 9,
+                "correct_predictions": 0,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 10,
+                "correct_predictions": 3,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 17,
+                "correct_predictions": 5,
+                "wrong_predictions": 12,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 2
+            }
+        }
+    },
+    {
+        "strategy": "ngram_4",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.773307935190144,
+        "strategy_eval_time": 8.784807645357573,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 3,
+                "correct_predictions": 1,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 5
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_5",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 8.795287582900498,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_6",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 8.845067286229396,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_7",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 10.100039806994763,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_8",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 11.037994217086624,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_9",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 8.609268691513565,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "fallback fpt->ngram",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 13.102541913043012,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "hard voting",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 0.0,
+        "strategy_eval_time": 41.74945118663075,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 4)",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 6.097569665079416,
+        "strategy_eval_time": 30.737656813401443,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 5, 8)",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 6.0570069947278995,
+        "strategy_eval_time": 38.010733468191965,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 4, 5)",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 6.0570069947278995,
+        "strategy_eval_time": 35.89378608452095,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 4)*",
+        "strategy_accuracy": 17.272727272727273,
+        "strategy_perplexity": 7.081127193472586,
+        "strategy_eval_time": 28.01549303662646,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 5, 8)*",
+        "strategy_accuracy": 17.272727272727273,
+        "strategy_perplexity": 7.07561204327407,
+        "strategy_eval_time": 27.753494598053315,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 4, 5)*",
+        "strategy_accuracy": 17.272727272727273,
+        "strategy_perplexity": 7.07561204327407,
+        "strategy_eval_time": 28.563069773244333,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "alergia",
+        "strategy_accuracy": 24.175824175824175,
+        "strategy_perplexity": Infinity,
+        "strategy_eval_time": 4.710731925545158,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "fpt",
+        "strategy_accuracy": 13.333333333333334,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 5.769205617380666,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 7,
+                "correct_predictions": 4,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 4,
+                "correct_predictions": 2,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 7,
+                "correct_predictions": 0,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 3,
+                "correct_predictions": 0,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "bag",
+        "strategy_accuracy": 13.740458015267176,
+        "strategy_perplexity": 7.307307834298442,
+        "strategy_eval_time": 5.887104914738582,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 26
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 12,
+                "correct_predictions": 3,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 3
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 11,
+                "correct_predictions": 1,
+                "wrong_predictions": 10,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 25
+            }
+        }
+    },
+    {
+        "strategy": "ngram_1",
+        "strategy_accuracy": 9.090909090909092,
+        "strategy_perplexity": 4.24609018498924,
+        "strategy_eval_time": 9.510543320205185,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 72,
+                "correct_predictions": 10,
+                "wrong_predictions": 62,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 84
+            }
+        }
+    },
+    {
+        "strategy": "ngram_2",
+        "strategy_accuracy": 22.105263157894736,
+        "strategy_perplexity": 5.01551491061097,
+        "strategy_eval_time": 10.073839963137448,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 37,
+                "correct_predictions": 8,
+                "wrong_predictions": 29,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 28
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 36,
+                "correct_predictions": 6,
+                "wrong_predictions": 30,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 26
+            }
+        }
+    },
+    {
+        "strategy": "ngram_3",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 7.139355381800914,
+        "strategy_eval_time": 10.584736918355082,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 11,
+                "correct_predictions": 3,
+                "wrong_predictions": 8,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 13
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 17,
+                "correct_predictions": 3,
+                "wrong_predictions": 14,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 9,
+                "correct_predictions": 0,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 10,
+                "correct_predictions": 3,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 17,
+                "correct_predictions": 5,
+                "wrong_predictions": 12,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 2
+            }
+        }
+    },
+    {
+        "strategy": "ngram_4",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.773307935190144,
+        "strategy_eval_time": 10.679056356241414,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 3,
+                "correct_predictions": 1,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 5
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_5",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 10.702636215712998,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_6",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 8.824107411143544,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_7",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 10.14981951032366,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_8",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 8.52804917555589,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_9",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 8.724548004485749,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "fallback fpt->ngram",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 13.933076963319882,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "hard voting",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 0.0,
+        "strategy_eval_time": 40.7538571200528,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 4)",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 6.097569665079416,
+        "strategy_eval_time": 31.838050255408653,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 5, 8)",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 6.0570069947278995,
+        "strategy_eval_time": 38.555690220424104,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 4, 5)",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 6.0570069947278995,
+        "strategy_eval_time": 38.581890064281424,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 4)*",
+        "strategy_accuracy": 17.272727272727273,
+        "strategy_perplexity": 7.081127193472586,
+        "strategy_eval_time": 24.407774537474243,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 5, 8)*",
+        "strategy_accuracy": 17.272727272727273,
+        "strategy_perplexity": 7.07561204327407,
+        "strategy_eval_time": 39.11374689458491,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 4, 5)*",
+        "strategy_accuracy": 17.272727272727273,
+        "strategy_perplexity": 7.07561204327407,
+        "strategy_eval_time": 28.91938764970381,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "alergia",
+        "strategy_accuracy": 24.175824175824175,
+        "strategy_perplexity": Infinity,
+        "strategy_eval_time": 4.760511628874055,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "fpt",
+        "strategy_accuracy": 13.333333333333334,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 6.180543165940505,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 7,
+                "correct_predictions": 4,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 4,
+                "correct_predictions": 2,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 7,
+                "correct_predictions": 0,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 3,
+                "correct_predictions": 0,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "bag",
+        "strategy_accuracy": 13.740458015267176,
+        "strategy_perplexity": 7.307307834298442,
+        "strategy_eval_time": 7.079197810246394,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 26
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 12,
+                "correct_predictions": 3,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 3
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 11,
+                "correct_predictions": 1,
+                "wrong_predictions": 10,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 25
+            }
+        }
+    },
+    {
+        "strategy": "ngram_1",
+        "strategy_accuracy": 9.090909090909092,
+        "strategy_perplexity": 4.24609018498924,
+        "strategy_eval_time": 10.016200306651356,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 72,
+                "correct_predictions": 10,
+                "wrong_predictions": 62,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 84
+            }
+        }
+    },
+    {
+        "strategy": "ngram_2",
+        "strategy_accuracy": 22.105263157894736,
+        "strategy_perplexity": 5.01551491061097,
+        "strategy_eval_time": 11.12183371743003,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 37,
+                "correct_predictions": 8,
+                "wrong_predictions": 29,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 28
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 36,
+                "correct_predictions": 6,
+                "wrong_predictions": 30,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 26
+            }
+        }
+    },
+    {
+        "strategy": "ngram_3",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 7.139355381800914,
+        "strategy_eval_time": 9.772541758778331,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 11,
+                "correct_predictions": 3,
+                "wrong_predictions": 8,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 13
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 17,
+                "correct_predictions": 3,
+                "wrong_predictions": 14,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 9,
+                "correct_predictions": 0,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 10,
+                "correct_predictions": 3,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 17,
+                "correct_predictions": 5,
+                "wrong_predictions": 12,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 2
+            }
+        }
+    },
+    {
+        "strategy": "ngram_4",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.773307935190144,
+        "strategy_eval_time": 8.737647926414406,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 3,
+                "correct_predictions": 1,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 5
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_5",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 9.314044491275325,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_6",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 9.080865880945227,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_7",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 10.49041748046875,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_8",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 11.493871500203898,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "ngram_9",
+        "strategy_accuracy": 26.31578947368421,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 8.855547223772321,
+        "per_state_stats": {
+            "0": {
+                "state_id": 0,
+                "total_predictions": 14,
+                "correct_predictions": 7,
+                "wrong_predictions": 7,
+                "empty_predictions": 0,
+                "level": 0,
+                "visits": 30
+            },
+            "1": {
+                "state_id": 1,
+                "total_predictions": 9,
+                "correct_predictions": 4,
+                "wrong_predictions": 5,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 13
+            },
+            "3": {
+                "state_id": 3,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 8
+            },
+            "4": {
+                "state_id": 4,
+                "total_predictions": 2,
+                "correct_predictions": 0,
+                "wrong_predictions": 2,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 4
+            },
+            "9": {
+                "state_id": 9,
+                "total_predictions": 1,
+                "correct_predictions": 1,
+                "wrong_predictions": 0,
+                "empty_predictions": 0,
+                "level": 4,
+                "visits": 1
+            },
+            "10": {
+                "state_id": 10,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "2": {
+                "state_id": 2,
+                "total_predictions": 22,
+                "correct_predictions": 2,
+                "wrong_predictions": 20,
+                "empty_predictions": 0,
+                "level": 1,
+                "visits": 17
+            },
+            "5": {
+                "state_id": 5,
+                "total_predictions": 8,
+                "correct_predictions": 2,
+                "wrong_predictions": 6,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 7
+            },
+            "6": {
+                "state_id": 6,
+                "total_predictions": 2,
+                "correct_predictions": 1,
+                "wrong_predictions": 1,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "7": {
+                "state_id": 7,
+                "total_predictions": 4,
+                "correct_predictions": 1,
+                "wrong_predictions": 3,
+                "empty_predictions": 0,
+                "level": 3,
+                "visits": 1
+            },
+            "8": {
+                "state_id": 8,
+                "total_predictions": 13,
+                "correct_predictions": 4,
+                "wrong_predictions": 9,
+                "empty_predictions": 0,
+                "level": 2,
+                "visits": 1
+            }
+        }
+    },
+    {
+        "strategy": "fallback fpt->ngram",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 6.634484682820845,
+        "strategy_eval_time": 15.622966892116672,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "hard voting",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 0.0,
+        "strategy_eval_time": 39.31548569228623,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 4)",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 6.097569665079416,
+        "strategy_eval_time": 34.788152673742275,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 5, 8)",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 6.0570069947278995,
+        "strategy_eval_time": 39.02728740985577,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 4, 5)",
+        "strategy_accuracy": 19.090909090909093,
+        "strategy_perplexity": 6.0570069947278995,
+        "strategy_eval_time": 37.41337702824519,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 4)*",
+        "strategy_accuracy": 17.272727272727273,
+        "strategy_perplexity": 7.081127193472586,
+        "strategy_eval_time": 27.20853784582117,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 5, 8)*",
+        "strategy_accuracy": 17.272727272727273,
+        "strategy_perplexity": 7.07561204327407,
+        "strategy_eval_time": 30.69835704761547,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "soft voting (2, 3, 4, 5)*",
+        "strategy_accuracy": 17.272727272727273,
+        "strategy_perplexity": 7.07561204327407,
+        "strategy_eval_time": 30.203179998712226,
+        "per_state_stats": {}
+    },
+    {
+        "strategy": "alergia",
+        "strategy_accuracy": 24.175824175824175,
+        "strategy_perplexity": Infinity,
+        "strategy_eval_time": 4.558772831172734,
+        "per_state_stats": {}
+    }
+]

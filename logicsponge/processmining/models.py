@@ -248,23 +248,25 @@ class StreamingMiner(ABC):
         log_likelihood: bool = False,
         compute_perplexity: bool = False,
         debug: bool = False,  # noqa: ARG002
-    ) -> float:
+    ) -> tuple[float, list[ActivityName]]:
         """
         Evaluate in batch mode.
 
         Evaluate the dataset either incrementally or by full sequence.
 
         Modes: 'incremental' or 'sequence'.
-        """
-        # Evaluate the dataset using a Bayes classifier
-        # self.initialize_bayes_classifier(data)
-        # self.eval_bayes_classifier(data)
 
+        NOTE: now returns a tuple (elapsed_time, predicted_vector) where predicted_vector is a
+        flattened list of predicted next-activities in the same order they were produced.
+        """
         # Initialize stats
         perplexities = []
 
         eval_start_time = time.time()
         pause_time = 0.0
+
+        # Collect flattened predicted next-activities for incremental mode
+        predicted_vector: list[ActivityName] = []
 
         for sequence in tqdm(data, desc="Processing sequences"):
             pause_start_time = time.time()
@@ -294,18 +296,15 @@ class StreamingMiner(ABC):
                 event = sequence[i]
                 actual_next_activity = event.get("activity")
 
-                if mode != "incremental":
-                    msg = f"Invalid mode: {mode}. Use 'incremental' ('sequential' is deprecated)."
-                    raise ValueError(msg)
-
-                    # # Prediction for sequence mode (whole sequence)
-                    # metrics = self.sequence_metrics(sequence[:i])
-                    # prediction = metrics_prediction(metrics, config=self.config)
-
                 # Prediction for incremental mode (step by step)
                 metrics = self.state_metrics(current_state)
                 prediction = metrics_prediction(metrics, config=self.config)
                 predicted_sequence += prediction["activity"].__str__() if prediction else "-"
+
+                # Collect predicted activity (skip empty predictions) in order
+                predicted_vector.append(
+                    prediction["activity"] if prediction is not None else "empty"
+                )
 
                 pause_start_time = time.time()
 
@@ -364,7 +363,9 @@ class StreamingMiner(ABC):
         for key, value in perplexity_stats.items():
             self.stats[key] = value
 
-        return time.time() - eval_start_time - pause_time
+        elapsed = time.time() - eval_start_time - pause_time
+        # Return elapsed time and the flattened predicted vector (same-order predictions)
+        return elapsed, predicted_vector
 
     @abstractmethod
     def get_state_info(self, state_id: StateId) -> ComposedState | None:

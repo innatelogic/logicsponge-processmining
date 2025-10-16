@@ -478,7 +478,8 @@ def train_rnn(
         # Evaluate on validation set after each epoch
         msg = "Evaluating on validation set..."
         logger.info(msg)
-        stats, _, _ = evaluate_rnn(model, val_sequences)
+        # updated unpacking to accept extra returned predicted-vector (ignored here)
+        stats, _, _, _ = evaluate_rnn(model, val_sequences)
         val_accuracy = stats["accuracy"]
 
         if not isinstance(val_accuracy, float):
@@ -522,11 +523,18 @@ def evaluate_rnn(
     *,
     per_sequence_perplexity: bool = True,
     max_k: int = 3,
-) -> tuple[dict[str, float | list[int]], list[float], float]:
+    idx_to_activity: dict[int, ActivityName] | None = None,
+) -> tuple[dict[str, float | list[int]], list[float], float, list[str]]:
     """
-    Evaluate the LSTM model on a dataset (train, test, or validation).
+    Evaluate the LSTM/Transformer model on a dataset (train, test, or validation).
 
-    Returns accuracy.
+    Returns:
+        - stats (dict): accuracy and other counts
+        - perplexities (list[float]): per-sequence (or aggregated) perplexities
+        - eval_time (float): evaluation runtime (seconds)
+        - predicted_vector (list[str]): flattened vector of predicted next-activity names
+          (one entry per non-padding prediction). If idx_to_activity is not provided,
+          indices are stringified.
     """
     eval_start_time = time.time()
     pause_time = 0.0
@@ -542,6 +550,9 @@ def evaluate_rnn(
     total_nll = 0.0  # Accumulate negative log-likelihood
     token_count = 0
     perplexities = []
+
+    # New: collect predicted activity names (as strings) for each non-padding prediction
+    predicted_vector: list[str] = []
 
     with torch.no_grad():
         for i in range(sequences.size(0)):  # Iterate through sequences by index
@@ -569,9 +580,17 @@ def evaluate_rnn(
             mask = y_target != 0  # Mask for non-padding targets
             masked_targets = y_target[mask]
 
+            # Save predicted values for non-padding positions, mapped to activity names
+            if mask.sum().item() > 0:
+                masked_predicted = predicted_indices[mask].cpu().tolist()
+                if idx_to_activity is not None:
+                    mapped = [idx_to_activity.get(int(idx), str(int(idx))) for idx in masked_predicted]
+                else:
+                    # Fallback: stringify indices so callers can still inspect values
+                    mapped = [str(int(idx)) for idx in masked_predicted]
+                predicted_vector.extend(mapped)  # type: ignore
+
             # Apply the mask and count correct predictions
-            # print(f"{x_input=} {y_target=}")
-            # print(predicted_indices[mask], masked_targets)
             correct_predictions += (predicted_indices[mask] == masked_targets).sum().item()
             total_predictions += mask.sum().item()  # Count non-padding tokens
 
@@ -636,7 +655,7 @@ def evaluate_rnn(
             torch.exp(torch.tensor(total_nll / token_count)).item() if token_count > 0 else float("inf")
         )
 
-    logger.debug("Perplexity: %s", perplexities[-1])
+    logger.debug("Perplexity: %s", perplexities[-1] if len(perplexities) > 0 else None)
 
     stats = {
         "accuracy": accuracy,
@@ -647,4 +666,4 @@ def evaluate_rnn(
     pause_time += time.time() - pause_start_time
     eval_time = time.time() - eval_start_time - pause_time
 
-    return stats, perplexities, eval_time
+    return stats, perplexities, eval_time, predicted_vector
