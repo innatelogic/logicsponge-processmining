@@ -80,6 +80,10 @@ def probs_prediction(probs: ProbDistr, config: Config) -> Prediction | None: # n
         # Create a copy of probs to avoid modifying the original dictionary
         probs_copy = probs.copy()
 
+    if not config["include_stop"] and stop_symbol in probs:  # stop_symbol will always be a key
+        # Create a copy of probs to avoid modifying the original dictionary
+        probs_copy = probs.copy()
+
         stop_probability = probs_copy.get(stop_symbol, 0.0)
 
         # If stop_symbol has a probability of 1 and there are no other activities available, return None
@@ -117,50 +121,13 @@ def probs_prediction(probs: ProbDistr, config: Config) -> Prediction | None: # n
         # If there are no probabilities after filtering, return None
         if probs_copy == {}:
             return None
+        # If there are no probabilities after filtering, return None
+        if probs_copy == {}:
+            return None
 
         return compute_highest_probability(probs_copy)
 
     return compute_highest_probability(probs)
-
-# def simple_activity_prediction(probs: ProbDistr, config: Config) -> dict | None:
-#     """
-#     Simplified prediction: return only the 'activity' with highest probability.
-
-#     Does not use randomization or top_k from config. Still respects include_stop
-#     and stop_symbol handling similar to probs_prediction.
-#     """
-#     if not probs:
-#         return None
-
-#     probs_copy = probs.copy()
-
-#     if not config["include_stop"] and stop_symbol in probs_copy:
-#         stop_probability = probs_copy.get(stop_symbol, 0.0)
-
-#         if stop_probability >= 1.0 and len(probs_copy) == 1:
-#             return None
-
-#         if stop_probability >= 1.0 and len(probs_copy) > 1:
-#             del probs_copy[stop_symbol]
-#             num_activities = len(probs_copy)
-#             uniform_prob = 1.0 / num_activities
-#             probs_copy = dict.fromkeys(probs_copy, uniform_prob)
-
-#         elif stop_probability < 1.0:
-#             del probs_copy[stop_symbol]
-#             total_prob = sum(probs_copy.values())
-#             if total_prob > 0:
-#                 probs_copy = {activity: prob / total_prob for activity, prob in probs_copy.items()}
-
-#     if not probs_copy:
-#         return None
-
-#     # choose the activity with highest probability; break ties by activity name
-#     sorted_probs = sorted(probs_copy.items(), key=lambda x: (-x[1], x[0]))
-#     predicted_activity = sorted_probs[0][0]
-
-#     return {"activity": predicted_activity}
-
 
 def metrics_prediction(metrics: Metrics, config: Config) -> Prediction | None:
     """Return prediction including time delays."""
