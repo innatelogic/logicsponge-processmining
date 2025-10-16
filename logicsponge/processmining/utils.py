@@ -21,7 +21,7 @@ def extract_event_fields(event: Event) -> Event:
 stop_symbol = DEFAULT_CONFIG["stop_symbol"]
 
 
-def probs_prediction(probs: ProbDistr, config: Config) -> Prediction | None:
+def probs_prediction(probs: ProbDistr, config: Config) -> Prediction | None: # noqa: C901
     """
     Return the top-k activities based on their probabilities.
 
@@ -56,7 +56,7 @@ def probs_prediction(probs: ProbDistr, config: Config) -> Prediction | None:
         # Determine the predicted activity
         if config["randomized"]:
             # Randomly choose an activity based on the given probability distribution
-            next_activity_idx = np.random.choice(
+            next_activity_idx = np.random.choice(  # noqa: NPY002
                 len(probabilities_array), p=probabilities_array / probabilities_array.sum()
             )
             predicted_activity = activities[next_activity_idx]
@@ -216,7 +216,8 @@ def compare_models_prediction_ratio(
     baseline_model: str = "actual",
 ) -> dict:
     """
-    For each iteration stored in prediction_vectors_memory, compute the ratio:
+    For each iteration stored in prediction_vectors_memory, compute the ratio.
+
       (# positions where reference == baseline AND tested == baseline)
       / (# positions where reference == baseline)
     Ignore positions where reference != baseline.
@@ -227,14 +228,16 @@ def compare_models_prediction_ratio(
       - "counts": dict with totals {'total_ref_correct', 'total_both_correct', 'iterations_used'}
       - "notes": optional notes about length mismatches
     """
-
     # Validate presence
     if tested_model not in prediction_vectors_memory:
-        raise KeyError(f"tested_model '{tested_model}' not found in prediction_vectors_memory")
+        msg = f"tested_model '{tested_model}' not found in prediction_vectors_memory"
+        raise KeyError(msg)
     if reference_model not in prediction_vectors_memory:
-        raise KeyError(f"reference_model '{reference_model}' not found in prediction_vectors_memory")
+        msg = f"reference_model '{reference_model}' not found in prediction_vectors_memory"
+        raise KeyError(msg)
     if baseline_model not in prediction_vectors_memory:
-        raise KeyError(f"baseline_model '{baseline_model}' not found in prediction_vectors_memory")
+        msg = f"baseline_model '{baseline_model}' not found in prediction_vectors_memory"
+        raise KeyError(msg)
 
     tested_list = prediction_vectors_memory[tested_model]
     reference_list = prediction_vectors_memory[reference_model]
