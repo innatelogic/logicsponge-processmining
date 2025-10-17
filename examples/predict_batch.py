@@ -648,11 +648,11 @@ for iteration in range(n_iterations):
         "hard voting": (hard_voting, test_set_transformed),
         # **adaptive_voting_strategies,
         **soft_voting_strategies,
-        "alergia": None,
         **bayesian_strategies,
     }
 
     training_times = dict.fromkeys(strategies, 0.0)
+
     # ============= Train Alergia
     if ALERGIA_TRAINING:
         alergia_start_time = time.time()
@@ -665,7 +665,9 @@ for iteration in range(n_iterations):
         alergia_elapsed_time = alergia_end_time - alergia_start_time
         msg = f"Training time for Alergia: {alergia_elapsed_time:.4f} seconds"
         logger.info(msg)
+        training_times = dict.fromkeys(strategies, 0.0)
         training_times["alergia"] = alergia_elapsed_time
+
 
     # ================= Train Process Miners
     miners_start_time = time.time()
