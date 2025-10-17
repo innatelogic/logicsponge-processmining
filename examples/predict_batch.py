@@ -57,7 +57,7 @@ from logicsponge.processmining.neural_networks import (
     train_rnn,
 )
 from logicsponge.processmining.test_data import data_name, dataset, dataset_test
-from logicsponge.processmining.utils import compare_models_prediction_ratio, compute_perplexity_stats
+from logicsponge.processmining.utils import RED_TO_GREEN_CMAP, compare_models_comparison, compute_perplexity_stats
 
 SEC_TO_MICRO = 1_000_000
 
@@ -331,8 +331,8 @@ all_metrics: dict = {
 # Before the iteration loop: initialize memory for storing prediction vectors per strategy
 prediction_vectors_memory: dict = {}
 # Add initial debug/info
-logger.info("[DEBUG] Initialized prediction_vectors_memory (will store per-strategy prediction vectors)")
-logger.debug("[DEBUG] Expected iterations: %s", n_iterations)
+logger.info(" Initialized prediction_vectors_memory (will store per-strategy prediction vectors)")
+logger.debug("Expected iterations: %s", n_iterations)
 
 # Repeat the experiment n_iterations times
 for iteration in range(n_iterations):
@@ -391,8 +391,8 @@ for iteration in range(n_iterations):
     for seq in test_set_transformed:
         actual_vector.extend(str(ev["activity"]) for ev in seq)
     prediction_vectors_memory.setdefault("actual", []).append(actual_vector)
-    logger.info(
-        "[DEBUG] Stored baseline actual vector | iteration=%d | len=%d | sample=%s",
+    logger.debug(
+        "Stored baseline actual vector | iteration=%d | len=%d | sample=%s",
         iteration + 1,
         len(actual_vector),
         actual_vector[:10],
@@ -774,14 +774,14 @@ for iteration in range(n_iterations):
             sample = prediction_vector[:10]
         except (TypeError, AttributeError, IndexError):
             sample = repr(prediction_vector)[:200]
-        logger.info(
-            "[DEBUG] Stored preds | strategy=%s | iteration=%d | preds_len=%d | sample=%s",
+        logger.debug(
+            "Stored preds | strategy=%s | iteration=%d | preds_len=%d | sample=%s",
             strategy_name,
             iteration + 1,
             len(prediction_vector) if hasattr(prediction_vector, "__len__") else -1,
             sample,
         )
-        logger.debug("[DEBUG] prediction_vector repr (first 400 chars): %s", repr(prediction_vector)[:400])
+        logger.debug("prediction_vector repr (first 400 chars): %s", repr(prediction_vector)[:400])
 
         stats = strategy.stats
 
@@ -927,21 +927,21 @@ for iteration in range(n_iterations):
             vecs = prediction_vectors_memory.get(nn_name, [])
             if vecs:
                 last = vecs[-1]
-                logger.info(
-                    "[DEBUG] NN stored preds | model=%s | iter=%d | preds_len=%d | sample=%s",
+                logger.debug(
+                    "NN stored preds | model=%s | iter=%d | preds_len=%d | sample=%s",
                     nn_name,
                     iteration + 1,
                     len(last) if hasattr(last, "__len__") else -1,
                     last[:10] if hasattr(last, "__getitem__") else repr(last)[:200],
                 )
             else:
-                logger.info("[DEBUG] NN stored preds | model=%s | iter=%d | (no preds stored)", nn_name, iteration + 1)
+                logger.debug("NN stored preds | model=%s | iter=%d | (no preds stored)", nn_name, iteration + 1)
 
     # Create a DataFrame for the iteration and log it
     iteration_df = pd.DataFrame(iteration_data).round(2)
     # Iteration-level summary of stored prediction vectors
     summary_counts = {k: len(v) for k, v in prediction_vectors_memory.items()}
-    logger.info("[ITER DEBUG] After iteration %d summary counts (per strategy): %s", iteration + 1, summary_counts)
+    logger.info("After iteration %d summary counts (per strategy): %s", iteration + 1, summary_counts)
     # Show small sample for a few strategies to verify alignment
     sample_strategies = list(iteration_data["Model"])[:5]
     for s in sample_strategies:
@@ -1061,135 +1061,97 @@ if not SHOW_DELAYS:
 msg = "\n" + str(data)
 logger.info(msg)
 
-# Before writing final results, add final summary of prediction_vectors_memory
-logger.info("[FINAL DEBUG] Completed all iterations. Prediction vectors stored per strategy:")
-for strat, vecs in prediction_vectors_memory.items():
-    total_preds = sum(len(v) for v in vecs)
-    comparision_to_ngram = compare_models_prediction_ratio(
-        prediction_vectors_memory, tested_model=strat, reference_model="ngram_3", baseline_model="actual")
-    overall_comparision = comparision_to_ngram.get("overall", None)
-    # logger.info("[FINAL DEBUG] strategy=%s | iterations_stored=%d | total_predictions=%d | comparision_ratio=%s", strat, len(vecs), total_preds, overall_comparision if overall_comparision is not None else "N/A") # noqa: E501
-    # logger.info("[FINAL DEBUG] strategy=%s | tail:%s", strat, vecs[-1][-10:] if vecs and len(vecs[-1]) >= 10 else vecs[-1] if vecs else "N/A") # noqa: E501
-    # print a tiny repr sample
-    if vecs:
-        try:
-            logger.debug("[FINAL DEBUG] strategy=%s | last_sample=%s", strat, vecs[-1][:10])
-        except (TypeError, AttributeError, IndexError):
-            logger.debug("[FINAL DEBUG] strategy=%s | last_sample_repr=%s", strat, repr(vecs[-1])[:400])
+# # Before writing final results, add final summary of prediction_vectors_memory
+# logger.info("[FINAL DEBUG] Completed all iterations. Prediction vectors stored per strategy:")
+# for strat, vecs in prediction_vectors_memory.items():
+#     total_preds = sum(len(v) for v in vecs)
+#     comparision_to_ngram = compare_models_comparison(
+#         prediction_vectors_memory, tested_model=strat, reference_model="ngram_3", baseline_model="actual")
+#     correlation = comparision_to_ngram.get("correlation", None)
+#     anticorrelation = comparision_to_ngram.get("anticorrelation", None)
+#     similarity = comparision_to_ngram.get("similarity", None)
+#     # logger.info("[FINAL DEBUG] strategy=%s | iterations_stored=%d | total_predictions=%d | comparision_ratio=%s", strat, len(vecs), total_preds, overall_comparision if overall_comparision is not None else "N/A") # noqa: E501
+#     # logger.info("[FINAL DEBUG] strategy=%s | tail:%s", strat, vecs[-1][-10:] if vecs and len(vecs[-1]) >= 10 else vecs[-1] if vecs else "N/A") # noqa: E501
+#     # print a tiny repr sample
+#     if vecs:
+#         try:
+#             logger.debug("[FINAL DEBUG] strategy=%s | last_sample=%s", strat, vecs[-1][:10])
+#         except (TypeError, AttributeError, IndexError):
+#             logger.debug("[FINAL DEBUG] strategy=%s | last_sample_repr=%s", strat, repr(vecs[-1])[:400])
 
 # === Cross-reference table of comparison ratios between all models ===
 try:
     model_keys = list(prediction_vectors_memory.keys())
     # Build empty DataFrame for overall ratios
 
-    ratio_df = pd.DataFrame(index=model_keys, columns=model_keys, dtype=float)
+    correlation_df = pd.DataFrame(index=model_keys, columns=model_keys, dtype=float)
+    anticorrelation_df = pd.DataFrame(index=model_keys, columns=model_keys, dtype=float)
+    similarity_df = pd.DataFrame(index=model_keys, columns=model_keys, dtype=float)
     iterations_df = pd.DataFrame(index=model_keys, columns=model_keys, dtype=float)
 
     for tested in model_keys:
         for reference in model_keys:
             try:
-                res = compare_models_prediction_ratio(
+                res = compare_models_comparison(
                     prediction_vectors_memory, tested_model=tested, reference_model=reference, baseline_model="actual")
-                overall = res.get("overall", None)
+                correlation = res.get("correlation", None)
+                anticorrelation = res.get("anticorrelation", None)
+                similarity = res.get("similarity", None)
                 iterations_used = res.get("counts", {}).get("iterations_used", None)
             except (ValueError, KeyError, TypeError, ZeroDivisionError, IndexError) as e:
                 logger.debug("Compare failed for tested=%s ref=%s: %s", tested, reference, e)
-                overall = None
+                correlation = None
+                anticorrelation = None
+                similarity = None
                 iterations_used = None
 
-            ratio_df.loc[tested, reference] = (overall * 100.0) if overall is not None else np.nan
+            correlation_df.loc[tested, reference] = (correlation * 100.0) if correlation is not None else np.nan
+            anticorrelation_df.loc[tested, reference] = (
+                (anticorrelation * 100.0)
+                if anticorrelation is not None
+                else np.nan
+            )
+            similarity_df.loc[tested, reference] = (similarity * 100.0) if similarity is not None else np.nan
+
             iterations_df.loc[tested, reference] = iterations_used if iterations_used is not None else np.nan
 
     # Log the ratio table similar to all_metrics
-    logger.info("\n[COMPARISON] Cross-reference (percent) - rows=tested, cols=reference:\n%s", ratio_df.round(2))
+    logger.info("\n[COMPARISON] Cross-reference (percent) - rows=tested, cols=reference:\n%s", correlation_df.round(2))
     logger.debug("\n[COMPARISON DEBUG] Iterations used per cell:\n%s", iterations_df)
 
     # Save cross-reference CSV for later analysis (use the same results dir as stats_file_path)
-    comparison_csv_path = stats_file_path.parent / f"comparison_matrix_{RUN_ID}.csv"
-    comparison_csv_path.parent.mkdir(parents=True, exist_ok=True)
-    ratio_df.to_csv(comparison_csv_path)
-    logger.info("[COMPARISON] Saved cross-reference CSV to: %s", comparison_csv_path.resolve())
+    correlation_csv_path = stats_file_path.parent / f"correlation_matrix_{RUN_ID}.csv"
+    anticorrelation_csv_path = stats_file_path.parent / f"anticorrelation_matrix_{RUN_ID}.csv"
+    similarity_csv_path = stats_file_path.parent / f"similarity_matrix_{RUN_ID}.csv"
+    correlation_csv_path.parent.mkdir(parents=True, exist_ok=True)
+    correlation_df.to_csv(correlation_csv_path)
+    anticorrelation_df.to_csv(anticorrelation_csv_path)
+    similarity_df.to_csv(similarity_csv_path)
+    logger.info(
+        "[COMPARISON] Saved cross-reference CSV to: %s, %s, %s",
+        correlation_csv_path.resolve(), anticorrelation_csv_path.resolve(), similarity_csv_path.resolve()
+    )
 
     # Optional: save a PNG heatmap automatically (use results dir)
-    heatmap_png = stats_file_path.parent / f"comparison_matrix_{RUN_ID}.png"
-    try:
-        plt.figure(figsize=(max(8, len(ratio_df.columns) * 0.5), max(6, len(ratio_df.index) * 0.5)))
-        sns.heatmap(ratio_df.astype(float), annot=False, fmt=".1f", cmap="viridis", cbar_kws={"label": "Percent"})
-        plt.title("Comparison: tested vs reference (percent correct where reference==actual)")
-        plt.tight_layout()
-        plt.savefig(heatmap_png, dpi=150)
-        plt.close()
-        logger.info("[COMPARISON] Saved summary heatmap to: %s", heatmap_png.resolve())
-    except (OSError, RuntimeError, ValueError) as e:
-        logger.debug("Could not auto-save heatmap image: %s", e, exc_info=True)
+    correlation_heatmap_png = stats_file_path.parent / f"correlation_matrix_{RUN_ID}.png"
+    anticorrelation_heatmap_png = stats_file_path.parent / f"anticorrelation_matrix_{RUN_ID}.png"
+    similarity_heatmap_png = stats_file_path.parent / f"similarity_matrix_{RUN_ID}.png"
+    for heatmap_png, df, title in [
+        (correlation_heatmap_png, correlation_df, "Correlation: tested vs reference"),
+        (anticorrelation_heatmap_png, anticorrelation_df, "Anticorrelation: tested vs reference"),
+        (similarity_heatmap_png, similarity_df, "Similarity: tested vs reference"),
+    ]:
+        try:
+            plt.figure(figsize=(max(8, len(df.columns) * 0.5), max(6, len(df.index) * 0.5)))
+            sns.heatmap(df.astype(float), annot=False, fmt=".1f", cmap=RED_TO_GREEN_CMAP, cbar_kws={"label": "Percent"})
+            plt.title(title)
+            plt.tight_layout()
+            plt.savefig(heatmap_png, dpi=150)
+            plt.close()
+            logger.info("[COMPARISON] Saved summary heatmap to: %s", heatmap_png.resolve())
+        except (OSError, RuntimeError, ValueError) as e:
+            logger.debug("Could not auto-save heatmap image: %s", e, exc_info=True)
 except (ValueError, KeyError, TypeError, ZeroDivisionError, IndexError, OSError, RuntimeError):
     logger.exception("Failed to build cross-reference comparison table")
 
-# Add helper function to visualize a saved comparison CSV as a heatmap
-from typing import NamedTuple
-
-
-class HeatmapOptions(NamedTuple):
-    """Options for show_comparison_heatmap to group optional visualization parameters."""
-
-    cmap: str = "viridis"
-    annotate: bool = True
-    fmt: str = ".1f"
-
-
-def show_comparison_heatmap(
-    csv_path: str | Path,
-    output_path: str | Path | None = None,
-    figsize: tuple[int, int] | None = None,
-    options: HeatmapOptions | None = None,
-) -> None:
-    """
-    Load a comparison CSV (as saved by this script) and show/save a seaborn heatmap.
-
-    Parameters
-    ----------
-    csv_path:
-        Path to the CSV file produced by this script.
-    output_path:
-        If provided, the heatmap image will be saved to this path.
-    figsize:
-        Optional tuple (w, h) in inches. If None, size is inferred from shape.
-    options:
-        HeatmapOptions namedtuple grouping optional visualization parameters:
-            - cmap: matplotlib colormap name (default 'viridis').
-            - annotate: whether to annotate cells with values (default True).
-            - fmt: annotation format string (default '.1f').
-
-    """
-    opts = options or HeatmapOptions()
-
-    csv_path = Path(csv_path)
-    if not csv_path.exists():
-        msg = f"CSV file not found: {csv_path}"
-        raise FileNotFoundError(msg)
-
-    comparision_df = pd.read_csv(csv_path, index_col=0)
-    # Convert to numeric and keep NaNs
-    comparision_df = comparision_df.apply(pd.to_numeric, errors="coerce")
-
-    nrows, ncols = comparision_df.shape
-    if figsize is None:
-        figsize = (max(8, ncols * 0.5), max(6, nrows * 0.5))  # noqa: PGH003 # type: ignore
-
-    plt.figure(figsize=figsize)
-    sns.heatmap(comparision_df, annot=opts.annotate, fmt=opts.fmt, cmap=opts.cmap, cbar_kws={"label": "Percent"})
-    plt.xlabel("reference model")
-    plt.ylabel("tested model")
-    plt.title("Comparison heatmap (tested vs reference)")
-
-    if output_path:
-        outp = Path(output_path)
-        outp.parent.mkdir(parents=True, exist_ok=True)
-        plt.tight_layout()
-        plt.savefig(outp, dpi=150)
-        logger.info("Saved comparison heatmap to %s", outp)
-        plt.close()
-    else:
-        plt.tight_layout()
-        plt.show()
 

@@ -2,12 +2,19 @@
 
 import copy
 import math
+from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
+import pandas as pd
+import seaborn as sns
+from matplotlib import pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 
 from logicsponge.processmining.config import DEFAULT_CONFIG
 from logicsponge.processmining.types import Config, Event, Metrics, Prediction, ProbDistr
 
+RED_TO_GREEN_CMAP = LinearSegmentedColormap.from_list('rg',["r", "w", "g"], N=256)
 
 def extract_event_fields(event: Event) -> Event:
     """Extract the required fields from an event."""
@@ -176,22 +183,30 @@ def compute_seq_perplexity(normalized_likelihood: float, *, log_likelihood: bool
     return float("inf")
 
 
-def compare_models_prediction_ratio(
+def compare_models_comparison(
     prediction_vectors_memory: dict,
     tested_model: str,
     reference_model: str,
     baseline_model: str = "actual",
 ) -> dict:
     """
-    For each iteration stored in prediction_vectors_memory, compute the ratio.
+    For each iteration stored in prediction_vectors_memory, compute correlation, anticorrelation and similarity.
 
-      (# positions where reference == baseline AND tested == baseline)
-      / (# positions where reference == baseline)
-    Ignore positions where reference != baseline.
+    Correlation:
+        (# positions where reference == baseline AND tested == baseline)
+        / (# positions where reference == baseline)
+    Anticorrelation:
+        (# positions where reference != baseline AND tested == baseline)
+        / (# positions where reference != baseline)
+    Similarity:
+        (# positions where tested == reference)
+        / (# total positions)
 
     Returns a dict with:
       - "per_iteration": list of ratios (float) or None when denominator is 0 for that iteration
-      - "overall": aggregated ratio across iterations (float) or None if no reference-correct positions
+      - "correlation": aggregated ratio across iterations (float) or None if no reference-correct positions
+      - "anticorrelation": aggregated ratio across iterations (float) or None if no reference-incorrect positions
+      - "similarity": aggregated ratio across iterations (float) or None if no total positions
       - "counts": dict with totals {'total_ref_correct', 'total_both_correct', 'iterations_used'}
       - "notes": optional notes about length mismatches
     """
@@ -212,9 +227,15 @@ def compare_models_prediction_ratio(
 
     iterations = min(len(tested_list), len(reference_list), len(baseline_list))
     per_iteration = []
-    total_ref_correct = 0
-    total_both_correct = 0
-    notes = []
+    notes: list[str] = []
+
+    # Aggregated counters
+    total_ref_correct = 0  # reference == baseline
+    total_both_correct = 0  # reference == baseline AND tested == baseline
+    total_ref_incorrect = 0  # reference != baseline
+    total_tested_correct_when_ref_incorrect = 0  # reference != baseline AND tested == baseline
+    total_positions = 0
+    total_similarity_matches = 0  # tested == reference
 
     for it in range(iterations):
         tested_vec = tested_list[it]
@@ -228,26 +249,143 @@ def compare_models_prediction_ratio(
 
         ref_correct = 0
         both_correct = 0
-        for i in range(n):
-            if ref_vec[i] == base_vec[i]:
-                ref_correct += 1
-                if tested_vec[i] == base_vec[i]:
-                    both_correct += 1
+        ref_incorrect = 0
+        tested_correct_when_ref_incorrect = 0
+        similarity_matches = 0
 
-        per_ratio = (both_correct / ref_correct) if ref_correct > 0 else None
-        per_iteration.append(per_ratio)
+        for i in range(n):
+            ref_equal_base = (ref_vec[i] == base_vec[i])
+            tested_equal_base = (tested_vec[i] == base_vec[i])
+            tested_equal_ref = (tested_vec[i] == ref_vec[i])
+
+            if ref_equal_base:
+                ref_correct += 1
+                if tested_equal_base:
+                    both_correct += 1
+            else:
+                ref_incorrect += 1
+                if tested_equal_base:
+                    tested_correct_when_ref_incorrect += 1
+
+            if tested_equal_ref:
+                similarity_matches += 1
+
+        # Compute per-iteration ratios (None if denominator zero)
+        corr = (both_correct / ref_correct) if ref_correct > 0 else None
+        anticorr = (tested_correct_when_ref_incorrect / ref_incorrect) if ref_incorrect > 0 else None
+        similarity = (similarity_matches / n) if n > 0 else None
+
+        per_iteration.append(
+            {
+                "iteration": it,
+                "positions": n,
+                "correlation": corr,
+                "anticorrelation": anticorr,
+                "similarity": similarity,
+                "counts": {
+                    "ref_correct": ref_correct,
+                    "both_correct": both_correct,
+                    "ref_incorrect": ref_incorrect,
+                    "tested_correct_when_ref_incorrect": tested_correct_when_ref_incorrect,
+                    "similarity_matches": similarity_matches,
+                },
+            }
+        )
+
+        # Update aggregates
         total_ref_correct += ref_correct
         total_both_correct += both_correct
+        total_ref_incorrect += ref_incorrect
+        total_tested_correct_when_ref_incorrect += tested_correct_when_ref_incorrect
+        total_positions += n
+        total_similarity_matches += similarity_matches
 
-    overall = (total_both_correct / total_ref_correct) if total_ref_correct > 0 else None
+    # Compute overall aggregated ratios (None when denominator 0)
+    overall_correlation = (total_both_correct / total_ref_correct) if total_ref_correct > 0 else None
+    overall_anticorrelation = (
+        total_tested_correct_when_ref_incorrect / total_ref_incorrect if total_ref_incorrect > 0 else None
+    )
+    overall_similarity = (total_similarity_matches / total_positions) if total_positions > 0 else None
 
+    # Return aggregated metrics as top-level keys matching the docstring:
     return {
         "per_iteration": per_iteration,
-        "overall": overall,
+        "correlation": overall_correlation,
+        "anticorrelation": overall_anticorrelation,
+        "similarity": overall_similarity,
         "counts": {
             "total_ref_correct": total_ref_correct,
             "total_both_correct": total_both_correct,
+            "total_ref_incorrect": total_ref_incorrect,
+            "total_tested_correct_when_ref_incorrect": total_tested_correct_when_ref_incorrect,
+            "total_positions": total_positions,
+            "total_similarity_matches": total_similarity_matches,
             "iterations_used": iterations,
         },
         "notes": notes,
     }
+
+
+class HeatmapOptions(NamedTuple):
+    """Options for show_comparison_heatmap to group optional visualization parameters."""
+
+    cmap: str = "viridis"
+    annotate: bool = True
+    fmt: str = ".1f"
+
+
+def show_comparison_heatmap(
+    csv_path: str | Path,
+    output_path: str | Path | None = None,
+    figsize: tuple[int, int] | None = None,
+    options: HeatmapOptions | None = None,
+) -> None:
+    """
+    Load a comparison CSV (as saved by this script) and show/save a seaborn heatmap.
+
+    Parameters
+    ----------
+    csv_path:
+        Path to the CSV file produced by this script.
+    output_path:
+        If provided, the heatmap image will be saved to this path.
+    figsize:
+        Optional tuple (w, h) in inches. If None, size is inferred from shape.
+    options:
+        HeatmapOptions namedtuple grouping optional visualization parameters:
+            - cmap: matplotlib colormap name (default 'viridis').
+            - annotate: whether to annotate cells with values (default True).
+            - fmt: annotation format string (default '.1f').
+
+    """
+    opts = options or HeatmapOptions()
+
+    csv_path = Path(csv_path)
+    if not csv_path.exists():
+        msg = f"CSV file not found: {csv_path}"
+        raise FileNotFoundError(msg)
+
+    comparision_df = pd.read_csv(csv_path, index_col=0)
+    # Convert to numeric and keep NaNs
+    comparision_df = comparision_df.apply(pd.to_numeric, errors="coerce")
+
+    nrows, ncols = comparision_df.shape
+    if figsize is None:
+        figsize = (max(8, ncols * 0.5), max(6, nrows * 0.5))  # noqa: PGH003 # type: ignore
+
+    plt.figure(figsize=figsize)
+    sns.heatmap(comparision_df, annot=opts.annotate, fmt=opts.fmt, cmap=opts.cmap, cbar_kws={"label": "Percent"})
+    plt.xlabel("reference model")
+    plt.ylabel("tested model")
+    plt.title("Comparison heatmap (tested vs reference)")
+
+    if output_path:
+        outp = Path(output_path)
+        outp.parent.mkdir(parents=True, exist_ok=True)
+        plt.tight_layout()
+        plt.savefig(outp, dpi=150)
+        plt.close()
+    else:
+        plt.tight_layout()
+        plt.show()
+
