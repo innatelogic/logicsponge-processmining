@@ -216,8 +216,8 @@ stats_to_log = []
 
 
 # Create an ID for the current run
-stats_file_path = Path(f"results/stats_batch_{RUN_ID}.json")
-log_file_path = Path(f"results/log_{RUN_ID}.txt")
+stats_file_path = Path(f"results/{RUN_ID}_stats_batch.json")
+log_file_path = Path(f"results/{RUN_ID}_log.txt")
 log_file_path.parent.mkdir(parents=True, exist_ok=True)
 with log_file_path.open("w") as f:
     for handler in logging.root.handlers[:]:
@@ -1120,9 +1120,9 @@ try:
     logger.debug("\n[COMPARISON DEBUG] Iterations used per cell:\n%s", iterations_df)
 
     # Save cross-reference CSV for later analysis (use the same results dir as stats_file_path)
-    correlation_csv_path = stats_file_path.parent / f"correlation_matrix_{RUN_ID}.csv"
-    anticorrelation_csv_path = stats_file_path.parent / f"anticorrelation_matrix_{RUN_ID}.csv"
-    similarity_csv_path = stats_file_path.parent / f"similarity_matrix_{RUN_ID}.csv"
+    correlation_csv_path = stats_file_path.parent / f"{RUN_ID}_correlation_matrix.csv"
+    anticorrelation_csv_path = stats_file_path.parent / f"{RUN_ID}_anticorrelation_matrix.csv"
+    similarity_csv_path = stats_file_path.parent / f"{RUN_ID}_similarity_matrix.csv"
     correlation_csv_path.parent.mkdir(parents=True, exist_ok=True)
     correlation_df.to_csv(correlation_csv_path)
     anticorrelation_df.to_csv(anticorrelation_csv_path)
@@ -1133,9 +1133,9 @@ try:
     )
 
     # Optional: save a PNG heatmap automatically (use results dir)
-    correlation_heatmap_png = stats_file_path.parent / f"correlation_matrix_{RUN_ID}.png"
-    anticorrelation_heatmap_png = stats_file_path.parent / f"anticorrelation_matrix_{RUN_ID}.png"
-    similarity_heatmap_png = stats_file_path.parent / f"similarity_matrix_{RUN_ID}.png"
+    correlation_heatmap_png = stats_file_path.parent / f"{RUN_ID}_correlation_matrix.png"
+    anticorrelation_heatmap_png = stats_file_path.parent / f"{RUN_ID}_anticorrelation_matrix.png"
+    similarity_heatmap_png = stats_file_path.parent / f"{RUN_ID}_similarity_matrix.png"
     for heatmap_png, df, title in [
         (correlation_heatmap_png, correlation_df, "Correlation: tested vs reference"),
         (anticorrelation_heatmap_png, anticorrelation_df, "Anticorrelation: tested vs reference"),

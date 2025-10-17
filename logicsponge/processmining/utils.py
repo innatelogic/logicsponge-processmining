@@ -14,7 +14,7 @@ from matplotlib.colors import LinearSegmentedColormap
 from logicsponge.processmining.config import DEFAULT_CONFIG
 from logicsponge.processmining.types import Config, Event, Metrics, Prediction, ProbDistr
 
-RED_TO_GREEN_CMAP = LinearSegmentedColormap.from_list('rg',["r", "w", "g"], N=256)
+RED_TO_GREEN_CMAP = LinearSegmentedColormap.from_list("rg",["r", "w", "g"], N=256)
 
 def extract_event_fields(event: Event) -> Event:
     """Extract the required fields from an event."""
@@ -183,7 +183,7 @@ def compute_seq_perplexity(normalized_likelihood: float, *, log_likelihood: bool
     return float("inf")
 
 
-def compare_models_comparison(
+def compare_models_comparison( # noqa: C901, PLR0915
     prediction_vectors_memory: dict,
     tested_model: str,
     reference_model: str,
