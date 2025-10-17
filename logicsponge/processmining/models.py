@@ -303,7 +303,7 @@ class StreamingMiner(ABC):
 
                 # Collect predicted activity (skip empty predictions) in order
                 predicted_vector.append(
-                    prediction["activity"] if prediction is not None else "empty"
+                    prediction["activity"] if prediction is not None else "N/A"
                 )
 
                 pause_start_time = time.time()
@@ -329,8 +329,12 @@ class StreamingMiner(ABC):
                 logger.debug("Prediction: %s", prediction)
 
                 logger.debug("Metrics: %s", metrics)
+
+                # ============================================================
                 # Update statistics based on the prediction
+                # -----------------------------------------
                 self.update_stats(event, prediction, current_state)
+                # ============================================================
 
                 pause_time += time.time() - pause_start_time
 
