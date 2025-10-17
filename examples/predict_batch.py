@@ -275,7 +275,7 @@ data_test = transform_to_seqs(dataset_test)
 # Define the number of iterations
 # ============================================================
 
-n_iterations = 5
+n_iterations = 2
 
 # Store metrics across iterations
 all_metrics: dict = {
@@ -950,6 +950,7 @@ for iteration in range(n_iterations):
         vecs = prediction_vectors_memory.get(s, [])
         last = vecs[-1] if vecs else []
         # logger.info("[ITER DEBUG] sample preds | strategy=%s | len=%d | sample=%s", s, len(last), (last[:8] if hasattr(last, "__getitem__") else repr(last)[:200])) # noqa: E501
+    logger.info("Iteration %d results:\n%s", iteration + 1, iteration_df)
 
 # ============================================================
 # Calculate and Show Final Results
