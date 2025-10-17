@@ -211,7 +211,7 @@ pd.set_option("display.expand_frame_repr", False)  # Prevent line-wrapping # noq
 
 logger = logging.getLogger(__name__)
 
-RUN_ID = time.strftime("%Y-%m-%d_%H-%M", time.localtime())
+RUN_ID = time.strftime("%Y-%m-%d_%H-%M", time.localtime()) + f"_{data_name}"
 stats_to_log = []
 
 
