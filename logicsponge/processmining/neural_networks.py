@@ -179,7 +179,8 @@ class LSTMModel(nn.Module):
         else:
             # Use one-hot encoding
             # print(f"x shape: {x.shape}, dtype: {x.dtype}, unique values: {torch.unique(x)}")
-            x = torch.nn.functional.one_hot(x, num_classes=self.vocab_size).float().to(self.device)
+            # Keep device consistent with input tensor to avoid device mismatch
+            x = torch.nn.functional.one_hot(x, num_classes=self.vocab_size).float().to(x.device)
 
         # Pass through LSTM layers
         lstm_out, _ = self.lstm1(x)
@@ -239,7 +240,7 @@ class TransformerModel(nn.Module):
         *,
         use_one_hot: bool = False,
         device: torch.device | None = None,
-        max_seq_len: int = 512,  # You can adjust this if needed
+        max_seq_len: int = 1024,  # Was 512. Adjust if needed
     ) -> None:
         """
         Initialize the Transformer model.
@@ -300,23 +301,43 @@ class TransformerModel(nn.Module):
             where each element is the predicted activity.
 
         """
+        # Ensure we keep computations on the same device as input indices
+        x_device = x.device
+        # Create padding mask (True for padding positions) from token indices
+        key_padding_mask = x == 0
+
         if not self.use_one_hot and self.embedding is not None:
             x = self.embedding(x)
         else:
-            x = F.one_hot(x, num_classes=self.vocab_size).float().to(self.device)
+            # Project indices to one-hot vectors on the same device as input
+            x = F.one_hot(x, num_classes=self.vocab_size).float().to(x_device)
 
         # Add positional encoding
         seq_len = x.size(1)
-        x = x + self.pos_embedding[:, :seq_len, :]
+        # If the sequence is longer than the learned maximum, interpolate the positional encoding
+        if seq_len <= self.pos_embedding.size(1):
+            pos = self.pos_embedding[:, :seq_len, :]
+        else:
+            # Interpolate along the sequence length dimension to match seq_len
+            # Shape transform: (1, L, D) -> (1, D, L) for interpolation over L -> back to (1, L, D)
+            pos = F.interpolate(
+                self.pos_embedding.transpose(1, 2),
+                size=seq_len,
+                mode="linear",
+                align_corners=False,
+            ).transpose(1, 2)
+        # Ensure positional encodings are on the same device as x
+        pos = pos.to(x_device)
+        x = x + pos
 
         # === Add causal (left) mask ===
         # Shape: [seq_len, seq_len]
-        mask = torch.triu(torch.ones(seq_len, seq_len, device=x.device), diagonal=1).bool()
+        mask = torch.triu(torch.ones(seq_len, seq_len, device=x_device), diagonal=1).bool()
         # PyTorch expects the mask to have True where positions should be masked
         # (i.e., prevent attending)
 
-        # Pass through transformer with mask
-        x = self.transformer(x, mask=mask)
+        # Pass through transformer with mask and key padding mask
+        x = self.transformer(x, mask=mask, src_key_padding_mask=key_padding_mask.to(x_device))
 
         return self.fc(x)
 
