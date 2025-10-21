@@ -199,8 +199,11 @@ if DATA == "file":
     # data_name = "Sepsis_Cases"
 
     # data_name = "Helpdesk"
-    data_name = "BPI_Challenge_2014" # 2013 2014 2017
-    # data_name = "BPI_Challenge_2017"
+    # data_name = "BPI_Challenge_2013" # ok
+    # data_name = "BPI_Challenge_2014" # very low accuracy
+    # data_name = "BPI_Challenge_2017" # ok
+    # data_name = "BPI_Challenge_2018" # unresolved error
+    data_name = "BPI_Challenge_2019"
 
     # =========================================================
     # DEFAULT DATA (= train set, when synthetic)
