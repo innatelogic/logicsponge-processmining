@@ -160,6 +160,7 @@ def data_statistics(data: list[list[Event]]) -> int:
     msg = (
         f"Number of cases: {len(data)}\n"
         f"Average length of case: {average_length}\n"
+        f"Maximum length of case: {max(len(lst) for lst in data) if data else 0}\n"
         f"Number of activities: {len(unique_activities)}\n"
         f"Number of events: {total_length}\n"
         f"Activity occurrences: {activity_occurrences}\n"
