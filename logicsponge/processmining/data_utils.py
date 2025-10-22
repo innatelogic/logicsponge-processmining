@@ -144,10 +144,11 @@ def retain_sequences_of_length_x_than(
 # ============================================================
 
 
-def data_statistics(data: list[list[Event]]) -> int:
+def data_statistics(data: list[list[Event]]) -> tuple[int, int]:
     # Calculate total length of sequences and average length
     total_length = sum(len(lst) for lst in data)
     average_length = total_length / len(data) if data else 0
+    max_seq_length = max((len(lst) for lst in data), default=0)
 
     # Flatten list of sequences and count the occurrences of each activity
     flattened_data = [event["activity"] for lst in data for event in lst]
@@ -160,13 +161,13 @@ def data_statistics(data: list[list[Event]]) -> int:
     msg = (
         f"Number of cases: {len(data)}\n"
         f"Average length of case: {average_length}\n"
-        f"Maximum length of case: {max(len(lst) for lst in data) if data else 0}\n"
+        f"Maximum length of case: {max_seq_length}\n"
         f"Number of activities: {len(unique_activities)}\n"
         f"Number of events: {total_length}\n"
         f"Activity occurrences: {activity_occurrences}\n"
     )
     logger.info(msg)
-    return len(unique_activities)
+    return len(unique_activities), max_seq_length
 
 
 # ============================================================

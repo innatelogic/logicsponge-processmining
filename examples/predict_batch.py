@@ -84,7 +84,7 @@ def transformer_model() -> tuple[TransformerModel, optim.Optimizer, nn.Module]:
     hidden_dim = 128
     output_dim = vocab_size  # Output used to predict the next activity
 
-    model = TransformerModel(vocab_size, embedding_dim, hidden_dim, output_dim, use_one_hot=True, device=device)
+    model = TransformerModel(vocab_size, embedding_dim, hidden_dim, output_dim, use_one_hot=True, device=device, max_seq_len=max_seq_length)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     return model, optimizer, criterion
@@ -267,7 +267,7 @@ stop_symbol = DEFAULT_CONFIG["stop_symbol"]
 
 nn_processor = PreprocessData()
 data = transform_to_seqs(dataset)
-n_activities = data_statistics(data)
+n_activities, max_seq_length = data_statistics(data)
 
 data_test = transform_to_seqs(dataset_test)
 
@@ -367,8 +367,6 @@ for iteration in range(n_iterations):
         train_set_transformed = add_stop_to_sequences(train_set_transformed, stop_symbol)
         val_set_transformed = add_stop_to_sequences(val_set_transformed, stop_symbol)
         test_set_transformed = add_stop_to_sequences(test_set_transformed, stop_symbol)
-
-    # data_statistics(test_set_transformed)
 
     alergia_train_set_transformed = add_input_symbols(train_set_transformed, "in")
 
