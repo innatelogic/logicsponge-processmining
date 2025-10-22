@@ -318,6 +318,9 @@ class TransformerModel(nn.Module):
         if seq_len <= self.pos_embedding.size(1):
             pos = self.pos_embedding[:, :seq_len, :]
         else:
+            raise ValueError(
+                f"Sequence length {seq_len} exceeds maximum positional encoding length {self.pos_embedding.size(1)}."
+            )
             # Interpolate along the sequence length dimension to match seq_len
             # Shape transform: (1, L, D) -> (1, D, L) for interpolation over L -> back to (1, L, D)
             pos = F.interpolate(
@@ -326,6 +329,7 @@ class TransformerModel(nn.Module):
                 mode="linear",
                 align_corners=False,
             ).transpose(1, 2)
+
         # Ensure positional encodings are on the same device as x
         pos = pos.to(x_device)
         x = x + pos
