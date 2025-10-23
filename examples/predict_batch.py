@@ -84,7 +84,7 @@ def transformer_model() -> tuple[TransformerModel, optim.Optimizer, nn.Module]:
     hidden_dim = 128
     output_dim = vocab_size  # Output used to predict the next activity
 
-    model = TransformerModel(vocab_size, embedding_dim, hidden_dim, output_dim, use_one_hot=True, device=device, max_seq_len=max_seq_length)
+    model = TransformerModel(vocab_size, embedding_dim, hidden_dim, output_dim, use_one_hot=True, device=device, max_seq_len=max_seq_length+2)  # +2 for start and stop symbols
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     return model, optimizer, criterion
