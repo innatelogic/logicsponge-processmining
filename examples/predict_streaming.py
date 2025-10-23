@@ -37,13 +37,26 @@ from logicsponge.processmining.streaming import (
     PrintEval,
     StreamingActivityPredictor,
 )
-from logicsponge.processmining.test_data import dataset
+from logicsponge.processmining.test_data import data_name, dataset
 
 logger = logging.getLogger(__name__)
-RUN_ID = int(time.time())
-stats_to_log = []
-stats_file_path = Path(f"results/stats_streaming_{RUN_ID}.csv")
 
+# Harmonize RUN_ID, stats path, and file logger as in predict_batch.py
+RUN_ID = time.strftime("%Y-%m-%d_%H-%M", time.localtime()) + f"_{data_name}"
+stats_to_log = []
+stats_file_path = Path(f"results/{RUN_ID}_stats_streaming.csv")
+log_file_path = Path(f"results/{RUN_ID}_streaming_log.txt")
+log_file_path.parent.mkdir(parents=True, exist_ok=True)
+with log_file_path.open("w"):
+    for handler in logging.root.handlers[:]:
+        if isinstance(handler, logging.FileHandler):
+            handler.flush()
+            handler.close()
+            logging.root.removeHandler(handler)
+    file_handler = logging.FileHandler(log_file_path)
+    formatter = logging.Formatter("%(message)s")
+    file_handler.setFormatter(formatter)
+    logging.root.addHandler(file_handler)
 
 # disable circular gc here, since a phase 2 may take minutes
 gc.disable()
@@ -52,16 +65,15 @@ gc.disable()
 #     print("gc", phase, info)
 # gc.callbacks.append(gb_callback_example)
 
+# Harmonize device selection logging with predict_batch.py
 if torch.backends.mps.is_available():
     # device = torch.device("mps")
     device = torch.device("cpu")
     logger.info("Using cpu.")
-
 elif torch.cuda.is_available():
     msg = f"Using cuda: {torch.cuda.get_device_name(0)}."
     logger.info(msg)
     device = torch.device("cuda")
-
 else:
     device = torch.device("cpu")
     logger.info("Using cpu.")
@@ -75,9 +87,11 @@ torch.backends.cudnn.benchmark = False
 # Initialize models
 # ====================================================
 
+# Add top_k to match predict_batch.py
 config = {
     "include_stop": False,
     "include_time": False,  # True is default
+    "top_k": 3,
 }
 
 start_symbol = DEFAULT_CONFIG["start_symbol"]
@@ -327,9 +341,10 @@ model_transformer = TransformerModel(
     hidden_dim=hidden_dim,
     output_dim=output_dim,
     use_one_hot=True,
+    device=device,
 )
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model_transformer.parameters(), lr=0.0001)  # Lower learning rate for transformer
+optimizer = optim.Adam(model_transformer.parameters(), lr=0.001)  # Align with batch config
 
 transformer = StreamingActivityPredictor(
     strategy=NeuralNetworkMiner(
@@ -411,43 +426,7 @@ def start_filter(item: DataItem) -> bool:
     return item["activity"] != start_symbol
 
 
-# len_dataset = 15214
-len_dataset = 262200  # BPI Challenge 2012
-# len_dataset = 65000
-# len_dataset = 1202267
-# len_dataset = 2514266
-# len_dataset = 1595923
-
-# sponge = (
-#     streamer
-#     * ls.KeyFilter(keys=["case_id", "activity", "timestamp"])
-#     * AddStartSymbol(start_symbol=start_symbol)
-#     * (
-#         (fpt * DataItemFilter(data_item_filter=start_filter) * Evaluation("fpt"))
-#         # | (bag * DataItemFilter(data_item_filter=start_filter) * Evaluation("bag"))
-#         # | (ngram_1 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_1"))
-#         # | (ngram_2 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_2"))
-#         # | (ngram_3 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_3"))
-#         # | (ngram_4 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_4"))
-#         # | (ngram_5 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_5"))
-#         # | (ngram_6 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_6"))
-#         # | (ngram_7 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_7"))
-#         # | (ngram_8 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_8"))
-#         # | (fallback * DataItemFilter(data_item_filter=start_filter) * Evaluation("fallback"))
-#         # | (hard_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("hard_voting"))
-#         # | (soft_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("soft_voting"))
-#         # | (adaptive_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("adaptive_voting"))
-#         | (lstm * DataItemFilter(data_item_filter=start_filter) * Evaluation("lstm"))
-#     )
-#     * ls.MergeToSingleStream() * ls.Flatten()
-#     * ls.AddIndex(key="index", index=1)
-#     * ls.KeyFilter(keys=all_attributes)
-#     * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 100 == 0 or item["index"] > len_dataset - 10)
-#     * PrintEval()
-#     # * ls.Print()
-#     # * (dashboard.Plot("Accuracy (%)", x="index", y=accuracy_list))
-#     # * (dashboard.Plot("Latency Mean (ms)", x="index", y=latency_mean_list))
-# )
+len_dataset = sum(1 for _ in dataset)
 
 
 sponge = (
