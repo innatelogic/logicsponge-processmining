@@ -14,8 +14,8 @@ logging.basicConfig(
     format="%(message)s",  # Only log level and message, no date
 )
 
-import logicsponge.core as ls
-from logicsponge.core import DataItem, DataItemFilter
+import logicsponge.core as ls  # type: ignore # noqa: PGH003
+from logicsponge.core import DataItem, DataItemFilter  # type: ignore # noqa: PGH003
 
 # from logicsponge.core import dashboard
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram

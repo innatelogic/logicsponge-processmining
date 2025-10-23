@@ -115,7 +115,7 @@ class LSTMModel(nn.Module):
     lstm2: nn.LSTM
     fc: nn.Linear
 
-    def __init__(
+    def __init__( # noqa: PLR0913
         self,
         vocab_size: int,
         embedding_dim: int,
@@ -231,7 +231,7 @@ class TransformerModel(nn.Module):
     transformer: nn.TransformerEncoder
     fc: nn.Linear
 
-    def __init__(
+    def __init__( # noqa: PLR0913
         self,
         vocab_size: int,
         embedding_dim: int,
@@ -318,8 +318,9 @@ class TransformerModel(nn.Module):
         if seq_len <= self.pos_embedding.size(1):
             pos = self.pos_embedding[:, :seq_len, :]
         else:
+            msg = f"Sequence length {seq_len} exceeds maximum positional encoding length {self.pos_embedding.size(1)}."
             raise ValueError(
-                f"Sequence length {seq_len} exceeds maximum positional encoding length {self.pos_embedding.size(1)}."
+                msg
             )
             # Interpolate along the sequence length dimension to match seq_len
             # Shape transform: (1, L, D) -> (1, D, L) for interpolation over L -> back to (1, L, D)
@@ -430,7 +431,7 @@ class PreprocessData:
         return pad_sequence(processed_sequences, batch_first=True, padding_value=0)
 
 
-def train_rnn(
+def train_rnn( # noqa: PLR0913 PLR0915
     model: LSTMModel | TransformerModel,
     train_sequences: torch.Tensor,
     val_sequences: torch.Tensor,
@@ -542,7 +543,7 @@ def train_rnn(
     return model
 
 
-def evaluate_rnn(
+def evaluate_rnn( # noqa: PLR0915
     model: LSTMModel | TransformerModel,
     sequences: torch.Tensor,
     *,
@@ -560,6 +561,7 @@ def evaluate_rnn(
         - predicted_vector (list[str]): flattened vector of predicted next-activity names
           (one entry per non-padding prediction). If idx_to_activity is not provided,
           indices are stringified.
+
     """
     eval_start_time = time.time()
     pause_time = 0.0
@@ -613,7 +615,7 @@ def evaluate_rnn(
                 else:
                     # Fallback: stringify indices so callers can still inspect values
                     mapped = [str(int(idx)) for idx in masked_predicted]
-                predicted_vector.extend(mapped)  # type: ignore
+                predicted_vector.extend(mapped)  # type: ignore # noqa: PGH003
 
             # Apply the mask and count correct predictions
             correct_predictions += (predicted_indices[mask] == masked_targets).sum().item()
