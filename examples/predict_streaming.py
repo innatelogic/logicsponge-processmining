@@ -17,6 +17,7 @@ logging.basicConfig(
 
 import logicsponge.core as ls
 from logicsponge.core import DataItem, DataItemFilter
+
 # from logicsponge.core import dashboard
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
 from logicsponge.processmining.config import DEFAULT_CONFIG
@@ -427,15 +428,13 @@ def start_filter(item: DataItem) -> bool:
     return item["activity"] != start_symbol
 
 
-# Use plain iterator streamer and compute len_dataset from dataset
-streamer = IteratorStreamer(data_iterator=dataset)
 # compute length (as in provided snippet)
 len_dataset = sum(1 for _ in dataset)
 
 # Initialize streamer with tqdm progress bar to track dataset processing
-# streamer = IteratorStreamer(
-#     data_iterator=iter(tqdm(dataset, total=len_dataset, desc="Streaming", unit="evt"))
-# )
+streamer = IteratorStreamer(
+    data_iterator=iter(tqdm(dataset, total=len_dataset, desc="Streaming", unit="evt"))
+)
 
 # sponge = (
 #     streamer
