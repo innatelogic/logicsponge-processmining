@@ -8,15 +8,14 @@ from pathlib import Path
 # ruff: noqa: E402
 import torch
 from torch import nn, optim
-from tqdm import tqdm
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(message)s",  # Only log level and message, no date
 )
 
-import logicsponge.core as ls
-from logicsponge.core import DataItem, DataItemFilter
+import logicsponge.core as ls  # type: ignore # noqa: PGH003
+from logicsponge.core import DataItem, DataItemFilter  # type: ignore # noqa: PGH003
 
 # from logicsponge.core import dashboard
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
@@ -41,23 +40,9 @@ from logicsponge.processmining.streaming import (
 from logicsponge.processmining.test_data import data_name, dataset
 
 logger = logging.getLogger(__name__)
-# Harmonize RUN_ID, stats path, and file logger (as in predict_batch.py)
 RUN_ID = time.strftime("%Y-%m-%d_%H-%M", time.localtime()) + f"_{data_name}"
 stats_to_log = []
 stats_file_path = Path(f"results/{RUN_ID}_stats_streaming.csv")
-log_file_path = Path(f"results/{RUN_ID}_streaming_log.txt")
-log_file_path.parent.mkdir(parents=True, exist_ok=True)
-# ensure file exists and attach file handler (replace any existing file handlers)
-with log_file_path.open("w"):
-    for handler in logging.root.handlers[:]:
-        if isinstance(handler, logging.FileHandler):
-            handler.flush()
-            handler.close()
-            logging.root.removeHandler(handler)
-    file_handler = logging.FileHandler(log_file_path)
-    formatter = logging.Formatter("%(message)s")
-    file_handler.setFormatter(formatter)
-    logging.root.addHandler(file_handler)
 
 # disable circular gc here, since a phase 2 may take minutes
 gc.disable()
@@ -89,11 +74,9 @@ torch.backends.cudnn.benchmark = False
 # Initialize models
 # ====================================================
 
-# Add top_k to match predict_batch.py
 config = {
     "include_stop": False,
     "include_time": False,  # True is default
-    "top_k": 3,
 }
 
 start_symbol = DEFAULT_CONFIG["start_symbol"]
@@ -343,10 +326,9 @@ model_transformer = TransformerModel(
     hidden_dim=hidden_dim,
     output_dim=output_dim,
     use_one_hot=True,
-    device=device,
 )
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model_transformer.parameters(), lr=0.001)  # Align with batch config
+optimizer = optim.Adam(model_transformer.parameters(), lr=0.0001)  # Lower learning rate for transformer
 
 transformer = StreamingActivityPredictor(
     strategy=NeuralNetworkMiner(
@@ -420,7 +402,7 @@ all_attributes = [
     *latency_mean_list,
 ]  # , *delay_list]
 
-# streamer is defined after len_dataset so tqdm can show total progress
+streamer = IteratorStreamer(data_iterator=dataset)
 
 
 def start_filter(item: DataItem) -> bool:
@@ -428,13 +410,12 @@ def start_filter(item: DataItem) -> bool:
     return item["activity"] != start_symbol
 
 
-# compute length (as in provided snippet)
-len_dataset = sum(1 for _ in dataset)
-
-# Initialize streamer with tqdm progress bar to track dataset processing
-streamer = IteratorStreamer(
-    data_iterator=iter(tqdm(dataset, total=len_dataset, desc="Streaming", unit="evt"))
-)
+# len_dataset = 15214
+len_dataset = 262200  # BPI Challenge 2012
+# len_dataset = 65000
+# len_dataset = 1202267
+# len_dataset = 2514266
+# len_dataset = 1595923
 
 # sponge = (
 #     streamer
