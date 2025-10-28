@@ -196,13 +196,13 @@ data_collection = {
 if DATA == "file":
     # data_name = "Synthetic_Train"
 
-    # data_name = "Sepsis_Cases"
+    data_name = "Sepsis_Cases"
 
     # data_name = "Helpdesk"
     # data_name = "BPI_Challenge_2013" # ok
     # data_name = "BPI_Challenge_2014" # very low accuracy
     # data_name = "BPI_Challenge_2017" # ok
-    data_name = "BPI_Challenge_2018" # 512 seq_len was too restrictive, trying 1024
+    # data_name = "BPI_Challenge_2018" # 512 seq_len was too restrictive, trying 1024
     # data_name = "BPI_Challenge_2019"
 
     # =========================================================

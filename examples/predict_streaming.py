@@ -10,9 +10,14 @@ import torch
 from torch import nn, optim
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",  # Only log level and message, no date
+    level=logging.DEBUG,
+    # format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
+# Ensure module-specific debug logs are visible
+logging.getLogger("logicsponge.processmining.models").setLevel(logging.INFO)
+logging.getLogger("logicsponge.processmining.streaming").setLevel(logging.DEBUG)
+logging.getLogger("logicsponge.processmining").setLevel(logging.INFO)
+
 
 import logicsponge.core as ls  # type: ignore # noqa: PGH003
 from logicsponge.core import DataItem, DataItemFilter  # type: ignore # noqa: PGH003
@@ -26,9 +31,10 @@ from logicsponge.processmining.models import (
     Fallback,
     HardVoting,
     NeuralNetworkMiner,
+    RLMiner,  # added RLMiner
     SoftVoting,
 )
-from logicsponge.processmining.neural_networks import LSTMModel, TransformerModel
+from logicsponge.processmining.neural_networks import LSTMModel, QNetwork, TransformerModel
 from logicsponge.processmining.streaming import (
     AddStartSymbol,
     CSVStatsWriter,
@@ -340,6 +346,29 @@ transformer = StreamingActivityPredictor(
     )
 )
 
+# instantiate q-learning model and wrap in RLMiner
+model_qlearning = QNetwork(
+    vocab_size=vocab_size,
+    embedding_dim=embedding_dim,
+    hidden_dim=hidden_dim,
+    output_dim=output_dim,
+    device=device
+).to(device)
+criterion_q = nn.MSELoss()  # placeholder; RLMiner uses log-prob based updates
+optimizer_q = optim.Adam(model_qlearning.parameters(), lr=0.001)
+
+qlearning_vanilla = StreamingActivityPredictor(
+    strategy=RLMiner(
+        model=model_qlearning,
+        criterion=criterion_q,
+        optimizer=optimizer_q,
+        batch_size=8,
+        config=config,
+        sequence_buffer_length=24, # has to be enough to cover short_term_mem_size
+        long_term_mem_size=8,
+        short_term_mem_size=16, # ~n in n-gram
+    )
+)
 
 # ====================================================
 # Sponge
@@ -365,6 +394,7 @@ models = [
     *list(soft_voting_predictors.keys()),  # Add all soft_voting predictor names
     "lstm",
     "transformer",
+    "qlearning_vanilla",
 ]
 
 
@@ -410,12 +440,24 @@ def start_filter(item: DataItem) -> bool:
     return item["activity"] != start_symbol
 
 
-# len_dataset = 15214
-len_dataset = 262200  # BPI Challenge 2012
-# len_dataset = 65000
-# len_dataset = 1202267
-# len_dataset = 2514266
-# len_dataset = 1595923
+if data_name == "Helpdesk":
+    len_dataset = 53_500
+elif data_name == "Sepsis":
+    len_dataset = 15_214
+elif data_name == "BPI_Challenge_2012":
+    len_dataset = 262_200
+elif data_name == "BPI_Challenge_2013":
+    len_dataset = 65_533
+elif data_name == "BPI_Challenge_2014":
+    len_dataset = 466_737
+elif data_name == "BPI_Challenge_2017":
+    len_dataset = 1_202_267
+elif data_name == "BPI_Challenge_2018":
+    len_dataset = 2_514_266
+elif data_name == "BPI_Challenge_2019":
+    len_dataset = 1_595_923
+else:
+    len_dataset = 100_000  # Default value
 
 # sponge = (
 #     streamer
@@ -482,6 +524,12 @@ sponge = (
             * transformer
             * DataItemFilter(data_item_filter=start_filter)
             * Evaluation("transformer")
+        )
+        | (
+            AddStartSymbol(start_symbol=start_symbol)
+            * qlearning_vanilla
+            * DataItemFilter(data_item_filter=start_filter)
+            * Evaluation("qlearning_vanilla")
         )
     )
     * ls.MergeToSingleStream()

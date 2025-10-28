@@ -357,6 +357,61 @@ class TransformerModel(nn.Module):
             nn.init.normal_(m, mean=0.0, std=0.02)
 
 
+
+# Small Q-network compatible with sequence input (embedding + GRU + linear)
+class QNetwork(nn.Module):
+    """
+    Simple Q-network with embedding, GRU, and linear layers.
+
+    Args:
+        vocab_size (int): Size of the vocabulary.
+        embedding_dim (int): Dimension of the embeddings.
+        hidden_dim (int): Dimension of the hidden layer in the GRU.
+        output_dim (int): Dimension of the output layer.
+        device (torch.device | None): Device to run the model on (CPU or GPU).
+
+    """
+
+    def __init__(
+            self,
+            vocab_size: int, embedding_dim: int, hidden_dim: int, output_dim: int, device: torch.device | None) -> None:
+        """
+        Initialize the Q-network.
+
+        Args:
+            vocab_size (int): Size of the vocabulary.
+            embedding_dim (int): Dimension of the embeddings.
+            hidden_dim (int): Dimension of the hidden layer in the GRU.
+            output_dim (int): Dimension of the output layer.
+            device (torch.device | None): Device to run the model on (CPU or GPU).
+
+        """
+        super().__init__()
+        self.device = device
+        # simple embedding (use embedding indices like other NN models)
+        self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
+        self.gru = nn.GRU(embedding_dim, hidden_dim, batch_first=True)
+        self.fc = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass through the Q-network.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, seq_len), where each element is an activity index.
+
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, 1, output_dim),
+            where each element is the predicted Q-value for the next activity.
+
+        """
+        # x: LongTensor [batch, seq_len]
+        emb = self.embedding(x)  # [batch, seq_len, embedding_dim]
+        out, _ = self.gru(emb)  # out: [batch, seq_len, hidden_dim]
+        last = out[:, -1, :]  # last timestep
+        logits = self.fc(last)  # [batch, output_dim]
+        return logits.unsqueeze(1)  # match interface [batch, 1, vocab] expected by miners
+
 # ============================================================
 # Training and Evaluation
 # ============================================================
