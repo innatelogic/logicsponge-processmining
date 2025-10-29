@@ -389,3 +389,56 @@ def show_comparison_heatmap(
         plt.tight_layout()
         plt.show()
 
+
+def save_all_comparison_heatmaps(
+    results_dir: str | Path,
+    run_id: str,
+    *,
+    snapshot_idx: int | None = None,
+    cmap: LinearSegmentedColormap = RED_TO_GREEN_CMAP,
+    annotate: bool = False,
+) -> dict[str, Path]:
+    """
+    Render and save correlation/anticorrelation/similarity heatmaps from CSV matrices.
+
+    Looks for CSVs produced by the comparison step:
+      - {results_dir}/{run_id}_correlation_matrix.csv
+      - {results_dir}/{run_id}_anticorrelation_matrix.csv
+      - {results_dir}/{run_id}_similarity_matrix.csv
+
+    Saves PNGs alongside them. If ``snapshot_idx`` is provided, it will be appended
+    to the filenames for periodic snapshots during streaming.
+
+    Returns a mapping with keys: 'correlation', 'anticorrelation', 'similarity' pointing to the PNG paths.
+    """
+    results_dir = Path(results_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    suffix = f"_{snapshot_idx}" if snapshot_idx is not None else ""
+
+    correlation_csv = results_dir / f"{run_id}_correlation_matrix.csv"
+    anticorrelation_csv = results_dir / f"{run_id}_anticorrelation_matrix.csv"
+    similarity_csv = results_dir / f"{run_id}_similarity_matrix.csv"
+
+    correlation_png = results_dir / f"{run_id}_correlation_matrix{suffix}.png"
+    anticorrelation_png = results_dir / f"{run_id}_anticorrelation_matrix{suffix}.png"
+    similarity_png = results_dir / f"{run_id}_similarity_matrix{suffix}.png"
+
+    # HeatmapOptions takes cmap name as string; use the provided cmap's name when available
+    cmap_name = cmap.name if hasattr(cmap, "name") else (cmap if isinstance(cmap, str) else "viridis")
+    opts = HeatmapOptions(cmap=cmap_name, annotate=annotate, fmt=".1f")
+
+    # Render each if CSV exists
+    if correlation_csv.exists():
+        show_comparison_heatmap(correlation_csv, output_path=correlation_png, options=opts)
+    if anticorrelation_csv.exists():
+        show_comparison_heatmap(anticorrelation_csv, output_path=anticorrelation_png, options=opts)
+    if similarity_csv.exists():
+        show_comparison_heatmap(similarity_csv, output_path=similarity_png, options=opts)
+
+    return {
+        "correlation": correlation_png,
+        "anticorrelation": anticorrelation_png,
+        "similarity": similarity_png,
+    }
+

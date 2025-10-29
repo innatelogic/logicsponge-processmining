@@ -15,7 +15,7 @@ logging.basicConfig(
 )
 # Ensure module-specific debug logs are visible
 logging.getLogger("logicsponge.processmining.models").setLevel(logging.INFO)
-logging.getLogger("logicsponge.processmining.streaming").setLevel(logging.DEBUG)
+logging.getLogger("logicsponge.processmining.streaming").setLevel(logging.INFO)
 logging.getLogger("logicsponge.processmining").setLevel(logging.INFO)
 
 
@@ -36,11 +36,14 @@ from logicsponge.processmining.models import (
 )
 from logicsponge.processmining.neural_networks import LSTMModel, QNetwork, TransformerModel
 from logicsponge.processmining.streaming import (
+    ActualCSVWriter,
     AddStartSymbol,
     CSVStatsWriter,
     Evaluation,
     IteratorStreamer,
+    PredictionCSVWriter,
     PrintEval,
+    StreamAlteration,
     StreamingActivityPredictor,
 )
 from logicsponge.processmining.test_data import data_name, dataset
@@ -48,7 +51,24 @@ from logicsponge.processmining.test_data import data_name, dataset
 logger = logging.getLogger(__name__)
 RUN_ID = time.strftime("%Y-%m-%d_%H-%M", time.localtime()) + f"_{data_name}"
 stats_to_log = []
-stats_file_path = Path(f"results/{RUN_ID}_stats_streaming.csv")
+# create a run-specific results directory: results/{RUN_ID}
+run_results_dir = Path(f"results/{RUN_ID}")
+run_results_dir.mkdir(parents=True, exist_ok=True)
+
+# stats and predictions live inside the run folder
+stats_file_path = run_results_dir / f"{RUN_ID}_stats_streaming.csv"
+predictions_dir = run_results_dir / "predictions"
+predictions_dir.mkdir(parents=True, exist_ok=True)
+
+# Add a file handler so logs are written into the run folder as well
+log_file_path = run_results_dir / f"{RUN_ID}_log.txt"
+try:
+    file_handler = logging.FileHandler(log_file_path)
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    file_handler.setFormatter(formatter)
+    logging.root.addHandler(file_handler)
+except OSError:
+    logger.debug("Could not create log file %s; continuing with console logging.", log_file_path)
 
 # disable circular gc here, since a phase 2 may take minutes
 gc.disable()
@@ -432,6 +452,8 @@ all_attributes = [
     *latency_mean_list,
 ]  # , *delay_list]
 
+
+
 streamer = IteratorStreamer(data_iterator=dataset)
 
 
@@ -459,47 +481,40 @@ elif data_name == "BPI_Challenge_2019":
 else:
     len_dataset = 100_000  # Default value
 
-# sponge = (
-#     streamer
-#     * ls.KeyFilter(keys=["case_id", "activity", "timestamp"])
-#     * AddStartSymbol(start_symbol=start_symbol)
-#     * (
-#         (fpt * DataItemFilter(data_item_filter=start_filter) * Evaluation("fpt"))
-#         # | (bag * DataItemFilter(data_item_filter=start_filter) * Evaluation("bag"))
-#         # | (ngram_1 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_1"))
-#         # | (ngram_2 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_2"))
-#         # | (ngram_3 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_3"))
-#         # | (ngram_4 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_4"))
-#         # | (ngram_5 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_5"))
-#         # | (ngram_6 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_6"))
-#         # | (ngram_7 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_7"))
-#         # | (ngram_8 * DataItemFilter(data_item_filter=start_filter) * Evaluation("ngram_8"))
-#         # | (fallback * DataItemFilter(data_item_filter=start_filter) * Evaluation("fallback"))
-#         # | (hard_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("hard_voting"))
-#         # | (soft_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("soft_voting"))
-#         # | (adaptive_voting * DataItemFilter(data_item_filter=start_filter) * Evaluation("adaptive_voting"))
-#         | (lstm * DataItemFilter(data_item_filter=start_filter) * Evaluation("lstm"))
-#     )
-#     * ls.MergeToSingleStream() * ls.Flatten()
-#     * ls.AddIndex(key="index", index=1)
-#     * ls.KeyFilter(keys=all_attributes)
-#     * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 100 == 0 or item["index"] > len_dataset - 10)
-#     * PrintEval()
-#     # * ls.Print()
-#     # * (dashboard.Plot("Accuracy (%)", x="index", y=accuracy_list))
-#     # * (dashboard.Plot("Latency Mean (ms)", x="index", y=latency_mean_list))
-# )
-
 
 sponge = (
     streamer
+    * StreamAlteration(
+        alteration_type="switch",
+        rate=1.0,
+        alteration_start=5000,
+        transition=1,
+    )
+    * StreamAlteration(
+        alteration_type="split",
+        rate=1.0,
+        alteration_start=5000,
+        transition=1000,
+    )
     * ls.KeyFilter(keys=["case_id", "activity", "timestamp"])
+    * ActualCSVWriter(csv_path=predictions_dir / "actual.csv")
     * (
-        (fpt * Evaluation("fpt"))
-        | (bag * Evaluation("bag"))
+        (fpt * PredictionCSVWriter(csv_path=predictions_dir / "fpt.csv", model_name="fpt") * Evaluation("fpt"))
+        | (bag * PredictionCSVWriter(csv_path=predictions_dir / "bag.csv", model_name="bag") * Evaluation("bag"))
         # Add all NGRAM_MODELS to the pipeline
-        | ((NGRAM_MODELS[name] * Evaluation(name)) for name in NGRAM_NAMES)
-        | (fallback * Evaluation("fallback"))
+        | (
+            (
+                NGRAM_MODELS[name]
+                * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name)
+                * Evaluation(name)
+            )
+            for name in NGRAM_NAMES
+        )
+        | (
+            fallback
+            * PredictionCSVWriter(csv_path=predictions_dir / "fallback.csv", model_name="fallback")
+            * Evaluation("fallback")
+        )
         # | (fallback_ngram8to2 * Evaluation("fallback_ngram8to2"))
         # | (fallback_ngram8to3 * Evaluation("fallback_ngram8to3"))
         # | (fallback_ngram8to4 * Evaluation("fallback_ngram8to4"))
@@ -507,28 +522,52 @@ sponge = (
         # | (fallback_ngram13to2 * Evaluation("fallback_ngram13to2"))
         # | (fallback_ngram8to_ooo * Evaluation("fallback_ngram8to_ooo"))
         # | (complex_fallback * Evaluation("complex_fallback"))
-        | (hard_voting * Evaluation("hard_voting"))
+        | (
+            hard_voting
+            * PredictionCSVWriter(csv_path=predictions_dir / "hard_voting.csv", model_name="hard_voting")
+            * Evaluation("hard_voting")
+        )
         # | (adaptive_voting * Evaluation("adaptive_voting"))
-        | (soft_voting * Evaluation("soft_voting"))
-        | (soft_voting_star * Evaluation("soft_voting_star"))
+        | (
+            soft_voting
+            * PredictionCSVWriter(csv_path=predictions_dir / "soft_voting.csv", model_name="soft_voting")
+            * Evaluation("soft_voting")
+        )
+        | (
+            soft_voting_star
+            * PredictionCSVWriter(csv_path=predictions_dir / "soft_voting_star.csv", model_name="soft_voting_star")
+            * Evaluation("soft_voting_star")
+        )
         # Add all soft_voting_predictors to the pipeline
-        | ((predictor * Evaluation(name)) for name, predictor in soft_voting_predictors.items())
+        | (
+            (
+                predictor
+                * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name)
+                * Evaluation(name)
+            )
+            for name, predictor in soft_voting_predictors.items()
+        )
         | (
             AddStartSymbol(start_symbol=start_symbol)
             * lstm
             * DataItemFilter(data_item_filter=start_filter)
+            * PredictionCSVWriter(csv_path=predictions_dir / "lstm.csv", model_name="lstm")
             * Evaluation("lstm")
         )
         | (
             AddStartSymbol(start_symbol=start_symbol)
             * transformer
             * DataItemFilter(data_item_filter=start_filter)
+            * PredictionCSVWriter(csv_path=predictions_dir / "transformer.csv", model_name="transformer")
             * Evaluation("transformer")
         )
         | (
             AddStartSymbol(start_symbol=start_symbol)
             * qlearning_vanilla
             * DataItemFilter(data_item_filter=start_filter)
+            * PredictionCSVWriter(
+                csv_path=predictions_dir / "qlearning_vanilla.csv", model_name="qlearning_vanilla"
+            )
             * Evaluation("qlearning_vanilla")
         )
     )

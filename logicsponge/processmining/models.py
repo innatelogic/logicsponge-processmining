@@ -1657,9 +1657,11 @@ class RLMiner(NeuralNetworkMiner):
     - optional: event['reward'] (numeric). If not present, reward defaults to 0.0 (no update).
     """
 
-    def __init__(self, *args: dict[str, Any], model: QNetwork, batch_size: int, optimizer, criterion,
+    def __init__(self, *args: dict[str, Any], model: QNetwork, batch_size: int,
+                 optimizer, criterion,
                  sequence_buffer_length: int = 50, long_term_mem_size: int = 10,
-                 short_term_mem_size: int | None = None, **kwargs: Any) -> None:
+                 short_term_mem_size: int | None = None, **kwargs: dict[str, Any]) -> None:
+        """Initialize the RLMiner class."""
         # Initialize parent
         super().__init__(*args, model=model, batch_size=batch_size, optimizer=optimizer, criterion=criterion, **kwargs)
 
@@ -1725,25 +1727,21 @@ class RLMiner(NeuralNetworkMiner):
             logger.debug("[RLMiner.update] current_seq names=%s", seq_names)
 
         # Compute reward based on model prediction from current context (for logging only)
-        reward = 0.0
         if current_seq and len(current_seq) >= 1:
             probs = self.idx_sequence_probs(current_seq)
             pred = probs_prediction(probs, config=self.config)
 
-            if logger.isEnabledFor(logging.DEBUG):
-                top_k = self.config.get("top_k", 5)
-                sorted_probs = sorted(probs.items(), key=lambda x: x[1], reverse=True)
-                logger.debug("[RLMiner.update] predicted winner: %s", pred.get("activity") if pred is not None else None)
-                logger.debug("[RLMiner.update] predicted top-%s: %s", top_k, sorted_probs[:top_k])
+            # top_k = self.config.get("top_k", 5)
+            # sorted_probs = sorted(probs.items(), key=lambda x: x[1], reverse=True)
+            # logger.debug("[RLMiner.update] predicted winner: %s", pred.get("activity") if pred is not None else None)
+            # logger.debug("[RLMiner.update] predicted top-%s: %s", top_k, sorted_probs[:top_k])
 
-            if pred is not None and pred.get("activity") == activity:
-                reward = 1.0
+            reward =  1.0 if pred is not None and pred.get("activity") == activity else 0.0
 
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(
-                    "[RLMiner.update] reward=%s (pred==obs? %s, with pred: %s, actual: %s)",
-                    reward, reward == 1.0, pred.get("activity") if pred is not None else None, activity
-                )
+            # logger.debug(
+            #     "[RLMiner.update] reward=%s (pred==obs? %s, with pred: %s, actual: %s)",
+            #     reward, reward == 1.0, pred.get("activity") if pred is not None else None, activity
+            # )
 
             # Compute policy loss on the observed action (always update):
             # loss = -log_prob(observed_activity | current_seq)
@@ -1760,26 +1758,20 @@ class RLMiner(NeuralNetworkMiner):
                 new_idx = len(self.activity_index) + 1
                 self.activity_index[activity] = new_idx
                 self.index_activity[new_idx] = activity
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug("[RLMiner.update] assigned new index to activity '%s' -> %s", activity, new_idx)
+                logger.debug("[RLMiner.update] assigned new index to activity '%s' -> %s", activity, new_idx)
             target_idx = int(self.activity_index[activity])
 
             if target_idx < log_probs.shape[0]:
                 lp = log_probs[target_idx]
                 loss = -lp  # always learn from the observed action (no reward gating)
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "[RLMiner.update] target_idx=%s activity=%s log_prob=%.6f reward=%s effective_loss=%.6f vocab=%s",
-                        target_idx, activity, lp.item(), reward, loss.item(), log_probs.shape[0]
-                    )
+                logger.debug(
+                    "[RLMiner.update] target_idx=%s activity=%s log_prob=%.6f reward=%s effective_loss=%.6f vocab=%s",
+                    target_idx, activity, lp.item(), reward, loss.item(), log_probs.shape[0]
+                )
                 loss.backward()
                 self.optimizer.step()
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug("[RLMiner.update] optimizer step completed")
+                logger.debug("[RLMiner.update] optimizer step completed")
             else:
-                logger.debug(
-                    "[RLMiner.update] skip step: target_idx=%s >= vocab=%s", target_idx, log_probs.shape[0]
-                )
                 logger.error(
                     "[RLMiner.update] activity '%s' with idx=%s not in vocab (size=%s)",
                     activity, target_idx, log_probs.shape[0]
@@ -1792,14 +1784,14 @@ class RLMiner(NeuralNetworkMiner):
             new_idx = len(self.activity_index) + 1
             self.activity_index[activity] = new_idx
             self.index_activity[new_idx] = activity
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug("[RLMiner.update] assigned new index to activity '%s' -> %s (enqueue path)", activity, new_idx)
+            logger.debug("[RLMiner.update] assigned new index to activity '%s' -> %s (enqueue path)", activity, new_idx)
+
         self._enqueue_activity(case_id, self.activity_index[activity])
-        if logger.isEnabledFor(logging.DEBUG):
-            new_seq = self.get_sequence(case_id)
-            new_seq_names = [self.index_activity.get(i, f"<unk:{i}>") for i in new_seq]
-            logger.debug("[RLMiner.update] new_seq idx=%s", new_seq)
-            logger.debug("[RLMiner.update] new_seq names=%s", new_seq_names)
+
+        # new_seq = self.get_sequence(case_id)
+        # new_seq_names = [self.index_activity.get(i, f"<unk:{i}>") for i in new_seq]
+        # logger.debug("[RLMiner.update] new_seq idx=%s", new_seq)
+        # logger.debug("[RLMiner.update] new_seq names=%s", new_seq_names)
 
     def case_metrics(self, case_id: CaseId) -> Metrics:
         """Predict next activity probabilities for a case_id (like NeuralNetworkMiner.case_metrics)."""
@@ -1817,9 +1809,9 @@ class RLMiner(NeuralNetworkMiner):
     def idx_sequence_probs(self, index_sequence: list[int]) -> ProbDistr:
         """Predict next activity probabilities for given index sequence (like parent)."""
         # Convert to a tensor and add a batch dimension
-        input_sequence = torch.tensor(index_sequence, dtype=torch.long, device=self.device).unsqueeze(
-            0
-        )  # Shape [1, sequence_length]
+        input_sequence = torch.as_tensor([index_sequence], dtype=torch.long, device=self.device)
+        # input_sequence = torch.tensor(index_sequence, dtype=torch.long, device=self.device).unsqueeze(0)  # Shape [1, sequence_length] # noqa: E501
+
 
         # Pass the sequence through the model to get the output
         self.model.eval()

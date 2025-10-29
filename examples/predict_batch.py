@@ -1098,7 +1098,11 @@ try:
         for reference in model_keys:
             try:
                 res = compare_models_comparison(
-                    prediction_vectors_memory, tested_model=tested, reference_model=reference, baseline_model="actual")
+                    prediction_vectors_memory,
+                    tested_model=tested,
+                    reference_model=reference,
+                    baseline_model="actual"
+                )
                 correlation = res.get("correlation", None)
                 anticorrelation = res.get("anticorrelation", None)
                 similarity = res.get("similarity", None)
