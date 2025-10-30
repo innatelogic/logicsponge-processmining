@@ -224,22 +224,32 @@ RUN_ID = time.strftime("%Y-%m-%d_%H-%M", time.localtime()) + f"_{data_name}"
 stats_to_log = []
 
 
-# Create an ID for the current run
-stats_file_path = Path(f"results/{RUN_ID}_stats_batch.json")
-log_file_path = Path(f"results/{RUN_ID}_log.txt")
-log_file_path.parent.mkdir(parents=True, exist_ok=True)
-with log_file_path.open("w") as f:
+# Build a run-specific results directory similar to predict_streaming.py
+run_results_dir = Path(f"results/{RUN_ID}")
+run_results_dir.mkdir(parents=True, exist_ok=True)
+
+# Stats and predictions live inside the run folder
+stats_file_path = run_results_dir / f"{RUN_ID}_stats_batch.json"
+predictions_dir = run_results_dir / "predictions"
+predictions_dir.mkdir(parents=True, exist_ok=True)
+
+# Log file inside run folder
+log_file_path = run_results_dir / f"{RUN_ID}_log.txt"
+try:
+    # Remove any existing file handlers first
     for handler in logging.root.handlers[:]:
         if isinstance(handler, logging.FileHandler):
             handler.flush()
             handler.close()
             logging.root.removeHandler(handler)
 
-    # Reconfigure the logger to write to the file
+    # Reconfigure the logger to write to the run-specific file
     file_handler = logging.FileHandler(log_file_path)
     formatter = logging.Formatter("%(message)s")
     file_handler.setFormatter(formatter)
     logging.root.addHandler(file_handler)
+except OSError:
+    logger.debug("Could not create log file %s; continuing with console logging.", log_file_path)
 
 if torch.backends.mps.is_available():
     # device = torch.device("mps")
@@ -967,7 +977,7 @@ for iteration in range(n_iterations):
             ).to(device)
             # Use MSELoss to be consistent with streaming RL configuration
             criterion = nn.MSELoss()
-            optimizer = optim.Adam(model_q.parameters(), lr=0.001)
+            optimizer = optim.Adam(model_q.parameters(), lr=0.008)
 
             start_time = time.time()
             model_q = train_rl(
@@ -977,7 +987,8 @@ for iteration in range(n_iterations):
                 criterion,
                 optimizer,
                 batch_size=8,
-                epochs=100,
+                # Train exactly one pass over all sequences (one epoch = one full pass)
+                epochs=1,
                 window_size=w,
             )
             end_time = time.time()
