@@ -52,8 +52,11 @@ from logicsponge.processmining.models import (
 from logicsponge.processmining.neural_networks import (
     LSTMModel,
     PreprocessData,
+    QNetwork,
     TransformerModel,
+    evaluate_rl,
     evaluate_rnn,
+    train_rl,
     train_rnn,
 )
 from logicsponge.processmining.test_data import data_name, dataset, dataset_test
@@ -206,6 +209,10 @@ NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 
 # ============================================================
 
+# RL (QNetwork) window configurations (for looped creation of models)
+RL_WINDOWS = [4, 8, 24]
+RL_MODEL_NAMES = [f"qlearning_win{w}" for w in RL_WINDOWS]
+
 mpl.use("Agg")
 
 pd.set_option("display.max_columns", None)  # Show all columns
@@ -321,6 +328,7 @@ all_metrics: dict = {
         "alergia",
         "LSTM",
         "transformer",
+    *RL_MODEL_NAMES,
         "bayesian train",
         "bayesian test",
         "bayesian t+t",
@@ -766,7 +774,7 @@ for iteration in range(n_iterations):
             test_data,
             mode="incremental",
             debug=(data_name == "Synthetic_Train"),
-            compute_perplexity="hard" not in strategy_name,
+            compute_perplexity=("hard" not in strategy_name and "qlearning" not in strategy_name),
         )
         evaluation_time *= SEC_TO_MICRO / TEST_EVENTS
 
@@ -904,7 +912,7 @@ for iteration in range(n_iterations):
         all_metrics[strategy_name]["mean_normalized_error"].append(mean_normalized_error)
         all_metrics[strategy_name]["num_delay_predictions"].append(delay_count)
 
-    # LSTM Evaluation
+    # LSTM + Transformer + RL Evaluation
     if NN_TRAINING:
         # For RNNs: Append START symbol
         nn_train_set_transformed = add_start_to_sequences(train_set_transformed, start_symbol)
@@ -940,6 +948,119 @@ for iteration in range(n_iterations):
                 )
             else:
                 logger.debug("NN stored preds | model=%s | iter=%d | (no preds stored)", nn_name, iteration + 1)
+
+        # RL (QNetwork) evaluation in batch mode (no RLMiner). Mirrors streaming windows.
+        vocab_size = 50
+        embedding_dim = 50
+        hidden_dim = 128
+        output_dim = vocab_size
+
+        for w in RL_WINDOWS:
+            rl_name = f"qlearning_win{w}"
+            logger.info("Training and evaluating %s model...", rl_name)
+            model_q = QNetwork(
+                vocab_size=vocab_size,
+                embedding_dim=embedding_dim,
+                hidden_dim=hidden_dim,
+                output_dim=output_dim,
+                device=device,
+            ).to(device)
+            # Use MSELoss to be consistent with streaming RL configuration
+            criterion = nn.MSELoss()
+            optimizer = optim.Adam(model_q.parameters(), lr=0.001)
+
+            start_time = time.time()
+            model_q = train_rl(
+                model_q,
+                nn_train_set_transformed,
+                nn_val_set_transformed,
+                criterion,
+                optimizer,
+                batch_size=8,
+                epochs=100,
+                window_size=w,
+            )
+            end_time = time.time()
+            training_time = (end_time - start_time) * SEC_TO_MICRO / (TRAIN_EVENTS + VAL_EVENTS)
+
+            stats, perplexities, eval_time, prediction_vector = evaluate_rl(
+                model_q,
+                nn_test_set_transformed,
+                max_k=config["top_k"],
+                idx_to_activity=nn_processor.idx_to_activity,
+                window_size=w,
+            )
+
+            prediction_vectors_memory.setdefault(rl_name, []).append(prediction_vector)
+
+            # RL perplexity is not defined; store None-based placeholders
+            perplexity_stats = {
+                "pp_harmonic_mean": None,
+                "pp_arithmetic_mean": None,
+                "pp_median": None,
+                "pp_q1": None,
+                "pp_q3": None,
+            }
+            eval_time *= SEC_TO_MICRO / TEST_EVENTS
+
+            if (
+                not isinstance(stats["top_k_correct_preds"], list)
+                or not isinstance(stats["total_predictions"], int)
+                or not isinstance(stats["accuracy"], float)
+            ):
+                msg = f"{rl_name} stats are not in the expected format."
+                raise TypeError(msg)
+
+            iteration_data["Model"].append(rl_name)
+
+            iteration_data["PP Harmo"].append(perplexity_stats["pp_harmonic_mean"])
+            iteration_data["PP Arithm"].append(perplexity_stats["pp_arithmetic_mean"])
+            iteration_data["PP Median"].append(perplexity_stats["pp_median"])
+            iteration_data["PP Q1"].append(perplexity_stats["pp_q1"])
+            iteration_data["PP Q3"].append(perplexity_stats["pp_q3"])
+
+            iteration_data["Correct (%)"].append(stats["accuracy"] * 100)
+            iteration_data["Wrong (%)"].append(100 - stats["accuracy"] * 100)
+            iteration_data["Empty (%)"].append(0.0)
+
+            for k in range(1, config["top_k"]):
+                iteration_data[f"Top-{k + 1}"].append(
+                    stats["top_k_correct_preds"][k] / stats["total_predictions"] * 100
+                )
+
+            iteration_data["Pred Time"].append(eval_time)
+            iteration_data["Train Time"].append(training_time)
+
+            iteration_data["Good Preds"].append(stats["correct_predictions"])
+            iteration_data["Tot Preds"].append(stats["total_predictions"])
+            iteration_data["Nb States"].append(None)
+
+            stats_to_log.append(
+                {
+                    "strategy": rl_name,
+                    "strategy_accuracy": stats["accuracy"] * 100,
+                    "strategy_perplexity": perplexity_stats["pp_harmonic_mean"],
+                    "strategy_eval_time": eval_time,
+                }
+            )
+
+            all_metrics[rl_name]["accuracies"].append(stats["accuracy"])
+            all_metrics[rl_name]["pp_arithmetic_mean"].append(perplexity_stats["pp_arithmetic_mean"])
+            all_metrics[rl_name]["pp_harmonic_mean"].append(perplexity_stats["pp_harmonic_mean"])
+            all_metrics[rl_name]["pp_median"].append(perplexity_stats["pp_median"])
+            all_metrics[rl_name]["pp_q1"].append(perplexity_stats["pp_q1"])
+            all_metrics[rl_name]["pp_q3"].append(perplexity_stats["pp_q3"])
+            for k in range(1, config["top_k"]):
+                all_metrics[rl_name][f"top-{k + 1}"].append(iteration_data[f"Top-{k + 1}"][-1])
+
+            all_metrics[rl_name]["pred_time"].append(eval_time)
+            all_metrics[rl_name]["train_time"].append(training_time)
+
+            all_metrics[rl_name]["num_states"].append(0)
+            all_metrics[rl_name]["mean_delay_error"].append(None)
+            all_metrics[rl_name]["mean_actual_delay"].append(None)
+            all_metrics[rl_name]["mean_normalized_error"].append(None)
+            all_metrics[rl_name]["num_delay_predictions"].append(None)
 
     # Create a DataFrame for the iteration and log it
     iteration_df = pd.DataFrame(iteration_data).round(2)

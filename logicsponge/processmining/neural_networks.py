@@ -3,6 +3,7 @@
 import copy
 import logging
 import time
+from dataclasses import dataclass
 
 import torch
 import torch.nn.functional as F  # noqa: N812
@@ -484,6 +485,249 @@ class PreprocessData:
 
         # Pad sequences, using 0 as the padding value
         return pad_sequence(processed_sequences, batch_first=True, padding_value=0)
+
+
+# === RL training/evaluation helpers for QNetwork (batch mode) ===
+RL_MIN_PREFIX_LEN = 2
+
+@dataclass
+class Transition:
+    """One offline RL transition for fitted Q-iteration."""
+
+    s: torch.Tensor         # prefix indices [len_s]
+    a: int                  # action index
+    r: float                # reward
+    s_next: torch.Tensor    # next prefix indices [len_s+1]
+    done: bool              # terminal flag
+
+def _sample_prefix_batch(batch_sequences: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+
+    Given a batch of padded sequences [B, L], sample one prefix per row and its next-token target.
+
+    Returns:
+        x_inputs: padded LongTensor [B_eff, L_max] of prefixes (padding=0)
+        y_targets: LongTensor [B_eff] of next tokens for each sampled prefix
+
+    Skips sequences shorter than RL_MIN_PREFIX_LEN.
+
+    """
+    device = batch_sequences.device
+    bsz, _ = batch_sequences.shape
+    inputs: list[torch.Tensor] = []
+    targets: list[int] = []
+
+    # compute effective lengths (exclude padding=0)
+    lengths = (batch_sequences != 0).sum(dim=1).tolist()
+
+    for b in range(bsz):
+        length = lengths[b]
+        if length is None or length < RL_MIN_PREFIX_LEN:
+            continue
+        # sample a cut point k in [1, length-1]
+        k = int(torch.randint(1, length, (1,), device=device).item())
+        prefix = batch_sequences[b, :k]  # shape [k]
+        target = int(batch_sequences[b, k].item())
+        inputs.append(prefix)
+        targets.append(target)
+
+    if not inputs:
+        # return empty tensors on the correct device
+        return (
+            torch.zeros(0, 1, dtype=torch.long, device=device),
+            torch.zeros(0, dtype=torch.long, device=device),
+        )
+
+    x_inputs = pad_sequence(inputs, batch_first=True, padding_value=0).to(device)
+    y_targets = torch.tensor(targets, dtype=torch.long, device=device)
+    return x_inputs, y_targets
+
+
+def train_rl(  # noqa: PLR0913, PLR0912, PLR0915, C901
+    model: QNetwork,
+    train_sequences: torch.Tensor,
+    val_sequences: torch.Tensor,
+    criterion: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    batch_size: int,
+    epochs: int = 10,
+    patience: int = 3,
+    *,
+    window_size: int | None = None,
+) -> QNetwork:
+    """
+    Train QNetwork in batch mode with the same learning rule as streaming RLMiner.
+
+    Train over mini-batches of prefixes with loss = CrossEntropy(logits_last_step, observed_action).
+    If window_size is provided, each sampled prefix is cropped to its last `window_size` tokens.
+
+    """
+    device = model.device or train_sequences.device
+
+    # Build full prefix -> next-token dataset (mirrors streaming updates over all events)
+    prefixes: list[torch.Tensor] = []
+    targets: list[int] = []
+    with torch.no_grad():
+        for i in range(train_sequences.shape[0]):
+            seq = train_sequences[i]
+            valid_len = int((seq != 0).sum().item())
+            if valid_len < RL_MIN_PREFIX_LEN:
+                continue
+            for k in range(1, valid_len):
+                prefix = seq[:k].clone()
+                if window_size is not None and prefix.numel() > window_size:
+                    prefix = prefix[-window_size:]
+                prefixes.append(prefix)
+                targets.append(int(seq[k].item()))
+
+    if not prefixes:
+        return model
+
+    def collate(batch: list[tuple[torch.Tensor, int]]) -> tuple[torch.Tensor, torch.Tensor]:
+        xs = [b[0] for b in batch]
+        ys = torch.tensor([b[1] for b in batch], dtype=torch.long)
+        x_pad = pad_sequence(xs, batch_first=True, padding_value=0)
+        return x_pad, ys
+
+    class PrefixDataset(torch.utils.data.Dataset):
+        def __init__(self, xs: list[torch.Tensor], ys: list[int]) -> None:
+            self.xs = xs
+            self.ys = ys
+
+        def __len__(self) -> int:
+            return len(self.xs)
+
+        def __getitem__(self, idx: int) -> tuple[torch.Tensor, int]:
+            return self.xs[idx], self.ys[idx]
+
+    dataset = PrefixDataset(prefixes, targets)
+    loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate)
+
+    # Use MSELoss to mirror streaming configuration; compare softmax(logits) to one-hot targets
+    mse = criterion if isinstance(criterion, nn.MSELoss) else nn.MSELoss()
+
+    best_val_acc = 0.0
+    best_state = None
+    patience_counter = 0
+
+    for _ in range(epochs):
+        model.train()
+        for x_pad, y in loader:
+            x_batch = x_pad.to(device)
+            y_batch = y.to(device)
+            logits = model(x_batch).squeeze(1)  # [B, vocab]
+            probs = F.softmax(logits, dim=-1)
+            # build one-hot targets [B, vocab]
+            target = torch.zeros_like(probs)
+            target.scatter_(1, y_batch.unsqueeze(1), 1.0)
+            loss = mse(probs, target)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+        # Validation: greedy accuracy on one random prefix per val sequence
+        model.eval()
+        correct, total = 0, 0
+        with torch.no_grad():
+            for i in range(val_sequences.shape[0]):
+                seq = val_sequences[i]
+                valid_len = int((seq != 0).sum().item())
+                if valid_len < RL_MIN_PREFIX_LEN:
+                    continue
+                k = int(torch.randint(1, valid_len, (1,), device=seq.device).item())
+                prefix = seq[:k].unsqueeze(0).to(device)
+                if window_size is not None and prefix.shape[1] > window_size:
+                    prefix = prefix[:, -window_size:]
+                logits = model(prefix).squeeze(1)  # [1, vocab]
+                pred = int(torch.argmax(logits, dim=-1).item())
+                target_idx = int(seq[k].item())
+                correct += 1 if pred == target_idx else 0
+                total += 1
+
+        val_acc = (correct / total) if total > 0 else 0.0
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                break
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
+    return model
+
+
+def evaluate_rl(
+    model: QNetwork,
+    sequences: torch.Tensor,
+    *,
+    max_k: int = 3,
+    idx_to_activity: dict[int, ActivityName] | None = None,
+    window_size: int | None = None,
+) -> tuple[dict[str, float | list[int]], list[float], float, list[str]]:
+    """
+
+    Evaluate QNetwork in batch mode by predicting next token for every prefix in each sequence.
+
+    Returns (stats, perplexities, eval_time, predicted_vector). Perplexities is empty for RL.
+    predicted_vector is a flattened list of predicted next-activity names/indices.
+
+    """
+    eval_start = time.time()
+    pause_time = 0.0
+
+    model.eval()
+    correct = 0
+    total = 0
+    top_k_correct = [0] * max_k
+    predicted_vector: list[str] = []
+
+    with torch.no_grad():
+        for i in range(sequences.shape[0]):
+            seq = sequences[i]
+            # build list of non-padding positions
+            valid_len = int((seq != 0).sum().item())
+            if valid_len < RL_MIN_PREFIX_LEN:
+                continue
+            # iterate over prefixes
+            for k in range(1, valid_len):
+                prefix = seq[:k].unsqueeze(0)  # [1, k]
+                if window_size is not None and prefix.shape[1] > window_size:
+                    prefix = prefix[:, -window_size:]
+                q_vals = model(prefix).squeeze(1).squeeze(0)  # [vocab]
+                topk = torch.topk(q_vals, k=max_k)
+                pred_idx = int(topk.indices[0].item())
+
+                # map to activity name if provided
+                if idx_to_activity is not None and pred_idx in idx_to_activity:
+                    predicted_vector.append(str(idx_to_activity[pred_idx]))
+                else:
+                    predicted_vector.append(str(pred_idx))
+
+                target_idx = int(seq[k].item())
+                total += 1
+                if pred_idx == target_idx:
+                    correct += 1
+                    for j in range(max_k):
+                        top_k_correct[j] += 1
+                else:
+                    # count inclusion in top-k
+                    for j in range(max_k):
+                        if target_idx in {int(x) for x in topk.indices[: j + 1].tolist()}:
+                            top_k_correct[j] += 1
+
+    accuracy = (correct / total) if total > 0 else 0.0
+    stats = {
+        "accuracy": accuracy,
+        "total_predictions": total,
+        "correct_predictions": correct,
+        "top_k_correct_preds": top_k_correct,
+    }
+    eval_time = time.time() - eval_start - pause_time
+    perplexities: list[float] = []  # not computed for RL
+    return stats, perplexities, eval_time, predicted_vector
 
 
 def train_rnn( # noqa: PLR0913 PLR0915

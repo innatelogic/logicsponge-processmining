@@ -1657,13 +1657,13 @@ class RLMiner(NeuralNetworkMiner):
     - optional: event['reward'] (numeric). If not present, reward defaults to 0.0 (no update).
     """
 
-    def __init__(self, *args: dict[str, Any], model: QNetwork, batch_size: int,
+    def __init__(self, *args: dict[str, Any], model: QNetwork,
                  optimizer, criterion,
                  sequence_buffer_length: int = 50, long_term_mem_size: int = 10,
                  short_term_mem_size: int | None = None, **kwargs: dict[str, Any]) -> None:
         """Initialize the RLMiner class."""
         # Initialize parent
-        super().__init__(*args, model=model, batch_size=batch_size, optimizer=optimizer, criterion=criterion, **kwargs)
+        super().__init__(*args, model=model, batch_size=8, optimizer=optimizer, criterion=criterion, **kwargs)
 
         # Buffering parameters
         if short_term_mem_size is None:
@@ -1702,7 +1702,9 @@ class RLMiner(NeuralNetworkMiner):
             removed = self.sequences[case_id].pop(0)
             if logger.isEnabledFor(logging.DEBUG):
                 removed_name = self.index_activity.get(removed, f"<unk:{removed}>")
-                logger.debug("[RLMiner._enqueue_activity] case=%s truncating oldest idx=%s (%s)", case_id, removed, removed_name)
+                logger.debug(
+                    "[RLMiner._enqueue_activity] case=%s truncating oldest idx=%s (%s)", case_id, removed, removed_name
+                )
 
     def update(self, event: Event) -> None:
         """

@@ -116,7 +116,7 @@ SOFT_VOTING_NGRAMS = [
     (2, 3, 4, 5),
 ]  # (2, 3, 6, 8), (2, 3, 5, 6), (2, 3, 4, 6), (2, 3, 6, 7), (2, 3, 7, 8), (2, 3, 6, 8)
 
-WINDOW_RANGE = [0, 1, 2, 3, 4, 5, 6, 7, 8]  # , 9, 10, 12, 14, 16]
+WINDOW_RANGE = [1, 2, 3, 4, 5, 8]  # 0, 1, 2, 3, 4, 5, 6, 7, 8 , 9, 10, 12, 14, 16]
 
 NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 # ] + [
@@ -128,6 +128,10 @@ NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 
 NGRAM_RETURN_TO_INITIAL = True
 # ============================================================
+
+# RL (QNetwork) window configurations
+RL_WINDOWS = [4, 8, 24]
+RL_NAMES = [f"qlearning_win{w}" for w in RL_WINDOWS]
 
 fpt = StreamingActivityPredictor(
     strategy=BasicMiner(algorithm=FrequencyPrefixTree(), config=config),
@@ -366,29 +370,30 @@ transformer = StreamingActivityPredictor(
     )
 )
 
-# instantiate q-learning model and wrap in RLMiner
-model_qlearning = QNetwork(
-    vocab_size=vocab_size,
-    embedding_dim=embedding_dim,
-    hidden_dim=hidden_dim,
-    output_dim=output_dim,
-    device=device
-).to(device)
-criterion_q = nn.MSELoss()  # placeholder; RLMiner uses log-prob based updates
-optimizer_q = optim.Adam(model_qlearning.parameters(), lr=0.001)
+# RL (QNetwork) models built in a loop
+RL_MODELS: dict[str, StreamingActivityPredictor] = {}
+for w in RL_WINDOWS:
+    model_qlearning = QNetwork(
+        vocab_size=vocab_size,
+        embedding_dim=embedding_dim,
+        hidden_dim=hidden_dim,
+        output_dim=output_dim,
+        device=device,
+    ).to(device)
+    criterion_q = nn.MSELoss()
+    optimizer_q = optim.Adam(model_qlearning.parameters(), lr=0.001)
 
-qlearning_vanilla = StreamingActivityPredictor(
-    strategy=RLMiner(
-        model=model_qlearning,
-        criterion=criterion_q,
-        optimizer=optimizer_q,
-        batch_size=8,
-        config=config,
-        sequence_buffer_length=24, # has to be enough to cover short_term_mem_size
-        long_term_mem_size=8,
-        short_term_mem_size=16, # ~n in n-gram
+    RL_MODELS[f"qlearning_win{w}"] = StreamingActivityPredictor(
+        strategy=RLMiner(
+            model=model_qlearning,
+            criterion=criterion_q,
+            optimizer=optimizer_q,
+            config=config,
+            sequence_buffer_length=w,  # has to be enough to cover short_term_mem_size
+            long_term_mem_size=8,
+            short_term_mem_size=16,  # ~n in n-gram
+        )
     )
-)
 
 # ====================================================
 # Sponge
@@ -414,7 +419,7 @@ models = [
     *list(soft_voting_predictors.keys()),  # Add all soft_voting predictor names
     "lstm",
     "transformer",
-    "qlearning_vanilla",
+    *RL_NAMES,
 ]
 
 
@@ -510,11 +515,11 @@ sponge = (
             )
             for name in NGRAM_NAMES
         )
-        | (
-            fallback
-            * PredictionCSVWriter(csv_path=predictions_dir / "fallback.csv", model_name="fallback")
-            * Evaluation("fallback")
-        )
+        # | (
+        #     fallback
+        #     * PredictionCSVWriter(csv_path=predictions_dir / "fallback.csv", model_name="fallback")
+        #     * Evaluation("fallback")
+        # )
         # | (fallback_ngram8to2 * Evaluation("fallback_ngram8to2"))
         # | (fallback_ngram8to3 * Evaluation("fallback_ngram8to3"))
         # | (fallback_ngram8to4 * Evaluation("fallback_ngram8to4"))
@@ -528,16 +533,16 @@ sponge = (
             * Evaluation("hard_voting")
         )
         # | (adaptive_voting * Evaluation("adaptive_voting"))
-        | (
-            soft_voting
-            * PredictionCSVWriter(csv_path=predictions_dir / "soft_voting.csv", model_name="soft_voting")
-            * Evaluation("soft_voting")
-        )
-        | (
-            soft_voting_star
-            * PredictionCSVWriter(csv_path=predictions_dir / "soft_voting_star.csv", model_name="soft_voting_star")
-            * Evaluation("soft_voting_star")
-        )
+        # | (
+        #     soft_voting
+        #     * PredictionCSVWriter(csv_path=predictions_dir / "soft_voting.csv", model_name="soft_voting")
+        #     * Evaluation("soft_voting")
+        # )
+        # | (
+        #     soft_voting_star
+        #     * PredictionCSVWriter(csv_path=predictions_dir / "soft_voting_star.csv", model_name="soft_voting_star")
+        #     * Evaluation("soft_voting_star")
+        # )
         # Add all soft_voting_predictors to the pipeline
         | (
             (
@@ -562,13 +567,14 @@ sponge = (
             * Evaluation("transformer")
         )
         | (
-            AddStartSymbol(start_symbol=start_symbol)
-            * qlearning_vanilla
-            * DataItemFilter(data_item_filter=start_filter)
-            * PredictionCSVWriter(
-                csv_path=predictions_dir / "qlearning_vanilla.csv", model_name="qlearning_vanilla"
+            (
+                AddStartSymbol(start_symbol=start_symbol)
+                * RL_MODELS[name]
+                * DataItemFilter(data_item_filter=start_filter)
+                * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name)
+                * Evaluation(name)
             )
-            * Evaluation("qlearning_vanilla")
+            for name in RL_NAMES
         )
     )
     * ls.MergeToSingleStream()
