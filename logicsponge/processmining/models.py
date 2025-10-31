@@ -1657,8 +1657,8 @@ class RLMiner(NeuralNetworkMiner):
     - optional: event['reward'] (numeric). If not present, reward defaults to 0.0 (no update).
     """
 
-    def __init__(self, *args: dict[str, Any], model: QNetwork,
-                 optimizer, criterion,
+    def __init__(self, *args: dict[str, Any], model: QNetwork,  # noqa: PLR0913
+                 optimizer, criterion,  # noqa: ANN001
                  sequence_buffer_length: int = 50, long_term_mem_size: int = 10,
                  short_term_mem_size: int | None = None, **kwargs: dict[str, Any]) -> None:
         """Initialize the RLMiner class."""

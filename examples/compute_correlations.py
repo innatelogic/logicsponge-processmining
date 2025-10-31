@@ -191,7 +191,7 @@ def sample_metrics_from_cumsums(
     return t_points, corr, anticorr, sim
 
 
-def build_app(results_root: Path, run_dir: Path) -> Dash:
+def build_app(results_root: Path, run_dir: Path) -> Dash:  # noqa: C901, PLR0915
     """Create and return the Dash app with an experiment selector for runs under results_root."""
     # Prepare initial data from the selected run
     pred_dir = run_dir / "predictions"
@@ -304,7 +304,9 @@ def build_app(results_root: Path, run_dir: Path) -> Dash:
             strats = sorted(model_s.keys())
             if not strats:
                 msg = "No strategies found in selected run"
-                raise RuntimeError(msg)
+                # Avoid raising an exception inside the inner callback; return no_update so the UI remains stable
+                print(f"Warning: {msg} in {experiment_path}")
+                return no_update, no_update, no_update, no_update, no_update, no_update, no_update
             default_test = "ngram_3" if "ngram_3" in strats else strats[0]
             ref_cands = [*strats, "actual"]
 

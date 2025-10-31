@@ -3,8 +3,10 @@
 import json
 import logging
 import time
+from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -103,7 +105,7 @@ def process_neural_model(  # noqa: PLR0913
     nn_val_set_transformed: torch.Tensor,
     nn_test_set_transformed: torch.Tensor,
     epochs: int = 20,
-) -> None:
+)-> None:
     """Train and evaluate a NN model."""
     match name:
         case "LSTM":
@@ -210,8 +212,87 @@ NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 # ============================================================
 
 # RL (QNetwork) window configurations (for looped creation of models)
-RL_WINDOWS = [4, 8, 24]
+RL_WINDOWS = [4, 5, 6, 7, 8, 24]
 RL_MODEL_NAMES = [f"qlearning_win{w}" for w in RL_WINDOWS]
+
+
+def qnetwork_model() -> tuple[QNetwork, optim.Optimizer, nn.Module]:
+    """Initialize a QNetwork model for RL training."""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    vocab_size = 50  # Assume an upper bound on the number of activities
+    embedding_dim = 50
+
+    hidden_dim = 128
+    output_dim = vocab_size  # Output used to predict the next activity
+
+    model = QNetwork(
+        vocab_size=vocab_size,
+        embedding_dim=embedding_dim,
+        hidden_dim=hidden_dim,
+        output_dim=output_dim,
+        device=device,
+    ).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    criterion = nn.MSELoss()  # Use MSE for Q-learning
+
+    return model, optimizer, criterion
+
+
+@dataclass
+class RLModelResults:
+    """Results from training/evaluating an RL model."""
+
+    acc: float
+    top_2: float
+    top_3: float
+    perplexities: list[float]
+    train_time: float
+
+
+def process_rl_model(
+    name: str,
+    window_size: int,
+    iteration_data: dict[str, Any],
+    nn_train_set_transformed: torch.Tensor,
+    nn_val_set_transformed: torch.Tensor,
+    epochs: int = 20,
+) -> tuple[dict[str, Any], list[Any], float, list[Any], float]:
+    """Train and evaluate a Q-learning model with specified window size."""
+    start_time = time.time()
+
+    # Initialize model
+    model, optimizer, criterion = qnetwork_model()
+
+    # Train model
+    model = train_rl(
+        model=model,
+        train_sequences=nn_train_set_transformed,
+        val_sequences=nn_val_set_transformed,
+        criterion=criterion,
+        optimizer=optimizer,
+        batch_size=8,
+        epochs=epochs,
+        window_size=window_size,
+        gamma=0.99,  # Standard RL discount factor
+    )
+
+    train_time = time.time() - start_time
+
+    # Evaluate on validation set
+    model.eval()
+    with torch.no_grad():
+        # evaluate_rl returns: metrics, perplexities, eval_time, prediction_vector
+        metrics, val_pp, eval_time, prediction_vector = evaluate_rl(
+            model=model,
+            sequences=nn_val_set_transformed,
+            max_k=3,
+            idx_to_activity=nn_processor.idx_to_activity,
+            window_size=window_size,
+        )
+
+    # Return the relevant outputs so the caller can integrate them into iteration records
+    return metrics, val_pp, eval_time, prediction_vector, train_time
 
 mpl.use("Agg")
 
@@ -269,7 +350,8 @@ torch.cuda.manual_seed(123)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-NN_TRAINING = True
+ML_TRAINING = True
+NN_TRAINING = False
 ALERGIA_TRAINING = False
 SHOW_DELAYS = False
 
@@ -357,6 +439,22 @@ logger.debug("Expected iterations: %s", n_iterations)
 
 # Repeat the experiment n_iterations times
 for iteration in range(n_iterations):
+    # Dictionary to store this iteration's metrics
+    iteration_metrics: dict[str, Any] = {}
+
+    # RL models will be trained/evaluated later (after NN preprocessing) to ensure train/val splits are available
+
+    # Store iteration metrics in global metrics
+    for name, metrics in iteration_metrics.items():
+        all_metrics[name]["accuracies"].append(metrics["acc"])
+        all_metrics[name]["top-2"].append(metrics["top-2"])
+        all_metrics[name]["top-3"].append(metrics["top-3"])
+        all_metrics[name]["pp_arithmetic_mean"].append(compute_perplexity_stats(metrics["perplexities"])["arithmetic_mean"])
+        all_metrics[name]["pp_harmonic_mean"].append(compute_perplexity_stats(metrics["perplexities"])["harmonic_mean"])
+        all_metrics[name]["pp_median"].append(compute_perplexity_stats(metrics["perplexities"])["median"])
+        all_metrics[name]["pp_q1"].append(compute_perplexity_stats(metrics["perplexities"])["q1"])
+        all_metrics[name]["pp_q3"].append(compute_perplexity_stats(metrics["perplexities"])["q3"])
+        all_metrics[name]["train_time"].append(metrics["train_time"])
     msg = f"Starting iteration {iteration + 1}/{n_iterations}..."
     logger.info(msg)
 
@@ -372,7 +470,7 @@ for iteration in range(n_iterations):
     else:
         # Warning: Synthetic_Train must not be split, but thus the validation set is not correctly generated
         train_set_transformed, val_set_transformed, test_set_transformed = data, data_test, data_test
-        # NN_TRAINING = False
+        # ML_TRAINING = False
 
     # Train set for process miners
     train_set = interleave_sequences(train_set_transformed, random_index=False)
@@ -923,88 +1021,67 @@ for iteration in range(n_iterations):
         all_metrics[strategy_name]["num_delay_predictions"].append(delay_count)
 
     # LSTM + Transformer + RL Evaluation
-    if NN_TRAINING:
-        # For RNNs: Append START symbol
-        nn_train_set_transformed = add_start_to_sequences(train_set_transformed, start_symbol)
-        nn_val_set_transformed = add_start_to_sequences(val_set_transformed, start_symbol)
-        nn_test_set_transformed = add_start_to_sequences(test_set_transformed, start_symbol)
+    if ML_TRAINING:
+        # For RNNs: Transform sequences with start/stop symbols first
+        nn_train_set_transformed = train_set_transformed
+        nn_val_set_transformed = val_set_transformed
+        nn_test_set_transformed = test_set_transformed
 
+        # Add START symbol for RNN models
+        nn_train_set_transformed = add_start_to_sequences(nn_train_set_transformed, start_symbol)
+        nn_val_set_transformed = add_start_to_sequences(nn_val_set_transformed, start_symbol)
+        nn_test_set_transformed = add_start_to_sequences(nn_test_set_transformed, start_symbol)
+
+        # Preprocess into tensor format
         nn_train_set_transformed = nn_processor.preprocess_data(nn_train_set_transformed)
         nn_val_set_transformed = nn_processor.preprocess_data(nn_val_set_transformed)
         nn_test_set_transformed = nn_processor.preprocess_data(nn_test_set_transformed)
 
-        for name in ["LSTM", "transformer"]:
-            msg = f"Training and evaluating {name} model..."
-            logger.info(msg)
-            process_neural_model(
-                name=name,
-                iteration_data=iteration_data,
-                all_metrics=all_metrics,
-                nn_train_set_transformed=nn_train_set_transformed,
-                nn_val_set_transformed=nn_val_set_transformed,
-                nn_test_set_transformed=nn_test_set_transformed,
-            )
-        # After NN evaluation in this iteration, print a short summary of NN entries
-        for nn_name in ("LSTM", "transformer"):
-            vecs = prediction_vectors_memory.get(nn_name, [])
-            if vecs:
-                last = vecs[-1]
-                logger.debug(
-                    "NN stored preds | model=%s | iter=%d | preds_len=%d | sample=%s",
-                    nn_name,
-                    iteration + 1,
-                    len(last) if hasattr(last, "__len__") else -1,
-                    last[:10] if hasattr(last, "__getitem__") else repr(last)[:200],
+        if NN_TRAINING:
+            for name in ["LSTM", "transformer"]:
+                msg = f"Training and evaluating {name} model..."
+                logger.info(msg)
+                process_neural_model(
+                    name=name,
+                    iteration_data=iteration_data,
+                    all_metrics=all_metrics,
+                    nn_train_set_transformed=nn_train_set_transformed,
+                    nn_val_set_transformed=nn_val_set_transformed,
+                    nn_test_set_transformed=nn_test_set_transformed,
                 )
-            else:
-                logger.debug("NN stored preds | model=%s | iter=%d | (no preds stored)", nn_name, iteration + 1)
+            # After NN evaluation in this iteration, print a short summary of NN entries
+            for nn_name in ("LSTM", "transformer"):
+                vecs = prediction_vectors_memory.get(nn_name, [])
+                if vecs:
+                    last = vecs[-1]
+                    logger.debug(
+                        "NN stored preds | model=%s | iter=%d | preds_len=%d | sample=%s",
+                        nn_name,
+                        iteration + 1,
+                        len(last) if hasattr(last, "__len__") else -1,
+                        last[:10] if hasattr(last, "__getitem__") else repr(last)[:200],
+                    )
+                else:
+                    logger.debug("NN stored preds | model=%s | iter=%d | (no preds stored)", nn_name, iteration + 1)
 
-        # RL (QNetwork) evaluation in batch mode (no RLMiner). Mirrors streaming windows.
-        vocab_size = 50
-        embedding_dim = 50
-        hidden_dim = 128
-        output_dim = vocab_size
-
+        # RL (QNetwork) evaluation in batch mode (no RLMiner). Use process_rl_model to run training/eval
         for w in RL_WINDOWS:
             rl_name = f"qlearning_win{w}"
             logger.info("Training and evaluating %s model...", rl_name)
-            model_q = QNetwork(
-                vocab_size=vocab_size,
-                embedding_dim=embedding_dim,
-                hidden_dim=hidden_dim,
-                output_dim=output_dim,
-                device=device,
-            ).to(device)
-            # Use MSELoss to be consistent with streaming RL configuration
-            criterion = nn.MSELoss()
-            optimizer = optim.Adam(model_q.parameters(), lr=0.008)
 
-            start_time = time.time()
-            model_q = train_rl(
-                model_q,
+            metrics, perplexities, eval_time, prediction_vector, training_time = process_rl_model(
+                rl_name,
+                w,
+                iteration_data,
                 nn_train_set_transformed,
                 nn_val_set_transformed,
-                criterion,
-                optimizer,
-                batch_size=8,
-                # Train exactly one pass over all sequences (one epoch = one full pass)
-                epochs=1,
-                window_size=w,
-            )
-            end_time = time.time()
-            training_time = (end_time - start_time) * SEC_TO_MICRO / (TRAIN_EVENTS + VAL_EVENTS)
-
-            stats, perplexities, eval_time, prediction_vector = evaluate_rl(
-                model_q,
-                nn_test_set_transformed,
-                max_k=config["top_k"],
-                idx_to_activity=nn_processor.idx_to_activity,
-                window_size=w,
+                epochs=20,
             )
 
+            # Store prediction vector like other strategies
             prediction_vectors_memory.setdefault(rl_name, []).append(prediction_vector)
 
-            # RL perplexity is not defined; store None-based placeholders
+            # Keep the same placeholders for RL perplexity as before
             perplexity_stats = {
                 "pp_harmonic_mean": None,
                 "pp_arithmetic_mean": None,
@@ -1012,12 +1089,13 @@ for iteration in range(n_iterations):
                 "pp_q1": None,
                 "pp_q3": None,
             }
+
             eval_time *= SEC_TO_MICRO / TEST_EVENTS
 
             if (
-                not isinstance(stats["top_k_correct_preds"], list)
-                or not isinstance(stats["total_predictions"], int)
-                or not isinstance(stats["accuracy"], float)
+                not isinstance(metrics["top_k_correct_preds"], list)
+                or not isinstance(metrics["total_predictions"], int)
+                or not isinstance(metrics["accuracy"], float)
             ):
                 msg = f"{rl_name} stats are not in the expected format."
                 raise TypeError(msg)
@@ -1030,32 +1108,32 @@ for iteration in range(n_iterations):
             iteration_data["PP Q1"].append(perplexity_stats["pp_q1"])
             iteration_data["PP Q3"].append(perplexity_stats["pp_q3"])
 
-            iteration_data["Correct (%)"].append(stats["accuracy"] * 100)
-            iteration_data["Wrong (%)"].append(100 - stats["accuracy"] * 100)
+            iteration_data["Correct (%)"].append(metrics["accuracy"] * 100)
+            iteration_data["Wrong (%)"].append(100 - metrics["accuracy"] * 100)
             iteration_data["Empty (%)"].append(0.0)
 
             for k in range(1, config["top_k"]):
                 iteration_data[f"Top-{k + 1}"].append(
-                    stats["top_k_correct_preds"][k] / stats["total_predictions"] * 100
+                    metrics["top_k_correct_preds"][k] / metrics["total_predictions"] * 100
                 )
 
             iteration_data["Pred Time"].append(eval_time)
             iteration_data["Train Time"].append(training_time)
 
-            iteration_data["Good Preds"].append(stats["correct_predictions"])
-            iteration_data["Tot Preds"].append(stats["total_predictions"])
+            iteration_data["Good Preds"].append(metrics["correct_predictions"])
+            iteration_data["Tot Preds"].append(metrics["total_predictions"])
             iteration_data["Nb States"].append(None)
 
             stats_to_log.append(
                 {
                     "strategy": rl_name,
-                    "strategy_accuracy": stats["accuracy"] * 100,
+                    "strategy_accuracy": metrics["accuracy"] * 100,
                     "strategy_perplexity": perplexity_stats["pp_harmonic_mean"],
                     "strategy_eval_time": eval_time,
                 }
             )
 
-            all_metrics[rl_name]["accuracies"].append(stats["accuracy"])
+            all_metrics[rl_name]["accuracies"].append(metrics["accuracy"])
             all_metrics[rl_name]["pp_arithmetic_mean"].append(perplexity_stats["pp_arithmetic_mean"])
             all_metrics[rl_name]["pp_harmonic_mean"].append(perplexity_stats["pp_harmonic_mean"])
             all_metrics[rl_name]["pp_median"].append(perplexity_stats["pp_median"])
