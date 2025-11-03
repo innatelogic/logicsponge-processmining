@@ -1,0 +1,13 @@
+{
+  "nn": {
+    "lr": 0.001,
+    "batch_size": 8,
+    "epochs": 20
+  },
+  "rl": {
+    "lr": 0.001,
+    "batch_size": 4,
+    "epochs": 20,
+    "gamma": 0.99
+  }
+}

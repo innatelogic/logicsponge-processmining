@@ -35,6 +35,8 @@ import pandas as pd
 import plotly.graph_objs as go
 from dash import Dash, Input, Output, dcc, html, no_update
 
+from logicsponge.processmining.config import DEFAULT_CONFIG
+
 
 def find_latest_run(results_root: Path) -> Path | None:
     """
@@ -138,6 +140,18 @@ def compute_pair_cumsums(
     a = np.asarray(act[:n], dtype=object)
     t = np.asarray(test_seq[:n], dtype=object)
     r = np.asarray(ref_seq[:n], dtype=object)
+
+    # Remove positions where either tested or reference produced an empty prediction
+    # Empty prediction symbol is defined in DEFAULT_CONFIG
+    empty_symbol = DEFAULT_CONFIG.get("empty_symbol")
+    if empty_symbol is not None:
+        valid_mask = (t != empty_symbol) & (r != empty_symbol)
+        # Apply mask to all three arrays
+        a = a[valid_mask]
+        t = t[valid_mask]
+        r = r[valid_mask]
+    # Recompute n after filtering
+    n = len(a)
 
     eq_ref_base = (r == a)
     eq_test_base = (t == a)

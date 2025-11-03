@@ -71,6 +71,7 @@ class Config(TypedDict, total=True):
     # Process mining core configuration
     start_symbol: ActivityName
     stop_symbol: ActivityName
+    empty_symbol: ActivityName
     discount_factor: float
     randomized: bool
     top_k: int

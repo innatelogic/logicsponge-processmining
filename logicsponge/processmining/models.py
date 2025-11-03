@@ -22,7 +22,7 @@ import torch
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
 
-from logicsponge.processmining.config import update_config
+from logicsponge.processmining.config import DEFAULT_CONFIG, update_config
 from logicsponge.processmining.data_utils import add_input_symbols_sequence
 from logicsponge.processmining.neural_networks import LSTMModel, QNetwork, RNNModel, TransformerModel
 from logicsponge.processmining.types import (
@@ -307,7 +307,7 @@ class StreamingMiner(ABC):
 
                 # Collect predicted activity (skip empty predictions) in order
                 predicted_vector.append(
-                    prediction["activity"] if prediction is not None else "N/A"
+                    prediction["activity"] if prediction is not None else DEFAULT_CONFIG["empty_symbol"]
                 )
 
                 pause_start_time = time.time()
@@ -1728,25 +1728,25 @@ class RLMiner(NeuralNetworkMiner):
             logger.debug("[RLMiner.update] current_seq idx=%s", current_seq)
             logger.debug("[RLMiner.update] current_seq names=%s", seq_names)
 
-        # Compute reward based on model prediction from current context (for logging only)
+        # Compute reward based on model prediction from current context (for logging and optional external reward)
         if current_seq and len(current_seq) >= 1:
             probs = self.idx_sequence_probs(current_seq)
             pred = probs_prediction(probs, config=self.config)
 
-            # top_k = self.config.get("top_k", 5)
-            # sorted_probs = sorted(probs.items(), key=lambda x: x[1], reverse=True)
-            # logger.debug("[RLMiner.update] predicted winner: %s", pred.get("activity") if pred is not None else None)
-            # logger.debug("[RLMiner.update] predicted top-%s: %s", top_k, sorted_probs[:top_k])
+            # External reward (from event) takes precedence when provided.
+            # If absent, fall back to a simple 0/1 reward computed from whether
+            # the model predicted the observed activity.
+            env_reward = event.get("reward", None)
+            computed_reward = 1.0 if pred is not None and pred.get("activity") == activity else 0.0
+            effective_reward = float(env_reward) if env_reward is not None else computed_reward
 
-            reward =  1.0 if pred is not None and pred.get("activity") == activity else 0.0
+            # If an external reward was supplied, store it for potential batch RL updates
+            if env_reward is not None:
+                self.case_rewards[case_id] = effective_reward
 
-            # logger.debug(
-            #     "[RLMiner.update] reward=%s (pred==obs? %s, with pred: %s, actual: %s)",
-            #     reward, reward == 1.0, pred.get("activity") if pred is not None else None, activity
-            # )
-
-            # Compute policy loss on the observed action (always update):
-            # loss = -log_prob(observed_activity | current_seq)
+            # Compute policy loss on the observed action. If an external reward is
+            # provided we apply REINFORCE-style scaling (loss = -reward * log_prob).
+            # Otherwise preserve the original behavior (loss = -log_prob).
             self.model.train()
             self.optimizer.zero_grad()
 
@@ -1765,10 +1765,13 @@ class RLMiner(NeuralNetworkMiner):
 
             if target_idx < log_probs.shape[0]:
                 lp = log_probs[target_idx]
-                loss = -lp  # always learn from the observed action (no reward gating)
+                if env_reward is not None:
+                    loss = -effective_reward * lp
+                else:
+                    loss = -lp
                 logger.debug(
                     "[RLMiner.update] target_idx=%s activity=%s log_prob=%.6f reward=%s effective_loss=%.6f vocab=%s",
-                    target_idx, activity, lp.item(), reward, loss.item(), log_probs.shape[0]
+                    target_idx, activity, lp.item(), effective_reward, loss.item(), log_probs.shape[0]
                 )
                 loss.backward()
                 self.optimizer.step()

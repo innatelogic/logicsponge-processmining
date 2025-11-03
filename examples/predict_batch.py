@@ -24,6 +24,31 @@ logging.basicConfig(
     format="%(message)s",
 )
 
+# Load run configuration (learning rates, batch sizes, epochs for NN and RL)
+config_file_path = Path(__file__).parent / "predict_config.json"
+default_run_config = {
+    "nn": {
+        "lr": 0.001,
+        "batch_size": 8,
+        "epochs": 20
+    },
+    "rl": {
+        "lr": 0.001,
+        "batch_size": 8,
+        "epochs": 20,
+        "gamma": 0.99
+    }
+}
+try:
+    if config_file_path.exists():
+        with config_file_path.open("r") as _f:
+            run_config = json.load(_f)
+    else:
+        run_config = default_run_config
+except (json.JSONDecodeError, OSError):
+    # Fallback to defaults if the config file is malformed or unreadable
+    run_config = default_run_config
+
 from logicsponge.processmining.algorithms_and_structures import (
     Bag,
     BayesianClassifier,
@@ -69,22 +94,22 @@ SEC_TO_MICRO = 1_000_000
 
 def lstm_model() -> tuple[LSTMModel, optim.Optimizer, nn.Module]:
     """Initialize and return an LSTM model, optimizer, and loss function."""
-    vocab_size = 50  # Assume an upper bound on the number of activities
-    embedding_dim = 50
+    vocab_size = 64  # Assume an upper bound on the number of activities
+    embedding_dim = 64
 
     hidden_dim = 128
     output_dim = vocab_size  # Output used to predict the next activity
 
     model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, use_one_hot=True, device=device)
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    optimizer = optim.Adam(model.parameters(), lr=run_config.get("nn", {}).get("lr", 0.001))
     return model, optimizer, criterion
 
 
 def transformer_model() -> tuple[TransformerModel, optim.Optimizer, nn.Module]:
     """Initialize and return a Transformer model, optimizer, and loss function."""
-    vocab_size = 50  # Assume an upper bound on the number of activities
-    embedding_dim = 50
+    vocab_size = 64  # Assume an upper bound on the number of activities
+    embedding_dim = 64
 
     hidden_dim = 128
     output_dim = vocab_size  # Output used to predict the next activity
@@ -93,7 +118,7 @@ def transformer_model() -> tuple[TransformerModel, optim.Optimizer, nn.Module]:
         vocab_size, embedding_dim, hidden_dim, output_dim, use_one_hot=True, device=device, max_seq_len=max_seq_length+2
     )  # +2 for start and stop symbols
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    optimizer = optim.Adam(model.parameters(), lr=run_config.get("nn", {}).get("lr", 0.001))
     return model, optimizer, criterion
 
 
@@ -119,7 +144,13 @@ def process_neural_model(  # noqa: PLR0913
     # Train the LSTM on the train set with batch size and sequence-to-sequence targets
     start_time = time.time()
     model = train_rnn(
-        model, nn_train_set_transformed, nn_val_set_transformed, criterion, optimizer, batch_size=8, epochs=epochs
+        model,
+        nn_train_set_transformed,
+        nn_val_set_transformed,
+        criterion,
+        optimizer,
+        batch_size=run_config.get("nn", {}).get("batch_size", 8),
+        epochs=epochs,
     )
     end_time = time.time()
     training_time = (end_time - start_time) * SEC_TO_MICRO / (TRAIN_EVENTS + VAL_EVENTS)
@@ -212,7 +243,7 @@ NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 # ============================================================
 
 # RL (QNetwork) window configurations (for looped creation of models)
-RL_WINDOWS = [4, 5, 6, 7, 8, 24]
+RL_WINDOWS = WINDOW_RANGE
 RL_MODEL_NAMES = [f"qlearning_win{w}" for w in RL_WINDOWS]
 
 
@@ -220,10 +251,10 @@ def qnetwork_model() -> tuple[QNetwork, optim.Optimizer, nn.Module]:
     """Initialize a QNetwork model for RL training."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    vocab_size = 50  # Assume an upper bound on the number of activities
-    embedding_dim = 50
+    vocab_size = 32  # Assume an upper bound on the number of activities
+    embedding_dim = 32
 
-    hidden_dim = 128
+    hidden_dim = 512
     output_dim = vocab_size  # Output used to predict the next activity
 
     model = QNetwork(
@@ -233,7 +264,7 @@ def qnetwork_model() -> tuple[QNetwork, optim.Optimizer, nn.Module]:
         output_dim=output_dim,
         device=device,
     ).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    optimizer = optim.Adam(model.parameters(), lr=run_config.get("rl", {}).get("lr", 0.001))
     criterion = nn.MSELoss()  # Use MSE for Q-learning
 
     return model, optimizer, criterion
@@ -251,14 +282,21 @@ class RLModelResults:
 
 
 def process_rl_model(
-    name: str,
+    _name: str,
     window_size: int,
-    iteration_data: dict[str, Any],
+    _iteration_data: dict[str, Any],
     nn_train_set_transformed: torch.Tensor,
     nn_val_set_transformed: torch.Tensor,
+    nn_eval_set_transformed: torch.Tensor,
     epochs: int = 20,
 ) -> tuple[dict[str, Any], list[Any], float, list[Any], float]:
-    """Train and evaluate a Q-learning model with specified window size."""
+    """
+    Train and evaluate a Q-learning model with specified window size.
+
+    Evaluation is performed on the same sequences as other models (test set),
+    transformed to tensor format, and intentionally WITHOUT an added START token
+    so that prediction vectors align with the common "actual" baseline.
+    """
     start_time = time.time()
 
     # Initialize model
@@ -271,28 +309,28 @@ def process_rl_model(
         val_sequences=nn_val_set_transformed,
         criterion=criterion,
         optimizer=optimizer,
-        batch_size=8,
+        batch_size=run_config.get("rl", {}).get("batch_size", 4),
         epochs=epochs,
         window_size=window_size,
-        gamma=0.99,  # Standard RL discount factor
+        gamma=run_config.get("rl", {}).get("gamma", 0.99),  # Standard RL discount factor
     )
 
     train_time = time.time() - start_time
 
-    # Evaluate on validation set
+    # Evaluate on the common evaluation set (same sequences as other models)
     model.eval()
     with torch.no_grad():
         # evaluate_rl returns: metrics, perplexities, eval_time, prediction_vector
-        metrics, val_pp, eval_time, prediction_vector = evaluate_rl(
+        metrics, eval_pp, eval_time, prediction_vector = evaluate_rl(
             model=model,
-            sequences=nn_val_set_transformed,
+            sequences=nn_eval_set_transformed,
             max_k=3,
             idx_to_activity=nn_processor.idx_to_activity,
             window_size=window_size,
         )
 
     # Return the relevant outputs so the caller can integrate them into iteration records
-    return metrics, val_pp, eval_time, prediction_vector, train_time
+    return metrics, eval_pp, eval_time, prediction_vector, train_time
 
 mpl.use("Agg")
 
@@ -301,6 +339,13 @@ pd.set_option("display.expand_frame_repr", False)  # Prevent line-wrapping # noq
 
 logger = logging.getLogger(__name__)
 
+# Log the resolved run configuration
+try:
+    logger.info("Run config:\n%s", json.dumps(run_config, indent=2))
+except (TypeError, OSError):
+    # If logging the config fails for any reason (non-serializable value), write a simple fallback message
+    logger.info("Run config: (could not serialize run_config)")
+
 RUN_ID = time.strftime("%Y-%m-%d_%H-%M", time.localtime()) + f"_{data_name}"
 stats_to_log = []
 
@@ -308,6 +353,17 @@ stats_to_log = []
 # Build a run-specific results directory similar to predict_streaming.py
 run_results_dir = Path(f"results/{RUN_ID}")
 run_results_dir.mkdir(parents=True, exist_ok=True)
+
+# Persist the resolved run configuration into the run-specific results folder so
+# the config used for this experiment is stored alongside outputs. This also
+# makes `config_file_path` point into the experiment folder.
+try:
+    config_copy_path = run_results_dir / "predict_config.json"
+    with config_copy_path.open("w") as _f:
+        json.dump(run_config, _f, indent=2)
+    config_file_path = config_copy_path
+except OSError:
+    logger.debug("Could not write run config to %s; continuing without saving.", run_results_dir)
 
 # Stats and predictions live inside the run folder
 stats_file_path = run_results_dir / f"{RUN_ID}_stats_batch.json"
@@ -376,7 +432,7 @@ data_test = transform_to_seqs(dataset_test)
 # Define the number of iterations
 # ============================================================
 
-n_iterations = 2
+N_ITERATIONS = 1
 
 # Store metrics across iterations
 all_metrics: dict = {
@@ -435,10 +491,10 @@ all_metrics: dict = {
 prediction_vectors_memory: dict = {}
 # Add initial debug/info
 logger.info(" Initialized prediction_vectors_memory (will store per-strategy prediction vectors)")
-logger.debug("Expected iterations: %s", n_iterations)
+logger.debug("Expected iterations: %s", N_ITERATIONS)
 
-# Repeat the experiment n_iterations times
-for iteration in range(n_iterations):
+# Repeat the experiment N_ITERATIONS times
+for iteration in range(N_ITERATIONS):
     # Dictionary to store this iteration's metrics
     iteration_metrics: dict[str, Any] = {}
 
@@ -455,7 +511,7 @@ for iteration in range(n_iterations):
         all_metrics[name]["pp_q1"].append(compute_perplexity_stats(metrics["perplexities"])["q1"])
         all_metrics[name]["pp_q3"].append(compute_perplexity_stats(metrics["perplexities"])["q3"])
         all_metrics[name]["train_time"].append(metrics["train_time"])
-    msg = f"Starting iteration {iteration + 1}/{n_iterations}..."
+    msg = f"Starting iteration {iteration + 1}/{N_ITERATIONS}..."
     logger.info(msg)
 
     # ============================================================
@@ -1037,6 +1093,14 @@ for iteration in range(n_iterations):
         nn_val_set_transformed = nn_processor.preprocess_data(nn_val_set_transformed)
         nn_test_set_transformed = nn_processor.preprocess_data(nn_test_set_transformed)
 
+        # RL evaluation must align exactly with the "actual" flattened vector used elsewhere.
+        # Basic miners predict one token per event, including the first event of each sequence
+        # (conditioned on the initial state). To match that, RL needs a START token so that
+        # iterating prefixes k=1..valid_len-1 yields targets covering all original events.
+        # Therefore, prepend START to test sequences for RL evaluation only.
+        rl_eval_set_with_start = add_start_to_sequences(test_set_transformed, start_symbol)
+        rl_eval_set_transformed = nn_processor.preprocess_data(rl_eval_set_with_start)
+
         if NN_TRAINING:
             for name in ["LSTM", "transformer"]:
                 msg = f"Training and evaluating {name} model..."
@@ -1075,11 +1139,23 @@ for iteration in range(n_iterations):
                 iteration_data,
                 nn_train_set_transformed,
                 nn_val_set_transformed,
-                epochs=20,
+                rl_eval_set_transformed,
+                epochs=default_run_config["rl"]["epochs"],
             )
 
             # Store prediction vector like other strategies
             prediction_vectors_memory.setdefault(rl_name, []).append(prediction_vector)
+
+            # Assert alignment with baseline actual vector for this iteration
+            actual_iters = prediction_vectors_memory.get("actual", [])
+            actual_len = len(actual_iters[iteration]) if len(actual_iters) > iteration else None
+            if actual_len is not None and len(prediction_vector) != actual_len:
+                msg = (
+                    f"Length mismatch for {rl_name} at iter {iteration + 1}: "
+                    f"preds={len(prediction_vector)} vs actual={actual_len}."
+                )
+                logger.exception("RL prediction vector length mismatch: %s", msg)
+                raise ValueError(msg)
 
             # Keep the same placeholders for RL perplexity as before
             perplexity_stats = {
@@ -1171,6 +1247,59 @@ for iteration in range(n_iterations):
 
 with stats_file_path.open("w") as f:
     json.dump(stats_to_log, f, indent=4)
+
+# Write prediction vectors (one CSV per strategy and per-iteration) into the run-specific predictions dir
+try:
+    for model_name, iterations in prediction_vectors_memory.items():
+        # Combined dataframe for all iterations for this model
+        combined_rows = []
+        for it_idx, pred_vec in enumerate(iterations, start=1):
+            # pred_vec is expected to be an iterable of predictions (one per event)
+            # Try to fetch the matching actual vector for this iteration (if available)
+            actual_iters = prediction_vectors_memory.get("actual", [])
+            actual_vec = None
+            if model_name != "actual" and len(actual_iters) >= it_idx:
+                actual_vec = actual_iters[it_idx - 1]
+
+            try:
+                preds = list(pred_vec)
+
+                if actual_vec is not None:
+                    # Align lengths: truncate to the shortest to avoid misalignment
+                    actuals = list(actual_vec)
+                    min_len = min(len(preds), len(actuals))
+                    preds = preds[:min_len]
+                    actuals = actuals[:min_len]
+                    df_iter = pd.DataFrame({"index": list(range(len(preds))), "prediction": preds, "actual": actuals})
+                else:
+                    df_iter = pd.DataFrame({"index": list(range(len(preds))), "prediction": preds})
+            except (ValueError, TypeError, OSError):
+                # Fallback: coerce into a single-column representation; include actual as string if available
+                if actual_vec is not None:
+                    try:
+                        actuals = list(actual_vec)
+                        df_iter = pd.DataFrame({"prediction": [str(pred_vec)], "actual": [str(actuals)]})
+                    except (ValueError, TypeError, OSError):
+                        df_iter = pd.DataFrame({"prediction": [str(pred_vec)]})
+                else:
+                    df_iter = pd.DataFrame({"prediction": [str(pred_vec)]})
+
+            iter_csv_path = predictions_dir / f"{RUN_ID}_{model_name}_iter{it_idx}.csv"
+            df_iter.to_csv(iter_csv_path, index=False)
+
+            # Append rows for the combined CSV
+            df_iter_insert = df_iter.copy()
+            df_iter_insert.insert(0, "iteration", it_idx)
+            combined_rows.append(df_iter_insert)
+
+        # Save combined CSV for the model (all iterations stacked)
+        if combined_rows:
+            combined_df = pd.concat(combined_rows, ignore_index=True)
+            combined_csv_path = predictions_dir / f"{RUN_ID}_{model_name}.csv"
+            combined_df.to_csv(combined_csv_path, index=False)
+    logger.info("Saved prediction vectors for %d strategies to %s", len(prediction_vectors_memory), predictions_dir)
+except (OSError, RuntimeError, ValueError, TypeError) as e:
+    logger.debug("Could not write prediction vectors to CSV: %s", e, exc_info=True)
 
 results: dict = {
     "Model": [],
@@ -1276,24 +1405,6 @@ if not SHOW_DELAYS:
 msg = "\n" + str(data)
 logger.info(msg)
 
-# # Before writing final results, add final summary of prediction_vectors_memory
-# logger.info("[FINAL DEBUG] Completed all iterations. Prediction vectors stored per strategy:")
-# for strat, vecs in prediction_vectors_memory.items():
-#     total_preds = sum(len(v) for v in vecs)
-#     comparision_to_ngram = compare_models_comparison(
-#         prediction_vectors_memory, tested_model=strat, reference_model="ngram_3", baseline_model="actual")
-#     correlation = comparision_to_ngram.get("correlation", None)
-#     anticorrelation = comparision_to_ngram.get("anticorrelation", None)
-#     similarity = comparision_to_ngram.get("similarity", None)
-#     # logger.info("[FINAL DEBUG] strategy=%s | iterations_stored=%d | total_predictions=%d | comparision_ratio=%s", strat, len(vecs), total_preds, overall_comparision if overall_comparision is not None else "N/A") # noqa: E501
-#     # logger.info("[FINAL DEBUG] strategy=%s | tail:%s", strat, vecs[-1][-10:] if vecs and len(vecs[-1]) >= 10 else vecs[-1] if vecs else "N/A") # noqa: E501
-#     # print a tiny repr sample
-#     if vecs:
-#         try:
-#             logger.debug("[FINAL DEBUG] strategy=%s | last_sample=%s", strat, vecs[-1][:10])
-#         except (TypeError, AttributeError, IndexError):
-#             logger.debug("[FINAL DEBUG] strategy=%s | last_sample_repr=%s", strat, repr(vecs[-1])[:400])
-
 # === Cross-reference table of comparison ratios between all models ===
 try:
     model_keys = list(prediction_vectors_memory.keys())
@@ -1311,7 +1422,8 @@ try:
                     prediction_vectors_memory,
                     tested_model=tested,
                     reference_model=reference,
-                    baseline_model="actual"
+                    baseline_model="actual",
+                    include_empty=False
                 )
                 correlation = res.get("correlation", None)
                 anticorrelation = res.get("anticorrelation", None)
@@ -1370,6 +1482,74 @@ try:
             logger.info("[COMPARISON] Saved summary heatmap to: %s", heatmap_png.resolve())
         except (OSError, RuntimeError, ValueError) as e:
             logger.debug("Could not auto-save heatmap image: %s", e, exc_info=True)
+
+    # --- Additional plots: for each ngram (one curve) show values across qlearning windows ---
+    try:
+        # discover qlearning columns and their window sizes
+        q_cols = [c for c in correlation_df.columns if isinstance(c, str) and c.startswith("qlearning_win")]
+        q_windows = []
+        for c in q_cols:
+            try:
+                q_windows.append((int(c.split("qlearning_win")[-1]), c))
+            except Exception:
+                # skip unparsable names
+                continue
+
+        if not q_windows:
+            logger.debug("No qlearning columns found for ngram vs qlearning plots; skipping.")
+        else:
+            # sort by window size
+            q_windows.sort()
+            windows_sorted, q_cols_sorted = zip(*q_windows)
+
+            # Styles: distinct color + linestyles cycling
+            cmap = plt.get_cmap("tab10")
+            linestyles = ["-", "--", "-.", ":"]
+
+            # function to plot one dataframe
+            def _plot_ngrams_vs_q(df: pd.DataFrame, title: str, suffix: str) -> None:
+                plt.figure(figsize=(8, 6))
+                plotted_any = False
+                for i, ngram in enumerate(NGRAM_NAMES):
+                    if ngram not in df.index:
+                        # skip missing ngram rows
+                        continue
+                    y = []
+                    for col in q_cols_sorted:
+                        val = df.loc[ngram, col] if col in df.columns else np.nan
+                        y.append(float(val) if not pd.isna(val) else np.nan) # type: ignore
+
+                    # skip if all NaN
+                    if all(np.isnan(v) for v in y):
+                        continue
+
+                    color = cmap(i % cmap.N)
+                    ls = linestyles[i % len(linestyles)]
+                    plt.plot(list(windows_sorted), y, label=ngram, color=color, linestyle=ls, marker="o")
+                    plotted_any = True
+
+                if not plotted_any:
+                    logger.debug("No data plotted for %s; skipping file generation.", title)
+                    plt.close()
+                    return
+
+                plt.xlabel("Q-learning window size")
+                plt.ylabel("Percent")
+                plt.title(f"{title}: NGrams vs Q-learning windows")
+                plt.grid(True, alpha=0.25)
+                plt.legend(title="Ngram", bbox_to_anchor=(1.05, 1), loc="upper left")
+                plt.tight_layout()
+                out_png = stats_file_path.parent / f"{RUN_ID}_ngrams_vs_qlearning_{suffix}.png"
+                plt.savefig(out_png, dpi=150)
+                plt.close()
+                logger.info("[COMPARISON] Saved ngrams vs qlearning %s to: %s", suffix, out_png.resolve())
+
+            # Plot correlation, anticorrelation, similarity
+            _plot_ngrams_vs_q(correlation_df, "Correlation", "correlation")
+            _plot_ngrams_vs_q(anticorrelation_df, "Anticorrelation", "anticorrelation")
+            _plot_ngrams_vs_q(similarity_df, "Similarity", "similarity")
+    except Exception as e:
+        logger.debug("Could not generate ngrams vs qlearning plots: %s", e, exc_info=True)
 except (ValueError, KeyError, TypeError, ZeroDivisionError, IndexError, OSError, RuntimeError):
     logger.exception("Failed to build cross-reference comparison table")
 

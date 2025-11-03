@@ -183,11 +183,13 @@ def compute_seq_perplexity(normalized_likelihood: float, *, log_likelihood: bool
     return float("inf")
 
 
-def compare_models_comparison( # noqa: C901, PLR0915
+def compare_models_comparison( # noqa: C901, PLR0915, PLR0912
     prediction_vectors_memory: dict,
     tested_model: str,
     reference_model: str,
     baseline_model: str = "actual",
+    *,
+    include_empty: bool = False,
 ) -> dict:
     """
     For each iteration stored in prediction_vectors_memory, compute correlation, anticorrelation and similarity.
@@ -246,6 +248,20 @@ def compare_models_comparison( # noqa: C901, PLR0915
         n = min(len(tested_vec), len(ref_vec), len(base_vec))
         if len(tested_vec) != len(ref_vec) or len(ref_vec) != len(base_vec):
             notes.append(f"iter_{it}: length_mismatch tested={len(tested_vec)} ref={len(ref_vec)} base={len(base_vec)}")
+
+        # Optionally remove positions where tested or reference produced an empty prediction
+        if not include_empty:
+            empty_symbol = DEFAULT_CONFIG.get("empty_symbol")
+            if empty_symbol is not None:
+                # Build filtered vectors keeping only indices where neither tested nor reference is empty
+                indices = [i for i in range(n) if tested_vec[i] != empty_symbol and ref_vec[i] != empty_symbol]
+                if len(indices) != n:
+                    # Note the filtering
+                    notes.append(f"iter_{it}: filtered_out_empty_positions removed={n - len(indices)}")
+                tested_vec = [tested_vec[i] for i in indices]
+                ref_vec = [ref_vec[i] for i in indices]
+                base_vec = [base_vec[i] for i in indices]
+                n = len(tested_vec)
 
         ref_correct = 0
         both_correct = 0

@@ -3,7 +3,6 @@
 import copy
 import logging
 import time
-from dataclasses import dataclass
 
 import torch
 import torch.nn.functional as F  # noqa: N812
@@ -555,8 +554,6 @@ def _sample_prefix_batch(batch_sequences: torch.Tensor) -> tuple[torch.Tensor, t
     x_inputs = pad_sequence(inputs, batch_first=True, padding_value=0).to(device)
     y_targets = torch.tensor(targets, dtype=torch.long, device=device)
     return x_inputs, y_targets
-
-
 def train_rl(  # noqa: PLR0913, PLR0915, C901
     model: QNetwork,
     train_sequences: torch.Tensor,
@@ -571,34 +568,36 @@ def train_rl(  # noqa: PLR0913, PLR0915, C901
     gamma: float = 0.99  # Discount factor for future rewards
 ) -> QNetwork:
     """
-    Train QNetwork in batch mode with Q-learning, matching RLMiner's streaming approach.
+    Train QNetwork to converge to N-gram statistics using cross-entropy loss.
 
-    Uses Q-learning with binary rewards (1.0 for correct predictions, 0.0 for incorrect)
-    and TD updates over mini-batches. This matches RLMiner's streaming behavior but in batch mode.
+    This implementation uses Maximum Likelihood Estimation (MLE) through cross-entropy,
+    which should converge to the same empirical distribution as N-gram frequency counts.
+    
+    Key features for proper convergence:
+    - Sufficient model capacity (embedding_dim and hidden_dim should be large enough)
+    - Proper learning rate (use adaptive optimizer like Adam)
+    - See all training examples multiple times (epochs)
+    - Early stopping based on validation accuracy
 
     If window_size is provided, each sampled prefix is cropped to its last `window_size` tokens.
     """
-    # Implement batched REINFORCE (policy-gradient) without sampling: build the full
-    # prefix -> next-token dataset once and iterate through all prefixes each epoch
-    # (round-robin). The update uses loss = -reward * log_prob(action). By default
-    # we derive a simple reward of 1.0 for the observed (dataset) next-token which
-    # reduces to maximizing log-likelihood; this keeps behavior stable while using
-    # a policy-gradient objective. The function keeps windowing, validation, and
-    # early stopping.
     device = model.device or train_sequences.device
-    # keep references to unused args to satisfy linters when callers pass them
-    _ = criterion
-    _ = gamma
+    _ = criterion  # Unused, we use cross-entropy
+    _ = gamma  # Not used in this supervised learning approach
     model = model.to(device)
 
-    # Build full prefix -> next-token dataset (mirrors streaming updates over all events)
+    # Build complete dataset of all prefixes and their targets
+    # This ensures we train on the full empirical distribution
     prefixes: list[torch.Tensor] = []
     targets: list[int] = []
+    
     for i in range(train_sequences.shape[0]):
         seq = train_sequences[i]
         valid_len = int((seq != 0).sum().item())
         if valid_len < RL_MIN_PREFIX_LEN:
             continue
+        
+        # Create all possible prefixes (like N-gram does)
         for k in range(1, valid_len):
             prefix = seq[:k].clone()
             if window_size is not None and prefix.numel() > window_size:
@@ -609,12 +608,7 @@ def train_rl(  # noqa: PLR0913, PLR0915, C901
     if not prefixes:
         return model
 
-    def collate(batch: list[tuple[torch.Tensor, int]]) -> tuple[torch.Tensor, torch.Tensor]:
-        xs = [b[0] for b in batch]
-        ys = torch.tensor([b[1] for b in batch], dtype=torch.long)
-        x_pad = pad_sequence(xs, batch_first=True, padding_value=0)
-        return x_pad, ys
-
+    # Create dataset and dataloader
     class PrefixDataset(torch.utils.data.Dataset):
         def __init__(self, xs: list[torch.Tensor], ys: list[int]) -> None:
             self.xs = xs
@@ -626,72 +620,85 @@ def train_rl(  # noqa: PLR0913, PLR0915, C901
         def __getitem__(self, idx: int) -> tuple[torch.Tensor, int]:
             return self.xs[idx], self.ys[idx]
 
+    def collate(batch: list[tuple[torch.Tensor, int]]) -> tuple[torch.Tensor, torch.Tensor]:
+        xs = [b[0] for b in batch]
+        ys = torch.tensor([b[1] for b in batch], dtype=torch.long)
+        x_pad = pad_sequence(xs, batch_first=True, padding_value=0)
+        return x_pad, ys
+
     dataset = PrefixDataset(prefixes, targets)
-    # round-robin (no sampling): do not shuffle so that each epoch sees all prefixes
-    loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, collate_fn=collate)
+    # Shuffle to avoid order bias and help convergence
+    loader = torch.utils.data.DataLoader(
+        dataset, batch_size=batch_size, shuffle=True, collate_fn=collate
+    )
 
     best_val_acc = 0.0
     best_state = None
     patience_counter = 0
 
+    logger.info("Training on %d prefix examples to learn empirical distribution", len(prefixes))
+
     for epoch in range(epochs):
         model.train()
         epoch_loss = 0.0
-        num_batches = 0
+        epoch_correct = 0
+        epoch_total = 0
 
         with tqdm(total=len(loader), desc=f"Epoch {epoch + 1}/{epochs}", unit="batch") as pbar:
-            for x_pad, y in loader:
+            for x_pad, y_batch in loader:
                 x_batch = x_pad.to(device)
-                y_batch = y.to(device)
+                y_batch = y_batch.to(device)
 
-                # Forward: obtain logits [B, vocab]
-                logits = model(x_batch).squeeze(1)
-                log_probs = F.log_softmax(logits, dim=-1)
+                # Forward pass: get Q-values (logits) for all actions
+                q_values = model(x_batch).squeeze(1)  # [batch_size, vocab_size]
 
-                # Select log-probabilities of the taken actions (the dataset next-token)
-                chosen_log_probs = log_probs[torch.arange(log_probs.size(0)), y_batch]
-
-                # Compute reward shaping identical to RLMiner: 1.0 if greedy prediction
-                # equals observed action, else 0.0 (used for logging only in RLMiner).
-                greedy_preds = torch.argmax(logits, dim=-1)
-                rewards = (greedy_preds == y_batch).float()
-
-                # RLMiner applies loss = -log_prob(action) (no reward gating). Match that here.
-                loss = - chosen_log_probs.mean()
-
-                # Optionally log mean reward for diagnostics (kept lightweight)
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug("train_rl epoch=%s batch_reward_mean=%.4f", epoch + 1, float(rewards.mean()))
+                # Cross-entropy loss = negative log-likelihood = MLE training
+                # This makes the model learn P(next_activity | prefix) from the data
+                loss = F.cross_entropy(q_values, y_batch)
 
                 optimizer.zero_grad()
                 loss.backward()
+                
+                # Optional: gradient clipping for stability
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                
                 optimizer.step()
 
+                # Track accuracy
+                predicted_actions = torch.argmax(q_values, dim=-1)
+                epoch_correct += (predicted_actions == y_batch).sum().item()
+                epoch_total += y_batch.size(0)
+
                 epoch_loss += loss.item()
-                num_batches += 1
                 pbar.update(1)
 
-        avg_loss = epoch_loss / num_batches if num_batches > 0 else float("inf")
+        avg_loss = epoch_loss / len(loader)
+        train_acc = epoch_correct / epoch_total if epoch_total > 0 else 0.0
 
-        # Validation (greedy accuracy on validation prefixes)
+        # Validation
         model.eval()
         with torch.no_grad():
             _, _, val_acc, _ = evaluate_rl(model, val_sequences, window_size=window_size)
 
-        logger.info("Epoch %d: Loss=%.4f, Val Acc=%.4f", epoch, avg_loss, val_acc)
+        logger.info("Epoch %d: Loss=%.4f, Train Acc=%.4f, Val Acc=%.4f", 
+                   epoch, avg_loss, train_acc, val_acc)
 
+        # Early stopping based on validation accuracy
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
             patience_counter = 0
+            logger.info("New best validation accuracy: %.4f", val_acc)
         else:
             patience_counter += 1
             if patience_counter >= patience:
-                logger.info("Early stopping!")
+                logger.info("Early stopping! Best val accuracy: %.4f", best_val_acc)
                 break
 
+    # Restore best model (the one that generalizes best)
     if best_state is not None:
         model.load_state_dict(best_state)
+    
     return model
 
 

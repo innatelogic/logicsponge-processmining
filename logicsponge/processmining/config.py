@@ -9,6 +9,7 @@ from logicsponge.processmining.types import Config
 DEFAULT_CONFIG: Config = {
     "start_symbol": "__start__",
     "stop_symbol": "__stop__",
+    "empty_symbol": "__empty__",
     "discount_factor": 0.9,
     "randomized": False,
     "top_k": 3,
