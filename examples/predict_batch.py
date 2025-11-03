@@ -33,7 +33,7 @@ default_run_config = {
         "epochs": 20
     },
     "rl": {
-        "lr": 0.001,
+        "lr": 0.0008,
         "batch_size": 8,
         "epochs": 20,
         "gamma": 0.99
@@ -230,7 +230,7 @@ VOTING_NGRAMS = [(2, 3, 4), (2, 3, 5, 8), (2, 3, 4, 5)]  # (2, 3, 5, 6), (2, 3, 
 
 SELECT_BEST_ARGS = ["prob"]  # ["acc", "prob", "prob x acc"]
 
-WINDOW_RANGE = [0, 1, 2, 3, 4, 5, 6, 7, 8]  # , 9, 10, 12, 14, 16]
+WINDOW_RANGE = [1, 2, 3, 4, 5, 6, 7, 8]  # , 9, 10, 12, 14, 16]
 
 NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 # ] + [
@@ -254,7 +254,7 @@ def qnetwork_model() -> tuple[QNetwork, optim.Optimizer, nn.Module]:
     vocab_size = 32  # Assume an upper bound on the number of activities
     embedding_dim = 32
 
-    hidden_dim = 512
+    hidden_dim = 1024 # was 512
     output_dim = vocab_size  # Output used to predict the next activity
 
     model = QNetwork(
