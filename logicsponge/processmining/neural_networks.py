@@ -722,6 +722,14 @@ def evaluate_rl(
     pause_time = 0.0
 
     model.eval()
+    # Determine the device the model is on. Prefer explicit model.device when provided;
+    # otherwise fall back to the device of model parameters.
+    model_device = getattr(model, "device", None)
+    if model_device is None:
+        try:
+            model_device = next(model.parameters()).device
+        except StopIteration:
+            model_device = None
     correct = 0
     total = 0
     top_k_correct = [0] * max_k
@@ -739,6 +747,10 @@ def evaluate_rl(
                 prefix = seq[:k].unsqueeze(0)  # [1, k]
                 if window_size is not None and prefix.shape[1] > window_size:
                     prefix = prefix[:, -window_size:]
+                # Ensure prefix is on the same device as the model to avoid
+                # "Expected all tensors to be on the same device" runtime error.
+                if model_device is not None:
+                    prefix = prefix.to(device=model_device)
                 q_vals = model(prefix).squeeze(1).squeeze(0)  # [vocab]
                 topk = torch.topk(q_vals, k=max_k)
                 pred_idx = int(topk.indices[0].item())
