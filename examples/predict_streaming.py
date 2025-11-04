@@ -19,6 +19,8 @@ logging.getLogger("logicsponge.processmining.streaming").setLevel(logging.INFO)
 logging.getLogger("logicsponge.processmining").setLevel(logging.INFO)
 
 
+import json
+
 import logicsponge.core as ls  # type: ignore # noqa: PGH003
 from logicsponge.core import DataItem, DataItemFilter  # type: ignore # noqa: PGH003
 
@@ -49,6 +51,7 @@ from logicsponge.processmining.streaming import (
     StreamingActivityPredictor,
 )
 from logicsponge.processmining.test_data import data_name, dataset
+from logicsponge.processmining.utils import add_file_log_handler, save_run_config
 
 # Non necessary, but nice for debugging
 data = transform_to_seqs(dataset)
@@ -67,13 +70,41 @@ stats_file_path = run_results_dir / f"{RUN_ID}_stats_streaming.csv"
 predictions_dir = run_results_dir / "predictions"
 predictions_dir.mkdir(parents=True, exist_ok=True)
 
+# --- Run configuration (defaults + writing config file like predict_batch.py)
+config_file_path = Path(__file__).parent / "predict_config.json"
+default_run_config = {
+    "nn": {"lr": 0.001, "batch_size": 8, "epochs": 20},
+    "rl": {"lr": 0.001, "batch_size": 8, "epochs": 20, "gamma": 0.99},
+    "lstm": {"vocab_size": 50, "embedding_dim": 50, "hidden_dim": 128, "output_dim": 50},
+    "transformer": {"vocab_size": 50, "embedding_dim": 50, "hidden_dim": 128, "output_dim": 50},
+    "qlearning": {"vocab_size": 50, "embedding_dim": 50, "hidden_dim": 128, "output_dim": 50},
+}
+try:
+    with config_file_path.open("w") as _f:
+        json.dump(default_run_config, _f, indent=2)
+    run_config = default_run_config
+except OSError as _e:
+    logger.debug("Could not write default config to %s: %s", config_file_path, _e)
+    run_config = default_run_config
+
+# Persist the resolved run configuration into the run-specific results folder
+try:
+    save_run_config(run_config, run_results_dir / "predict_config.json")
+except Exception:
+    logger.exception("Could not write run config copy to %s; continuing without saving.", run_results_dir)
+
 # Add a file handler so logs are written into the run folder as well
 log_file_path = run_results_dir / f"{RUN_ID}_log.txt"
 try:
-    file_handler = logging.FileHandler(log_file_path)
-    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-    file_handler.setFormatter(formatter)
-    logging.root.addHandler(file_handler)
+    # remove existing file handlers (if any) to avoid duplicate file logging
+    for handler in logging.root.handlers[:]:
+        try:
+            if isinstance(handler, logging.FileHandler):
+                logging.root.removeHandler(handler)
+        except Exception:
+            logger.exception("Error removing existing file handler.")
+    # use helper to add a file handler
+    fh = add_file_log_handler(log_file_path, fmt="%(asctime)s %(levelname)s %(name)s: %(message)s")
 except OSError:
     logger.debug("Could not create log file %s; continuing with console logging.", log_file_path)
 
@@ -103,6 +134,13 @@ torch.cuda.manual_seed(123)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
+# Select which ML components to train/evaluate (parity with predict_batch.py)
+ML_TRAINING = True
+NN_TRAINING = False
+RL_TRAINING = True
+ALERGIA_TRAINING = False
+SHOW_DELAYS = False
+
 # ====================================================
 # Initialize models
 # ====================================================
@@ -123,7 +161,7 @@ SOFT_VOTING_NGRAMS = [
     (2, 3, 4, 5),
 ]  # (2, 3, 6, 8), (2, 3, 5, 6), (2, 3, 4, 6), (2, 3, 6, 7), (2, 3, 7, 8), (2, 3, 6, 8)
 
-WINDOW_RANGE = [1, 2, 3, 4, 5, 6, 7, 8] # [1, 2, 3, 4, 5, 8]  # 0, 1, 2, 3, 4, 5, 6, 7, 8 , 9, 10, 12, 14, 16]
+WINDOW_RANGE = [1, 2, 3, 4, 5, 8]  # 0, 1, 2, 3, 4, 5, 6, 7, 8 , 9, 10, 12, 14, 16]
 
 # NN/RL window range aligned with predict_batch.py
 NN_WINDOW_RANGE = WINDOW_RANGE # [1, 2, 3, 4, 5, 6, 7, 8]
@@ -337,47 +375,49 @@ adaptive_voting = StreamingActivityPredictor(
     )
 )
 
-# Initialize LSTMs (base model without window constraint)
-vocab_size = 50  # An upper bound on the number of activities
-embedding_dim = 50
-hidden_dim = 128
-output_dim = vocab_size
+# Initialize LSTMs (base model without window constraint) using run_config
+nn_cfg = run_config.get("nn", {})
+lstm_cfg = run_config.get("lstm", {})
+vocab_size = lstm_cfg.get("vocab_size", 50)  # An upper bound on the number of activities
+embedding_dim = lstm_cfg.get("embedding_dim", 50)
+hidden_dim = lstm_cfg.get("hidden_dim", 128)
+output_dim = lstm_cfg.get("output_dim", vocab_size)
 model_lstm = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, device=device, use_one_hot=True)
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model_lstm.parameters(), lr=0.001)
+optimizer = optim.Adam(model_lstm.parameters(), lr=nn_cfg.get("lr", 0.001))
 
 lstm = StreamingActivityPredictor(
     strategy=NeuralNetworkMiner(
         model=model_lstm,
         criterion=criterion,
         optimizer=optimizer,
-        batch_size=8,
+        batch_size=nn_cfg.get("batch_size", 8),
         config=config,
     )
 )
 
 
-# Initialize transformer model (base model without window constraint)
-hidden_dim = 128
-output_dim = vocab_size  # Output used to predict the next activity
-
+# Initialize transformer model (base model without window constraint) using run_config
+transformer_cfg = run_config.get("transformer", {})
+hidden_dim_tr = transformer_cfg.get("hidden_dim", hidden_dim)
+output_dim_tr = transformer_cfg.get("output_dim", output_dim)
 model_transformer = TransformerModel(
     seq_input_dim=max_seq_length + 2,
-    vocab_size=vocab_size,
-    embedding_dim=embedding_dim,
-    hidden_dim=hidden_dim,
-    output_dim=output_dim,
+    vocab_size=transformer_cfg.get("vocab_size", vocab_size),
+    embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
+    hidden_dim=hidden_dim_tr,
+    output_dim=output_dim_tr,
     use_one_hot=True,
 )
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model_transformer.parameters(), lr=0.0001)  # Lower learning rate for transformer
+optimizer = optim.Adam(model_transformer.parameters(), lr=nn_cfg.get("lr", 0.0001))
 
 transformer = StreamingActivityPredictor(
     strategy=NeuralNetworkMiner(
         model=model_transformer,
         criterion=criterion,
         optimizer=optimizer,
-        batch_size=8,
+        batch_size=nn_cfg.get("batch_size", 8),
         config=config,
     )
 )
@@ -392,13 +432,13 @@ for w in NN_WINDOW_RANGE:
     # LSTM windowed variant
     model_lstm_w = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, device=device, use_one_hot=True)
     criterion_l = nn.CrossEntropyLoss()
-    optimizer_l = optim.Adam(model_lstm_w.parameters(), lr=0.001)
+    optimizer_l = optim.Adam(model_lstm_w.parameters(), lr=nn_cfg.get("lr", 0.001))
     LSTM_MODELS[f"lstm_win{w}"] = StreamingActivityPredictor(
         strategy=WindowedNeuralNetworkMiner(
             model=model_lstm_w,
             criterion=criterion_l,
             optimizer=optimizer_l,
-            batch_size=8,
+            batch_size=nn_cfg.get("batch_size", 8),
             sequence_buffer_length=w,
             config=config,
         )
@@ -414,13 +454,13 @@ for w in NN_WINDOW_RANGE:
         use_one_hot=True,
     )
     criterion_t = nn.CrossEntropyLoss()
-    optimizer_t = optim.Adam(model_tr_w.parameters(), lr=0.0001)
+    optimizer_t = optim.Adam(model_tr_w.parameters(), lr=nn_cfg.get("lr", 0.0001))
     TRANSFORMER_MODELS[f"transformer_win{w}"] = StreamingActivityPredictor(
         strategy=WindowedNeuralNetworkMiner(
             model=model_tr_w,
             criterion=criterion_t,
             optimizer=optimizer_t,
-            batch_size=8,
+            batch_size=nn_cfg.get("batch_size", 8),
             sequence_buffer_length=w,
             config=config,
         )
@@ -429,15 +469,16 @@ for w in NN_WINDOW_RANGE:
 # RL (QNetwork) models built in a loop
 RL_MODELS: dict[str, StreamingActivityPredictor] = {}
 for w in RL_WINDOWS:
+    q_cfg = run_config.get("qlearning", {})
     model_qlearning = QNetwork(
-        vocab_size=vocab_size,
-        embedding_dim=embedding_dim,
-        hidden_dim=hidden_dim,
-        output_dim=output_dim,
+        vocab_size=q_cfg.get("vocab_size", vocab_size),
+        embedding_dim=q_cfg.get("embedding_dim", embedding_dim),
+        hidden_dim=q_cfg.get("hidden_dim", hidden_dim),
+        output_dim=q_cfg.get("output_dim", output_dim),
         device=device,
     ).to(device)
     criterion_q = nn.MSELoss()
-    optimizer_q = optim.Adam(model_qlearning.parameters(), lr=0.001)
+    optimizer_q = optim.Adam(model_qlearning.parameters(), lr=run_config.get("rl", {}).get("lr", 0.001))
 
     RL_MODELS[f"qlearning_win{w}"] = StreamingActivityPredictor(
         strategy=RLMiner(
@@ -453,14 +494,14 @@ for w in RL_WINDOWS:
 
 # Add a single non-windowed qlearning baseline (use a large buffer to approximate no window)
 model_qlearning_base = QNetwork(
-    vocab_size=vocab_size,
-    embedding_dim=embedding_dim,
-    hidden_dim=hidden_dim,
-    output_dim=output_dim,
+    vocab_size=run_config.get("qlearning", {}).get("vocab_size", vocab_size),
+    embedding_dim=run_config.get("qlearning", {}).get("embedding_dim", embedding_dim),
+    hidden_dim=run_config.get("qlearning", {}).get("hidden_dim", hidden_dim),
+    output_dim=run_config.get("qlearning", {}).get("output_dim", output_dim),
     device=device,
 ).to(device)
 criterion_q_base = nn.MSELoss()
-optimizer_q_base = optim.Adam(model_qlearning_base.parameters(), lr=0.001)
+optimizer_q_base = optim.Adam(model_qlearning_base.parameters(), lr=run_config.get("rl", {}).get("lr", 0.001))
 
 RL_MODELS[RL_BASELINE_NAME] = StreamingActivityPredictor(
     strategy=RLMiner(
@@ -569,132 +610,105 @@ else:
     len_dataset = 100_000  # Default value
 
 
+
+# Build the prediction sub-pipeline conditionally based on ML/NN flags
+prediction_group = (
+    (fpt * PredictionCSVWriter(csv_path=predictions_dir / "fpt.csv", model_name="fpt") * Evaluation("fpt"))
+    | (bag * PredictionCSVWriter(csv_path=predictions_dir / "bag.csv", model_name="bag") * Evaluation("bag"))
+)
+
+# Add NGRAM models
+for name in NGRAM_NAMES:
+    prediction_group = prediction_group | (
+        NGRAM_MODELS[name]
+        * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name)
+        * Evaluation(name)
+    )
+
+# Add voting and fallback/hard predictors
+prediction_group = prediction_group | (
+    hard_voting
+    * PredictionCSVWriter(
+        csv_path=predictions_dir / "hard_voting.csv",
+        model_name="hard_voting",
+    )
+    * Evaluation("hard_voting")
+)
+
+for name, predictor in soft_voting_predictors.items():
+    prediction_group = prediction_group | (
+        predictor * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name) * Evaluation(name)
+    )
+
+# Optionally include NN models (only if NN_TRAINING is enabled)
+if NN_TRAINING and ML_TRAINING:
+    prediction_group = prediction_group | (
+        AddStartSymbol(start_symbol=start_symbol)
+        * lstm
+        * DataItemFilter(data_item_filter=start_filter)
+        * PredictionCSVWriter(csv_path=predictions_dir / "lstm.csv", model_name="lstm")
+        * Evaluation("lstm")
+    )
+
+    prediction_group = prediction_group | (
+        AddStartSymbol(start_symbol=start_symbol)
+        * transformer
+        * DataItemFilter(data_item_filter=start_filter)
+        * PredictionCSVWriter(csv_path=predictions_dir / "transformer.csv", model_name="transformer")
+        * Evaluation("transformer")
+    )
+
+    for name in LSTM_WIN_NAMES:
+        prediction_group = prediction_group | (
+            AddStartSymbol(start_symbol=start_symbol)
+            * LSTM_MODELS[name]
+            * DataItemFilter(data_item_filter=start_filter)
+            * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name)
+            * Evaluation(name)
+        )
+
+    for name in TRANSFORMER_WIN_NAMES:
+        prediction_group = prediction_group | (
+            AddStartSymbol(start_symbol=start_symbol)
+            * TRANSFORMER_MODELS[name]
+            * DataItemFilter(data_item_filter=start_filter)
+            * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name)
+            * Evaluation(name)
+        )
+
+# Optionally include RL models (if ML_TRAINING enabled)
+if RL_TRAINING and ML_TRAINING:
+    for name in RL_NAMES:
+        prediction_group = prediction_group | (
+            AddStartSymbol(start_symbol=start_symbol)
+            * RL_MODELS[name]
+            * DataItemFilter(data_item_filter=start_filter)
+            * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name)
+            * Evaluation(name)
+        )
+
+    prediction_group = prediction_group | (
+        AddStartSymbol(start_symbol=start_symbol)
+        * RL_MODELS[RL_BASELINE_NAME]
+        * DataItemFilter(data_item_filter=start_filter)
+        * PredictionCSVWriter(csv_path=predictions_dir / f"{RL_BASELINE_NAME}.csv", model_name=RL_BASELINE_NAME)
+        * Evaluation(RL_BASELINE_NAME)
+    )
+
+# Assemble the full sponge
 sponge = (
     streamer
-    * StreamAlteration(
-        alteration_type="switch",
-        rate=1.0,
-        alteration_start=5000,
-        transition=1,
-    )
-    * StreamAlteration(
-        alteration_type="split",
-        rate=1.0,
-        alteration_start=5000,
-        transition=1000,
-    )
+    # * StreamAlteration(alteration_type="switch", rate=1.0, alteration_start=5000, transition=1)
+    # * StreamAlteration(alteration_type="split", rate=1.0, alteration_start=5000, transition=1000)
     * ls.KeyFilter(keys=["case_id", "activity", "timestamp"])
     * ActualCSVWriter(csv_path=predictions_dir / "actual.csv")
-    * (
-        (fpt * PredictionCSVWriter(csv_path=predictions_dir / "fpt.csv", model_name="fpt") * Evaluation("fpt"))
-        | (bag * PredictionCSVWriter(csv_path=predictions_dir / "bag.csv", model_name="bag") * Evaluation("bag"))
-        # Add all NGRAM_MODELS to the pipeline
-        | (
-            (
-                NGRAM_MODELS[name]
-                * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name)
-                * Evaluation(name)
-            )
-            for name in NGRAM_NAMES
-        )
-        # | (
-        #     fallback
-        #     * PredictionCSVWriter(csv_path=predictions_dir / "fallback.csv", model_name="fallback")
-        #     * Evaluation("fallback")
-        # )
-        # | (fallback_ngram8to2 * Evaluation("fallback_ngram8to2"))
-        # | (fallback_ngram8to3 * Evaluation("fallback_ngram8to3"))
-        # | (fallback_ngram8to4 * Evaluation("fallback_ngram8to4"))
-        # | (fallback_ngram10to2 * Evaluation("fallback_ngram10to2"))
-        # | (fallback_ngram13to2 * Evaluation("fallback_ngram13to2"))
-        # | (fallback_ngram8to_ooo * Evaluation("fallback_ngram8to_ooo"))
-        # | (complex_fallback * Evaluation("complex_fallback"))
-        | (
-            hard_voting
-            * PredictionCSVWriter(csv_path=predictions_dir / "hard_voting.csv", model_name="hard_voting")
-            * Evaluation("hard_voting")
-        )
-        # | (adaptive_voting * Evaluation("adaptive_voting"))
-        # | (
-        #     soft_voting
-        #     * PredictionCSVWriter(csv_path=predictions_dir / "soft_voting.csv", model_name="soft_voting")
-        #     * Evaluation("soft_voting")
-        # )
-        # | (
-        #     soft_voting_star
-        #     * PredictionCSVWriter(csv_path=predictions_dir / "soft_voting_star.csv", model_name="soft_voting_star")
-        #     * Evaluation("soft_voting_star")
-        # )
-        # Add all soft_voting_predictors to the pipeline
-        | (
-            (
-                predictor
-                * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name)
-                * Evaluation(name)
-            )
-            for name, predictor in soft_voting_predictors.items()
-        )
-        | (
-            AddStartSymbol(start_symbol=start_symbol)
-            * lstm
-            * DataItemFilter(data_item_filter=start_filter)
-            * PredictionCSVWriter(csv_path=predictions_dir / "lstm.csv", model_name="lstm")
-            * Evaluation("lstm")
-        )
-        | (
-            AddStartSymbol(start_symbol=start_symbol)
-            * transformer
-            * DataItemFilter(data_item_filter=start_filter)
-            * PredictionCSVWriter(csv_path=predictions_dir / "transformer.csv", model_name="transformer")
-            * Evaluation("transformer")
-        )
-        | (
-            (
-                AddStartSymbol(start_symbol=start_symbol)
-                * LSTM_MODELS[name]
-                * DataItemFilter(data_item_filter=start_filter)
-                * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name)
-                * Evaluation(name)
-            )
-            for name in LSTM_WIN_NAMES
-        )
-        | (
-            (
-                AddStartSymbol(start_symbol=start_symbol)
-                * TRANSFORMER_MODELS[name]
-                * DataItemFilter(data_item_filter=start_filter)
-                * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name)
-                * Evaluation(name)
-            )
-            for name in TRANSFORMER_WIN_NAMES
-        )
-        | (
-            (
-                AddStartSymbol(start_symbol=start_symbol)
-                * RL_MODELS[name]
-                * DataItemFilter(data_item_filter=start_filter)
-                * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name)
-                * Evaluation(name)
-            )
-            for name in RL_NAMES
-        )
-        | (
-            AddStartSymbol(start_symbol=start_symbol)
-            * RL_MODELS[RL_BASELINE_NAME]
-            * DataItemFilter(data_item_filter=start_filter)
-            * PredictionCSVWriter(csv_path=predictions_dir / f"{RL_BASELINE_NAME}.csv", model_name=RL_BASELINE_NAME)
-            * Evaluation(RL_BASELINE_NAME)
-        )
-    )
+    * prediction_group
     * ls.MergeToSingleStream()
     * ls.Flatten()
     * ls.AddIndex(key="index", index=1)
     * ls.KeyFilter(keys=all_attributes)
     * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 100 == 0 or item["index"] == len_dataset - 1)
     * (PrintEval() | CSVStatsWriter(csv_path=stats_file_path))
-    # * ls.Print()
-    # * (dashboard.Plot("Accuracy (%)", x="index", y=accuracy_list))
-    # * (dashboard.Plot("Latency Mean (ms)", x="index", y=latency_mean_list))
 )
 
 

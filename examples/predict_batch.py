@@ -83,7 +83,13 @@ from logicsponge.processmining.neural_networks import (
     train_rnn,
 )
 from logicsponge.processmining.test_data import data_name, dataset, dataset_test
-from logicsponge.processmining.utils import RED_TO_GREEN_CMAP, compare_models_comparison, compute_perplexity_stats
+from logicsponge.processmining.utils import (
+    RED_TO_GREEN_CMAP,
+    add_file_log_handler,
+    compare_models_comparison,
+    compute_perplexity_stats,
+    save_run_config,
+)
 
 SEC_TO_MICRO = 1_000_000
 
@@ -465,12 +471,10 @@ run_results_dir.mkdir(parents=True, exist_ok=True)
 # Persist the resolved run configuration into the run-specific results folder so
 # the config used for this experiment is stored alongside outputs. This also
 # makes `config_file_path` point into the experiment folder.
-try:
-    config_copy_path = run_results_dir / "predict_config.json"
-    with config_copy_path.open("w") as _f:
-        json.dump(run_config, _f, indent=2)
+config_copy_path = run_results_dir / "predict_config.json"
+if save_run_config(run_config, config_copy_path):
     config_file_path = config_copy_path
-except OSError:
+else:
     logger.debug("Could not write run config to %s; continuing without saving.", run_results_dir)
 
 # Stats and predictions live inside the run folder
@@ -488,11 +492,10 @@ try:
             handler.close()
             logging.root.removeHandler(handler)
 
-    # Reconfigure the logger to write to the run-specific file
-    file_handler = logging.FileHandler(log_file_path)
-    formatter = logging.Formatter("%(message)s")
-    file_handler.setFormatter(formatter)
-    logging.root.addHandler(file_handler)
+    # Use helper to add a file handler
+    file_handler = add_file_log_handler(log_file_path, fmt="%(message)s")
+    if file_handler is None:
+        logger.debug("Could not create log file %s; continuing with console logging.", log_file_path)
 except OSError:
     logger.debug("Could not create log file %s; continuing with console logging.", log_file_path)
 
@@ -518,6 +521,7 @@ ML_TRAINING = True
 NN_TRAINING = True
 ALERGIA_TRAINING = False
 SHOW_DELAYS = False
+RL_TRAINING = True
 
 # ============================================================
 # Determine start and stop symbols
@@ -637,7 +641,6 @@ for iteration in range(N_ITERATIONS):
     else:
         # Warning: Synthetic_Train must not be split, but thus the validation set is not correctly generated
         train_set_transformed, val_set_transformed, test_set_transformed = data, data_test, data_test
-        # ML_TRAINING = False
 
     # Train set for process miners
     train_set = interleave_sequences(train_set_transformed, random_index=False)
@@ -1255,103 +1258,104 @@ for iteration in range(N_ITERATIONS):
                     logger.debug("NN stored preds | model=%s | iter=%d | (no preds stored)", nn_name, iteration + 1)
 
         # RL (QNetwork) evaluation in batch mode (no RLMiner). Use process_rl_model to run training/eval
-        for w in [None, *WINDOW_RANGE] : # Include both no-window and windowed variants
-            rl_name = f"qlearning_win{w}" if w is not None else "qlearning"
-            logger.info("Training and evaluating %s model...", rl_name)
+        if RL_TRAINING:
+            for w in [None, *WINDOW_RANGE] : # Include both no-window and windowed variants
+                rl_name = f"qlearning_win{w}" if w is not None else "qlearning"
+                logger.info("Training and evaluating %s model...", rl_name)
 
-            metrics, perplexities, eval_time, prediction_vector, training_time = process_rl_model(
-                rl_name,
-                w,
-                iteration_data,
-                nn_train_set_transformed,
-                nn_val_set_transformed,
-                rl_eval_set_transformed,
-                epochs=default_run_config["rl"]["epochs"],
-            )
-
-            # Store prediction vector like other strategies
-            prediction_vectors_memory.setdefault(rl_name, []).append(prediction_vector)
-
-            # Assert alignment with baseline actual vector for this iteration
-            actual_iters = prediction_vectors_memory.get("actual", [])
-            actual_len = len(actual_iters[iteration]) if len(actual_iters) > iteration else None
-            if actual_len is not None and len(prediction_vector) != actual_len:
-                msg = (
-                    f"Length mismatch for {rl_name} at iter {iteration + 1}: "
-                    f"preds={len(prediction_vector)} vs actual={actual_len}."
-                )
-                logger.exception("RL prediction vector length mismatch: %s", msg)
-                raise ValueError(msg)
-
-            # Keep the same placeholders for RL perplexity as before
-            perplexity_stats = {
-                "pp_harmonic_mean": None,
-                "pp_arithmetic_mean": None,
-                "pp_median": None,
-                "pp_q1": None,
-                "pp_q3": None,
-            }
-
-            eval_time *= SEC_TO_MICRO / TEST_EVENTS
-
-            if (
-                not isinstance(metrics["top_k_correct_preds"], list)
-                or not isinstance(metrics["total_predictions"], int)
-                or not isinstance(metrics["accuracy"], float)
-            ):
-                msg = f"{rl_name} stats are not in the expected format."
-                raise TypeError(msg)
-
-            iteration_data["Model"].append(rl_name)
-
-            iteration_data["PP Harmo"].append(perplexity_stats["pp_harmonic_mean"])
-            iteration_data["PP Arithm"].append(perplexity_stats["pp_arithmetic_mean"])
-            iteration_data["PP Median"].append(perplexity_stats["pp_median"])
-            iteration_data["PP Q1"].append(perplexity_stats["pp_q1"])
-            iteration_data["PP Q3"].append(perplexity_stats["pp_q3"])
-
-            iteration_data["Correct (%)"].append(metrics["accuracy"] * 100)
-            iteration_data["Wrong (%)"].append(100 - metrics["accuracy"] * 100)
-            iteration_data["Empty (%)"].append(0.0)
-
-            for k in range(1, config["top_k"]):
-                iteration_data[f"Top-{k + 1}"].append(
-                    metrics["top_k_correct_preds"][k] / metrics["total_predictions"] * 100
+                metrics, perplexities, eval_time, prediction_vector, training_time = process_rl_model(
+                    rl_name,
+                    w,
+                    iteration_data,
+                    nn_train_set_transformed,
+                    nn_val_set_transformed,
+                    rl_eval_set_transformed,
+                    epochs=default_run_config["rl"]["epochs"],
                 )
 
-            iteration_data["Pred Time"].append(eval_time)
-            iteration_data["Train Time"].append(training_time)
+                # Store prediction vector like other strategies
+                prediction_vectors_memory.setdefault(rl_name, []).append(prediction_vector)
 
-            iteration_data["Good Preds"].append(metrics["correct_predictions"])
-            iteration_data["Tot Preds"].append(metrics["total_predictions"])
-            iteration_data["Nb States"].append(None)
+                # Assert alignment with baseline actual vector for this iteration
+                actual_iters = prediction_vectors_memory.get("actual", [])
+                actual_len = len(actual_iters[iteration]) if len(actual_iters) > iteration else None
+                if actual_len is not None and len(prediction_vector) != actual_len:
+                    msg = (
+                        f"Length mismatch for {rl_name} at iter {iteration + 1}: "
+                        f"preds={len(prediction_vector)} vs actual={actual_len}."
+                    )
+                    logger.exception("RL prediction vector length mismatch: %s", msg)
+                    raise ValueError(msg)
 
-            stats_to_log.append(
-                {
-                    "strategy": rl_name,
-                    "strategy_accuracy": metrics["accuracy"] * 100,
-                    "strategy_perplexity": perplexity_stats["pp_harmonic_mean"],
-                    "strategy_eval_time": eval_time,
+                # Keep the same placeholders for RL perplexity as before
+                perplexity_stats = {
+                    "pp_harmonic_mean": None,
+                    "pp_arithmetic_mean": None,
+                    "pp_median": None,
+                    "pp_q1": None,
+                    "pp_q3": None,
                 }
-            )
 
-            all_metrics[rl_name]["accuracies"].append(metrics["accuracy"])
-            all_metrics[rl_name]["pp_arithmetic_mean"].append(perplexity_stats["pp_arithmetic_mean"])
-            all_metrics[rl_name]["pp_harmonic_mean"].append(perplexity_stats["pp_harmonic_mean"])
-            all_metrics[rl_name]["pp_median"].append(perplexity_stats["pp_median"])
-            all_metrics[rl_name]["pp_q1"].append(perplexity_stats["pp_q1"])
-            all_metrics[rl_name]["pp_q3"].append(perplexity_stats["pp_q3"])
-            for k in range(1, config["top_k"]):
-                all_metrics[rl_name][f"top-{k + 1}"].append(iteration_data[f"Top-{k + 1}"][-1])
+                eval_time *= SEC_TO_MICRO / TEST_EVENTS
 
-            all_metrics[rl_name]["pred_time"].append(eval_time)
-            all_metrics[rl_name]["train_time"].append(training_time)
+                if (
+                    not isinstance(metrics["top_k_correct_preds"], list)
+                    or not isinstance(metrics["total_predictions"], int)
+                    or not isinstance(metrics["accuracy"], float)
+                ):
+                    msg = f"{rl_name} stats are not in the expected format."
+                    raise TypeError(msg)
 
-            all_metrics[rl_name]["num_states"].append(0)
-            all_metrics[rl_name]["mean_delay_error"].append(None)
-            all_metrics[rl_name]["mean_actual_delay"].append(None)
-            all_metrics[rl_name]["mean_normalized_error"].append(None)
-            all_metrics[rl_name]["num_delay_predictions"].append(None)
+                iteration_data["Model"].append(rl_name)
+
+                iteration_data["PP Harmo"].append(perplexity_stats["pp_harmonic_mean"])
+                iteration_data["PP Arithm"].append(perplexity_stats["pp_arithmetic_mean"])
+                iteration_data["PP Median"].append(perplexity_stats["pp_median"])
+                iteration_data["PP Q1"].append(perplexity_stats["pp_q1"])
+                iteration_data["PP Q3"].append(perplexity_stats["pp_q3"])
+
+                iteration_data["Correct (%)"].append(metrics["accuracy"] * 100)
+                iteration_data["Wrong (%)"].append(100 - metrics["accuracy"] * 100)
+                iteration_data["Empty (%)"].append(0.0)
+
+                for k in range(1, config["top_k"]):
+                    iteration_data[f"Top-{k + 1}"].append(
+                        metrics["top_k_correct_preds"][k] / metrics["total_predictions"] * 100
+                    )
+
+                iteration_data["Pred Time"].append(eval_time)
+                iteration_data["Train Time"].append(training_time)
+
+                iteration_data["Good Preds"].append(metrics["correct_predictions"])
+                iteration_data["Tot Preds"].append(metrics["total_predictions"])
+                iteration_data["Nb States"].append(None)
+
+                stats_to_log.append(
+                    {
+                        "strategy": rl_name,
+                        "strategy_accuracy": metrics["accuracy"] * 100,
+                        "strategy_perplexity": perplexity_stats["pp_harmonic_mean"],
+                        "strategy_eval_time": eval_time,
+                    }
+                )
+
+                all_metrics[rl_name]["accuracies"].append(metrics["accuracy"])
+                all_metrics[rl_name]["pp_arithmetic_mean"].append(perplexity_stats["pp_arithmetic_mean"])
+                all_metrics[rl_name]["pp_harmonic_mean"].append(perplexity_stats["pp_harmonic_mean"])
+                all_metrics[rl_name]["pp_median"].append(perplexity_stats["pp_median"])
+                all_metrics[rl_name]["pp_q1"].append(perplexity_stats["pp_q1"])
+                all_metrics[rl_name]["pp_q3"].append(perplexity_stats["pp_q3"])
+                for k in range(1, config["top_k"]):
+                    all_metrics[rl_name][f"top-{k + 1}"].append(iteration_data[f"Top-{k + 1}"][-1])
+
+                all_metrics[rl_name]["pred_time"].append(eval_time)
+                all_metrics[rl_name]["train_time"].append(training_time)
+
+                all_metrics[rl_name]["num_states"].append(0)
+                all_metrics[rl_name]["mean_delay_error"].append(None)
+                all_metrics[rl_name]["mean_actual_delay"].append(None)
+                all_metrics[rl_name]["mean_normalized_error"].append(None)
+                all_metrics[rl_name]["num_delay_predictions"].append(None)
 
     # Create a DataFrame for the iteration and log it
     iteration_df = pd.DataFrame(iteration_data).round(2)

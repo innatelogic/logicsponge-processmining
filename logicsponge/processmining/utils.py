@@ -1,6 +1,7 @@
 """Utility functions for process mining."""
 
 import copy
+import json
 import logging
 import math
 from pathlib import Path
@@ -16,6 +17,45 @@ from logicsponge.processmining.config import DEFAULT_CONFIG
 from logicsponge.processmining.types import Config, Event, Metrics, Prediction, ProbDistr
 
 RED_TO_GREEN_CMAP = LinearSegmentedColormap.from_list("rg",["r", "w", "g"], N=256)
+
+
+def save_run_config(config: dict, dest: Path) -> bool:
+    """
+    Save a run configuration (JSON) to the specified path.
+
+    Returns True if write succeeded, False otherwise (and logs debug info).
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with dest.open("w") as _f:
+            json.dump(config, _f, indent=2)
+    except OSError as e:
+        logger.debug("Could not write run config to %s: %s", dest, e)
+        return False
+    else:
+        return True
+
+
+def add_file_log_handler(log_file_path: Path, fmt: str = "%(message)s") -> logging.Handler | None:
+    """
+    Add a FileHandler to the root logger writing to `log_file_path`.
+
+    Returns the handler on success, or None on failure. Does not remove existing
+    handlers; caller can manage handlers if needed.
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        log_file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_file_path)
+        formatter = logging.Formatter(fmt)
+        file_handler.setFormatter(formatter)
+        logging.root.addHandler(file_handler)
+    except OSError as e:
+        logger.debug("Could not create log file %s; continuing with console logging. %s", log_file_path, e)
+        return None
+    else:
+        return file_handler
 
 def extract_event_fields(event: Event) -> Event:
     """Extract the required fields from an event."""
