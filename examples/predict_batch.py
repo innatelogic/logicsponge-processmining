@@ -29,9 +29,9 @@ config_file_path = Path(__file__).parent / "predict_config.json"
 default_run_config = {
     "nn": {"lr": 0.001, "batch_size": 8, "epochs": 20},
     "rl": {"lr": 0.001, "batch_size": 8, "epochs": 20, "gamma": 0.99},
-    "lstm": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 512, "output_dim": 32},
-    "transformer": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 512, "output_dim": 32},
-    "qlearning": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 1024, "output_dim": 32},
+    "lstm": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 128, "output_dim": 32},
+    "transformer": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 128, "output_dim": 32},
+    "qlearning": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 512, "output_dim": 32},
 }
 
 # Write the default run configuration into `predict_config.json` in the repo folder.
@@ -106,20 +106,20 @@ def lstm_model() -> tuple[LSTMModel, optim.Optimizer, nn.Module]:
 def transformer_model() -> tuple[TransformerModel, optim.Optimizer, nn.Module]:
     """Initialize and return a Transformer model, optimizer, and loss function."""
     model = TransformerModel(
+        seq_input_dim=max_seq_length + 2,
         vocab_size=run_config.get("transformer", {}).get("vocab_size", 64),
         embedding_dim=run_config.get("transformer", {}).get("embedding_dim", 64),
         hidden_dim=run_config.get("transformer", {}).get("hidden_dim", 128),
         output_dim=run_config.get("transformer", {}).get("output_dim", 64),
         use_one_hot=True,
         device=device,
-        max_seq_len=max_seq_length + 2
     )  # +2 for start and stop symbols
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=run_config.get("nn", {}).get("lr", 0.001))
     return model, optimizer, criterion
 
 
-def process_neural_model(  # noqa: PLR0913, PLR0915
+def process_neural_model(  # noqa: C901, PLR0912, PLR0913, PLR0915
     name: str,
     iteration_data: dict,
     all_metrics: dict,
@@ -194,7 +194,7 @@ def process_neural_model(  # noqa: PLR0913, PLR0915
                 seq = nn_test_set_transformed[i]
                 valid_len = int((seq != 0).sum().item())
                 # Skip sequences too short to have a prefix
-                if valid_len < 2:
+                if valid_len < 2:  # noqa: PLR2004
                     continue
                 # iterate prefixes (k = 1..valid_len-1) to produce one pred per event
                 for k in range(1, valid_len):
@@ -207,7 +207,7 @@ def process_neural_model(  # noqa: PLR0913, PLR0915
                     outputs = model(prefix)
                     # outputs shape: [batch=1, seq_len=maybe<=window_size, vocab]
                     # We take the last timestep's logits as the prediction for the next token
-                    last_logits = outputs[:, -1, :].squeeze(0) if outputs.dim() == 3 else outputs.squeeze(0)
+                    last_logits = outputs[:, -1, :].squeeze(0) if outputs.dim() == 3 else outputs.squeeze(0)  # noqa: PLR2004
 
                     topk = torch.topk(last_logits, k=config["top_k"])
                     pred_idx = int(topk.indices[0].item())
@@ -391,7 +391,7 @@ class RLModelResults:
 
 def process_rl_model(
     _name: str,
-    window_size: int,
+    window_size: int | None,
     _iteration_data: dict[str, Any],
     nn_train_set_transformed: torch.Tensor,
     nn_val_set_transformed: torch.Tensor,
@@ -584,6 +584,7 @@ all_metrics: dict = {
         "alergia",
         "LSTM",
         "transformer",
+        "qlearning",
         *[f"LSTM_win{w}" for w in WINDOW_RANGE],
         *[f"transformer_win{w}" for w in WINDOW_RANGE],
         *[f"qlearning_win{w}" for w in WINDOW_RANGE],
@@ -1252,6 +1253,17 @@ for iteration in range(N_ITERATIONS):
                     )
                 else:
                     logger.debug("NN stored preds | model=%s | iter=%d | (no preds stored)", nn_name, iteration + 1)
+
+        logger.info("Training and evaluating qlearning model...")
+        process_rl_model(
+            "qlearning",
+            None,
+            iteration_data,
+            nn_train_set_transformed,
+            nn_val_set_transformed,
+            nn_test_set_transformed,
+            epochs=default_run_config["rl"]["epochs"],
+        )
 
         # RL (QNetwork) evaluation in batch mode (no RLMiner). Use process_rl_model to run training/eval
         for w in WINDOW_RANGE:

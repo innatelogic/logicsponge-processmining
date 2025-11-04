@@ -233,6 +233,7 @@ class TransformerModel(nn.Module):
 
     def __init__( # noqa: PLR0913
         self,
+        seq_input_dim: int,  # Was 512. Adjust if needed
         vocab_size: int,
         embedding_dim: int,
         hidden_dim: int,
@@ -240,19 +241,18 @@ class TransformerModel(nn.Module):
         *,
         use_one_hot: bool = False,
         device: torch.device | None = None,
-        max_seq_len: int = 1024,  # Was 512. Adjust if needed
     ) -> None:
         """
         Initialize the Transformer model.
 
         Args:
+            seq_input_dim (int): Input dimension for sequences.
             vocab_size (int): Size of the vocabulary.
             embedding_dim (int): Dimension of the embeddings.
             hidden_dim (int): Dimension of the hidden layers in the transformer.
             output_dim (int): Dimension of the output layer.
             use_one_hot (bool): Whether to use one-hot encoding instead of embeddings.
             device (torch.device | None): Device to run the model on (CPU or GPU).
-            max_seq_len (int): Maximum sequence length for positional encoding.
 
         """
         super().__init__()
@@ -267,15 +267,12 @@ class TransformerModel(nn.Module):
         else:
             self.embedding = None
 
-        # Input dimension
-        input_dim = vocab_size if use_one_hot else embedding_dim
-
         # Positional encoding: learnable [1, max_seq_len, input_dim]
-        self.pos_embedding = nn.Parameter(torch.zeros(1, max_seq_len, input_dim, device=device))
+        self.pos_embedding = nn.Parameter(torch.zeros(1, seq_input_dim, seq_input_dim, device=device))
 
         # Transformer encoder
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=input_dim,
+            d_model=seq_input_dim,
             nhead=1,
             dim_feedforward=hidden_dim,
             batch_first=True,
@@ -284,7 +281,7 @@ class TransformerModel(nn.Module):
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=2)
 
         # Output layer
-        self.fc = nn.Linear(input_dim, output_dim, device=device)
+        self.fc = nn.Linear(seq_input_dim, output_dim, device=device)
 
         # Custom initialization
         self.apply(self._init_weights)
@@ -378,7 +375,7 @@ class QNetwork(nn.Module):
         embedding_dim: int,
         hidden_dim: int,
         output_dim: int,
-        device: torch.device | None,
+        device: torch.device | None = None,
         *,
         use_one_hot: bool = False,
     ) -> None:
@@ -387,11 +384,13 @@ class QNetwork(nn.Module):
 
         Args:
             vocab_size (int): Size of the vocabulary.
-            embedding_dim (int): Dimension of the embeddings.
+            embedding_dim (int): Dimension of the embeddings (feature size per timestep when embeddings are used).
             hidden_dim (int): Dimension of the hidden layer in the GRU.
             output_dim (int): Dimension of the output layer.
             device (torch.device | None): Device to run the model on (CPU or GPU).
-            use_one_hot (bool): Whether to use one-hot encoding instead of embeddings.
+            use_one_hot (bool): Whether to use one-hot encoding instead of
+                embeddings. If True, the GRU input size is set to
+                `vocab_size`.
 
         """
         super().__init__()
@@ -409,8 +408,8 @@ class QNetwork(nn.Module):
             gru_input_dim = vocab_size
 
         # GRU input dimension depends on whether we use embedding or one-hot
-        self.gru = nn.GRU(gru_input_dim, hidden_dim, batch_first=True)
-        self.fc = nn.Linear(hidden_dim, output_dim)
+        self.gru = nn.GRU(gru_input_dim, hidden_dim, batch_first=True, device=device)
+        self.fc = nn.Linear(hidden_dim, output_dim, device=device)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -432,7 +431,15 @@ class QNetwork(nn.Module):
             emb = F.one_hot(x, num_classes=self.vocab_size).float().to(x.device)
 
         out, _ = self.gru(emb)  # out: [batch, seq_len, hidden_dim]
-        last = out[:, -1, :]  # last timestep
+        # Select per-row last valid (non-padding) timestep to avoid using padded steps
+        # lengths: number of non-zero tokens per row
+        lengths = (x != 0).sum(dim=1)  # [batch]
+        # When length is 0 (all padding), fall back to index 0 (safe due to padding embedding -> zeros)
+        last_indices = torch.clamp(lengths - 1, min=0)  # [batch]
+        # Gather last valid hidden state per row
+        batch_size, hidden_dim = out.size(0), out.size(2)
+        gather_index = last_indices.view(batch_size, 1, 1).expand(-1, 1, hidden_dim)
+        last = out.gather(dim=1, index=gather_index).squeeze(1)  # [batch, hidden_dim]
         logits = self.fc(last)  # [batch, output_dim]
         return logits.unsqueeze(1)  # match interface [batch, 1, vocab] expected by miners
 
@@ -572,7 +579,7 @@ def train_rl(  # noqa: PLR0913, PLR0915, C901
 
     This implementation uses Maximum Likelihood Estimation (MLE) through cross-entropy,
     which should converge to the same empirical distribution as N-gram frequency counts.
-    
+
     Key features for proper convergence:
     - Sufficient model capacity (embedding_dim and hidden_dim should be large enough)
     - Proper learning rate (use adaptive optimizer like Adam)
@@ -590,13 +597,13 @@ def train_rl(  # noqa: PLR0913, PLR0915, C901
     # This ensures we train on the full empirical distribution
     prefixes: list[torch.Tensor] = []
     targets: list[int] = []
-    
+
     for i in range(train_sequences.shape[0]):
         seq = train_sequences[i]
         valid_len = int((seq != 0).sum().item())
         if valid_len < RL_MIN_PREFIX_LEN:
             continue
-        
+
         # Create all possible prefixes (like N-gram does)
         for k in range(1, valid_len):
             prefix = seq[:k].clone()
@@ -645,9 +652,9 @@ def train_rl(  # noqa: PLR0913, PLR0915, C901
         epoch_total = 0
 
         with tqdm(total=len(loader), desc=f"Epoch {epoch + 1}/{epochs}", unit="batch") as pbar:
-            for x_pad, y_batch in loader:
+            for x_pad, y_batch_loop in loader:
                 x_batch = x_pad.to(device)
-                y_batch = y_batch.to(device)
+                y_batch = y_batch_loop.to(device)
 
                 # Forward pass: get Q-values (logits) for all actions
                 q_values = model(x_batch).squeeze(1)  # [batch_size, vocab_size]
@@ -658,10 +665,10 @@ def train_rl(  # noqa: PLR0913, PLR0915, C901
 
                 optimizer.zero_grad()
                 loss.backward()
-                
+
                 # Optional: gradient clipping for stability
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                
+
                 optimizer.step()
 
                 # Track accuracy
@@ -680,8 +687,13 @@ def train_rl(  # noqa: PLR0913, PLR0915, C901
         with torch.no_grad():
             _, _, val_acc, _ = evaluate_rl(model, val_sequences, window_size=window_size)
 
-        logger.info("Epoch %d: Loss=%.4f, Train Acc=%.4f, Val Acc=%.4f", 
-                   epoch, avg_loss, train_acc, val_acc)
+        logger.info(
+            "Epoch %d: Loss=%.4f, Train Acc=%.4f, Val Acc=%.4f",
+            epoch,
+            avg_loss,
+            train_acc,
+            val_acc,
+        )
 
         # Early stopping based on validation accuracy
         if val_acc > best_val_acc:
@@ -698,11 +710,11 @@ def train_rl(  # noqa: PLR0913, PLR0915, C901
     # Restore best model (the one that generalizes best)
     if best_state is not None:
         model.load_state_dict(best_state)
-    
+
     return model
 
 
-def evaluate_rl(
+def evaluate_rl(  # noqa: C901, PLR0912
     model: QNetwork,
     sequences: torch.Tensor,
     *,
@@ -785,7 +797,7 @@ def evaluate_rl(
     return stats, perplexities, eval_time, predicted_vector
 
 
-def train_rnn( # noqa: PLR0913 PLR0915
+def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
     model: LSTMModel | TransformerModel,
     train_sequences: torch.Tensor,
     val_sequences: torch.Tensor,
@@ -924,7 +936,7 @@ def train_rnn( # noqa: PLR0913 PLR0915
     return model
 
 
-def evaluate_rnn( # noqa: PLR0915
+def evaluate_rnn(  # noqa: PLR0913, PLR0915
     model: LSTMModel | TransformerModel,
     sequences: torch.Tensor,
     *,
