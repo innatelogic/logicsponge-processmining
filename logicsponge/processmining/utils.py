@@ -1,6 +1,7 @@
 """Utility functions for process mining."""
 
 import copy
+import logging
 import math
 from pathlib import Path
 from typing import NamedTuple
@@ -457,4 +458,107 @@ def save_all_comparison_heatmaps(
         "anticorrelation": anticorrelation_png,
         "similarity": similarity_png,
     }
+
+
+def discover_window_columns(df: pd.DataFrame, prefix: str) -> list[tuple[int, str]]:
+    """
+    Discover columns in a DataFrame whose names start with `prefix`.
+
+    Parse the integer window sizes from the suffix.
+
+    Returns a sorted list of (window_size, column_name). Any column whose suffix
+    cannot be parsed to int will be skipped and an exception logged.
+    """
+    logger = logging.getLogger(__name__)
+    cols = [c for c in df.columns if isinstance(c, str) and c.startswith(prefix)]
+    windows: list[tuple[int, str]] = []
+    for c in cols:
+        try:
+            windows.append((int(c.split(prefix)[-1]), c))
+        except Exception:
+            logger.exception("Could not parse window size from column: %s", c)
+
+    windows.sort()
+    return windows
+
+
+def plot_ngrams_vs_prefix(  # noqa: D417, PLR0913
+    df: pd.DataFrame,
+    ngram_names: list[str],
+    prefix: str,
+    *,
+    xlabel: str,
+    title: str,
+    out_png: str | Path,
+    grid_alpha: float = 0.25,
+) -> bool:
+    """
+    Plot "NGrams vs {prefix} windows".
+
+    Parameters
+    ----------
+    - df: DataFrame indexed by ngram name, columns are model names including columns
+      with names like '<prefix><window>' where <window> is an integer.
+    - ngram_names: list of ngram labels (rows to plot)
+    - prefix: column name prefix to discover window columns (e.g. 'qlearning_win')
+    - xlabel: x-axis label (e.g. 'Q-learning window size')
+    - title: short title used in the figure title
+    - out_png: path to save the resulting PNG
+    - grid_alpha: alpha transparency for the grid lines (default 0.25)
+
+    Returns True if a file was created, False if nothing was plotted (no columns / data).
+
+    """
+    logger = logging.getLogger(__name__)
+    out_path = Path(out_png)
+
+    windows = discover_window_columns(df, prefix)
+    if not windows:
+        logger.debug("No %s columns found for ngram vs %s plots; skipping.", prefix, title)
+        return False
+
+    windows_sorted, cols_sorted = zip(*windows, strict=True)
+
+    cmap = plt.get_cmap("tab10")
+    linestyles = ["-", "--", "-.", ":"]
+
+    plt.figure(figsize=(8, 6))
+    plotted_any = False
+    for i, ngram in enumerate(ngram_names):
+        if ngram not in df.index:
+            continue
+        y: list[float] = []
+        for col in cols_sorted:
+            try:
+                val = df.loc[ngram, col] if col in df.columns else np.nan
+                y.append(float(val) if not pd.isna(val) else np.nan)  # type: ignore # noqa: PGH003
+            except Exception:
+                # keep alignment even if a conversion fails
+                logger.exception("Failed converting value for row=%s col=%s", ngram, col)
+                y.append(np.nan)
+
+        if all(np.isnan(v) for v in y):
+            continue
+
+        color = cmap(i % cmap.N)
+        ls = linestyles[i % len(linestyles)]
+        plt.plot(list(windows_sorted), y, label=ngram, color=color, linestyle=ls, marker="o")
+        plotted_any = True
+
+    if not plotted_any:
+        logger.debug("No data plotted for %s vs %s; skipping file generation.", title, prefix)
+        plt.close()
+        return False
+
+    plt.xlabel(xlabel)
+    plt.ylabel("Percent")
+    plt.title(f"{title}: NGrams vs {prefix} windows")
+    plt.grid(alpha=grid_alpha)
+    plt.legend(title="Ngram", bbox_to_anchor=(1.05, 1), loc="upper left")
+    plt.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(out_path, dpi=150)
+    plt.close()
+    logger.info("Saved ngrams vs %s %s to: %s", prefix, title, out_path.resolve())
+    return True
 

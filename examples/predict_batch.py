@@ -27,26 +27,22 @@ logging.basicConfig(
 # Load run configuration (learning rates, batch sizes, epochs for NN and RL)
 config_file_path = Path(__file__).parent / "predict_config.json"
 default_run_config = {
-    "nn": {
-        "lr": 0.001,
-        "batch_size": 8,
-        "epochs": 20
-    },
-    "rl": {
-        "lr": 0.0008,
-        "batch_size": 8,
-        "epochs": 20,
-        "gamma": 0.99
-    }
+    "nn": {"lr": 0.001, "batch_size": 8, "epochs": 20},
+    "rl": {"lr": 0.001, "batch_size": 8, "epochs": 20, "gamma": 0.99},
+    "lstm": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 512, "output_dim": 32},
+    "transformer": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 512, "output_dim": 32},
+    "qlearning": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 1024, "output_dim": 32},
 }
+
+# Write the default run configuration into `predict_config.json` in the repo folder.
+# We intentionally write the defaults here (instead of loading) so that users get a
+# populated config file they can edit. If writing fails we fall back to in-memory defaults.
 try:
-    if config_file_path.exists():
-        with config_file_path.open("r") as _f:
-            run_config = json.load(_f)
-    else:
-        run_config = default_run_config
-except (json.JSONDecodeError, OSError):
-    # Fallback to defaults if the config file is malformed or unreadable
+    with config_file_path.open("w") as _f:
+        json.dump(default_run_config, _f, indent=2)
+    run_config = default_run_config
+except OSError as _e:
+    logging.getLogger(__name__).debug("Could not write default config to %s: %s", config_file_path, _e)
     run_config = default_run_config
 
 from logicsponge.processmining.algorithms_and_structures import (
@@ -94,13 +90,14 @@ SEC_TO_MICRO = 1_000_000
 
 def lstm_model() -> tuple[LSTMModel, optim.Optimizer, nn.Module]:
     """Initialize and return an LSTM model, optimizer, and loss function."""
-    vocab_size = 64  # Assume an upper bound on the number of activities
-    embedding_dim = 64
-
-    hidden_dim = 128
-    output_dim = vocab_size  # Output used to predict the next activity
-
-    model = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, use_one_hot=True, device=device)
+    model = LSTMModel(
+        vocab_size=run_config.get("lstm", {}).get("vocab_size", 64),
+        embedding_dim=run_config.get("lstm", {}).get("embedding_dim", 64),
+        hidden_dim=run_config.get("lstm", {}).get("hidden_dim", 128),
+        output_dim=run_config.get("lstm", {}).get("output_dim", 64),
+        use_one_hot=True,
+        device=device
+    )
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=run_config.get("nn", {}).get("lr", 0.001))
     return model, optimizer, criterion
@@ -108,21 +105,21 @@ def lstm_model() -> tuple[LSTMModel, optim.Optimizer, nn.Module]:
 
 def transformer_model() -> tuple[TransformerModel, optim.Optimizer, nn.Module]:
     """Initialize and return a Transformer model, optimizer, and loss function."""
-    vocab_size = 64  # Assume an upper bound on the number of activities
-    embedding_dim = 64
-
-    hidden_dim = 128
-    output_dim = vocab_size  # Output used to predict the next activity
-
     model = TransformerModel(
-        vocab_size, embedding_dim, hidden_dim, output_dim, use_one_hot=True, device=device, max_seq_len=max_seq_length+2
+        vocab_size=run_config.get("transformer", {}).get("vocab_size", 64),
+        embedding_dim=run_config.get("transformer", {}).get("embedding_dim", 64),
+        hidden_dim=run_config.get("transformer", {}).get("hidden_dim", 128),
+        output_dim=run_config.get("transformer", {}).get("output_dim", 64),
+        use_one_hot=True,
+        device=device,
+        max_seq_len=max_seq_length + 2
     )  # +2 for start and stop symbols
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=run_config.get("nn", {}).get("lr", 0.001))
     return model, optimizer, criterion
 
 
-def process_neural_model(  # noqa: PLR0913
+def process_neural_model(  # noqa: PLR0913, PLR0915
     name: str,
     iteration_data: dict,
     all_metrics: dict,
@@ -130,8 +127,19 @@ def process_neural_model(  # noqa: PLR0913
     nn_val_set_transformed: torch.Tensor,
     nn_test_set_transformed: torch.Tensor,
     epochs: int = 20,
-)-> None:
-    """Train and evaluate a NN model."""
+    *,
+    window_size: int | None = None,
+) -> None:
+    """
+    Train and evaluate a NN model.
+
+    When `window_size` is provided, the model is trained/evaluated on the last
+    `window_size` tokens of each sequence (mimicking the qlearning windowing).
+    Results are stored under a display name `f"{name}_win{window_size}"` so they
+    can be compared alongside the RL models.
+    """
+    display_name = f"{name}_win{window_size}" if window_size is not None else name
+
     match name:
         case "LSTM":
             model, optimizer, criterion = lstm_model()
@@ -141,7 +149,7 @@ def process_neural_model(  # noqa: PLR0913
             msg = "Unknown NN model."
             raise ValueError(msg)
 
-    # Train the LSTM on the train set with batch size and sequence-to-sequence targets
+    # Train the model on (optionally) windowed prefixes
     start_time = time.time()
     model = train_rnn(
         model,
@@ -151,15 +159,105 @@ def process_neural_model(  # noqa: PLR0913
         optimizer,
         batch_size=run_config.get("nn", {}).get("batch_size", 8),
         epochs=epochs,
+        window_size=window_size,
     )
     end_time = time.time()
     training_time = (end_time - start_time) * SEC_TO_MICRO / (TRAIN_EVENTS + VAL_EVENTS)
 
-    stats, perplexities, eval_time, prediction_vector = evaluate_rnn(
-        model, nn_test_set_transformed, max_k=config["top_k"], idx_to_activity=nn_processor.idx_to_activity
-    )
-    # Store neural model prediction vector in global memory
-    prediction_vectors_memory.setdefault(name, []).append(prediction_vector)
+    # If a window_size is provided we want to evaluate the model in "prefix" mode
+    # (one prediction per prefix), so that the resulting flattened prediction vector
+    # aligns with the baseline `actual` vector and with how RL/qlearning is evaluated.
+    if window_size is None:
+        stats, perplexities, eval_time, prediction_vector = evaluate_rnn(
+            model,
+            nn_test_set_transformed,
+            max_k=config["top_k"],
+            idx_to_activity=nn_processor.idx_to_activity,
+            window_size=None,
+        )
+    else:
+        # Local prefix-mode evaluation for RNN/Transformer: iterate prefixes and
+        # make a single prediction per prefix (cropping the input to the last
+        # `window_size` tokens before passing to the model). This mirrors
+        # evaluate_rl behavior and ensures alignment with `actual`.
+        eval_start = time.time()
+        correct = 0
+        total = 0
+        top_k_correct = [0] * config["top_k"]
+        prediction_vector = []
+
+        model.eval()
+        model_device = getattr(model, "device", None)
+
+        with torch.no_grad():
+            for i in range(nn_test_set_transformed.shape[0]):
+                seq = nn_test_set_transformed[i]
+                valid_len = int((seq != 0).sum().item())
+                # Skip sequences too short to have a prefix
+                if valid_len < 2:
+                    continue
+                # iterate prefixes (k = 1..valid_len-1) to produce one pred per event
+                for k in range(1, valid_len):
+                    prefix = seq[:k].unsqueeze(0)  # [1, k]
+                    if prefix.shape[1] > window_size:
+                        prefix = prefix[:, -window_size:]
+                    if model_device is not None:
+                        prefix = prefix.to(device=model_device)
+
+                    outputs = model(prefix)
+                    # outputs shape: [batch=1, seq_len=maybe<=window_size, vocab]
+                    # We take the last timestep's logits as the prediction for the next token
+                    last_logits = outputs[:, -1, :].squeeze(0) if outputs.dim() == 3 else outputs.squeeze(0)
+
+                    topk = torch.topk(last_logits, k=config["top_k"])
+                    pred_idx = int(topk.indices[0].item())
+
+                    # Map to activity names
+                    if nn_processor.idx_to_activity and pred_idx in nn_processor.idx_to_activity:
+                        prediction_vector.append(str(nn_processor.idx_to_activity[pred_idx]))
+                    else:
+                        prediction_vector.append(str(pred_idx))
+
+                    target_idx = int(seq[k].item())
+                    total += 1
+                    if pred_idx == target_idx:
+                        correct += 1
+                        for j in range(config["top_k"]):
+                            top_k_correct[j] += 1
+                    else:
+                        # count inclusion in top-k
+                        for j in range(config["top_k"]):
+                            if target_idx in {int(x) for x in topk.indices[: j + 1].tolist()}:
+                                top_k_correct[j] += 1
+
+        eval_time = time.time() - eval_start
+        stats = {
+            "accuracy": (correct / total) if total > 0 else 0.0,
+            "total_predictions": total,
+            "correct_predictions": correct,
+            "top_k_correct_preds": top_k_correct,
+        }
+        perplexities = []
+
+    # Store neural model prediction vector in global memory under display name
+    prediction_vectors_memory.setdefault(display_name, []).append(prediction_vector)
+
+    # Sanity/length alignment check: ensure NN produced the same number of
+    # predictions as the baseline `actual` vector for this iteration. The
+    # `actual` vector is appended earlier in the outer loop; here we compare
+    # against the most recent `actual` entry so misalignments are detected
+    # early and fail fast.
+    actual_iters = prediction_vectors_memory.get("actual", [])
+    if actual_iters:
+        # The current iteration's baseline is expected to be the last one
+        actual_len = len(actual_iters[-1])
+        if len(prediction_vector) != actual_len:
+            msg = (
+                f"Length mismatch for NN model '{display_name}': preds={len(prediction_vector)} "
+                f"vs actual={actual_len}. This indicates evaluation misalignment."
+            )
+            logger.exception(msg)
+            raise ValueError(msg)
 
     perplexity_stats = compute_perplexity_stats(perplexities)
     eval_time *= SEC_TO_MICRO / TEST_EVENTS
@@ -169,10 +267,11 @@ def process_neural_model(  # noqa: PLR0913
         or not isinstance(stats["total_predictions"], int)
         or not isinstance(stats["accuracy"], float)
     ):
-        msg = f"{name} stats are not in the expected format."
+        msg = f"{display_name} stats are not in the expected format."
         raise TypeError(msg)
+
     # Append data to the iteration data dictionary
-    iteration_data["Model"].append(name)
+    iteration_data["Model"].append(display_name)
 
     iteration_data["PP Harmo"].append(perplexity_stats["pp_harmonic_mean"])
     iteration_data["PP Arithm"].append(perplexity_stats["pp_arithmetic_mean"])
@@ -196,31 +295,50 @@ def process_neural_model(  # noqa: PLR0913
 
     stats_to_log.append(
         {
-            "strategy": name,
+            "strategy": display_name,
             "strategy_accuracy": stats["accuracy"] * 100,
             "strategy_perplexity": perplexity_stats["pp_harmonic_mean"],
             "strategy_eval_time": eval_time,
-            # "per_state_stats": None
         }
     )
 
-    all_metrics[name]["accuracies"].append(stats["accuracy"])
-    all_metrics[name]["pp_arithmetic_mean"].append(perplexity_stats["pp_arithmetic_mean"])
-    all_metrics[name]["pp_harmonic_mean"].append(perplexity_stats["pp_harmonic_mean"])
-    all_metrics[name]["pp_median"].append(perplexity_stats["pp_median"])
-    all_metrics[name]["pp_q1"].append(perplexity_stats["pp_q1"])
-    all_metrics[name]["pp_q3"].append(perplexity_stats["pp_q3"])
+    # Ensure the all_metrics dict has an entry for display_name
+    if display_name not in all_metrics:
+        all_metrics[display_name] = {
+            "accuracies": [],
+            "pp_arithmetic_mean": [],
+            "pp_harmonic_mean": [],
+            "pp_median": [],
+            "pp_q1": [],
+            "pp_q3": [],
+            "top-2": [],
+            "top-3": [],
+            "num_states": [],
+            "train_time": [],
+            "pred_time": [],
+            "mean_delay_error": [],
+            "mean_actual_delay": [],
+            "mean_normalized_error": [],
+            "num_delay_predictions": [],
+        }
+
+    all_metrics[display_name]["accuracies"].append(stats["accuracy"])
+    all_metrics[display_name]["pp_arithmetic_mean"].append(perplexity_stats["pp_arithmetic_mean"])
+    all_metrics[display_name]["pp_harmonic_mean"].append(perplexity_stats["pp_harmonic_mean"])
+    all_metrics[display_name]["pp_median"].append(perplexity_stats["pp_median"])
+    all_metrics[display_name]["pp_q1"].append(perplexity_stats["pp_q1"])
+    all_metrics[display_name]["pp_q3"].append(perplexity_stats["pp_q3"])
     for k in range(1, config["top_k"]):
-        all_metrics[name][f"top-{k + 1}"].append(iteration_data[f"Top-{k + 1}"][-1])
+        all_metrics[display_name][f"top-{k + 1}"].append(iteration_data[f"Top-{k + 1}"][-1])
 
-    all_metrics[name]["pred_time"].append(eval_time)
-    all_metrics[name]["train_time"].append(training_time)
+    all_metrics[display_name]["pred_time"].append(eval_time)
+    all_metrics[display_name]["train_time"].append(training_time)
 
-    all_metrics[name]["num_states"].append(0)
-    all_metrics[name]["mean_delay_error"].append(None)
-    all_metrics[name]["mean_actual_delay"].append(None)
-    all_metrics[name]["mean_normalized_error"].append(None)
-    all_metrics[name]["num_delay_predictions"].append(None)
+    all_metrics[display_name]["num_states"].append(0)
+    all_metrics[display_name]["mean_delay_error"].append(None)
+    all_metrics[display_name]["mean_actual_delay"].append(None)
+    all_metrics[display_name]["mean_normalized_error"].append(None)
+    all_metrics[display_name]["num_delay_predictions"].append(None)
 
 
 # ============================================================
@@ -242,26 +360,16 @@ NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 
 # ============================================================
 
-# RL (QNetwork) window configurations (for looped creation of models)
-RL_WINDOWS = WINDOW_RANGE
-RL_MODEL_NAMES = [f"qlearning_win{w}" for w in RL_WINDOWS]
-
 
 def qnetwork_model() -> tuple[QNetwork, optim.Optimizer, nn.Module]:
     """Initialize a QNetwork model for RL training."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    vocab_size = 32  # Assume an upper bound on the number of activities
-    embedding_dim = 32
-
-    hidden_dim = 1024 # was 512
-    output_dim = vocab_size  # Output used to predict the next activity
-
     model = QNetwork(
-        vocab_size=vocab_size,
-        embedding_dim=embedding_dim,
-        hidden_dim=hidden_dim,
-        output_dim=output_dim,
+        vocab_size=run_config.get("qlearning", {}).get("vocab_size", 32),
+        embedding_dim=run_config.get("qlearning", {}).get("embedding_dim", 32),
+        hidden_dim=run_config.get("qlearning", {}).get("hidden_dim", 1024),
+        output_dim=run_config.get("qlearning", {}).get("output_dim", 32),
         device=device,
     ).to(device)
     optimizer = optim.Adam(model.parameters(), lr=run_config.get("rl", {}).get("lr", 0.001))
@@ -476,7 +584,9 @@ all_metrics: dict = {
         "alergia",
         "LSTM",
         "transformer",
-    *RL_MODEL_NAMES,
+        *[f"LSTM_win{w}" for w in WINDOW_RANGE],
+        *[f"transformer_win{w}" for w in WINDOW_RANGE],
+        *[f"qlearning_win{w}" for w in WINDOW_RANGE],
         "bayesian train",
         "bayesian test",
         "bayesian t+t",
@@ -1113,6 +1223,21 @@ for iteration in range(N_ITERATIONS):
                     nn_val_set_transformed=nn_val_set_transformed,
                     nn_test_set_transformed=nn_test_set_transformed,
                 )
+            # Also train/evaluate windowed variants similar to RL qlearning windows
+            for w in WINDOW_RANGE:
+                for name in ["LSTM", "transformer"]:
+                    msg = f"Training and evaluating {name} with window={w}..."
+                    logger.info(msg)
+                    process_neural_model(
+                        name=name,
+                        iteration_data=iteration_data,
+                        all_metrics=all_metrics,
+                        nn_train_set_transformed=nn_train_set_transformed,
+                        nn_val_set_transformed=nn_val_set_transformed,
+                        nn_test_set_transformed=nn_test_set_transformed,
+                        epochs=default_run_config.get("nn", {}).get("epochs", 20),
+                        window_size=w,
+                    )
             # After NN evaluation in this iteration, print a short summary of NN entries
             for nn_name in ("LSTM", "transformer"):
                 vecs = prediction_vectors_memory.get(nn_name, [])
@@ -1129,7 +1254,7 @@ for iteration in range(N_ITERATIONS):
                     logger.debug("NN stored preds | model=%s | iter=%d | (no preds stored)", nn_name, iteration + 1)
 
         # RL (QNetwork) evaluation in batch mode (no RLMiner). Use process_rl_model to run training/eval
-        for w in RL_WINDOWS:
+        for w in WINDOW_RANGE:
             rl_name = f"qlearning_win{w}"
             logger.info("Training and evaluating %s model...", rl_name)
 
@@ -1483,73 +1608,89 @@ try:
         except (OSError, RuntimeError, ValueError) as e:
             logger.debug("Could not auto-save heatmap image: %s", e, exc_info=True)
 
-    # --- Additional plots: for each ngram (one curve) show values across qlearning windows ---
+            # --- Additional plots: for each ngram (one curve) show values across qlearning windows ---
     try:
-        # discover qlearning columns and their window sizes
-        q_cols = [c for c in correlation_df.columns if isinstance(c, str) and c.startswith("qlearning_win")]
-        q_windows = []
-        for c in q_cols:
-            try:
-                q_windows.append((int(c.split("qlearning_win")[-1]), c))
-            except Exception:
-                # skip unparsable names
-                continue
+        from logicsponge.processmining.utils import plot_ngrams_vs_prefix
 
-        if not q_windows:
-            logger.debug("No qlearning columns found for ngram vs qlearning plots; skipping.")
-        else:
-            # sort by window size
-            q_windows.sort()
-            windows_sorted, q_cols_sorted = zip(*q_windows)
+        # Q-learning windows
+        plot_ngrams_vs_prefix(
+            correlation_df,
+            NGRAM_NAMES,
+            "qlearning_win",
+            xlabel="Q-learning window size",
+            title="Correlation",
+            out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_qlearning_correlation.png",
+        )
+        plot_ngrams_vs_prefix(
+            anticorrelation_df,
+            NGRAM_NAMES,
+            "qlearning_win",
+            xlabel="Q-learning window size",
+            title="Anticorrelation",
+            out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_qlearning_anticorrelation.png",
+        )
+        plot_ngrams_vs_prefix(
+            similarity_df,
+            NGRAM_NAMES,
+            "qlearning_win",
+            xlabel="Q-learning window size",
+            title="Similarity",
+            out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_qlearning_similarity.png",
+        )
 
-            # Styles: distinct color + linestyles cycling
-            cmap = plt.get_cmap("tab10")
-            linestyles = ["-", "--", "-.", ":"]
+        # Transformer windows
+        plot_ngrams_vs_prefix(
+            correlation_df,
+            NGRAM_NAMES,
+            "transformer_win",
+            xlabel="Model window size",
+            title="Correlation",
+            out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_transformer_win_transformer_correlation.png",
+        )
+        plot_ngrams_vs_prefix(
+            anticorrelation_df,
+            NGRAM_NAMES,
+            "transformer_win",
+            xlabel="Model window size",
+            title="Anticorrelation",
+            out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_transformer_win_transformer_anticorrelation.png",
+        )
+        plot_ngrams_vs_prefix(
+            similarity_df,
+            NGRAM_NAMES,
+            "transformer_win",
+            xlabel="Model window size",
+            title="Similarity",
+            out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_transformer_win_transformer_similarity.png",
+        )
 
-            # function to plot one dataframe
-            def _plot_ngrams_vs_q(df: pd.DataFrame, title: str, suffix: str) -> None:
-                plt.figure(figsize=(8, 6))
-                plotted_any = False
-                for i, ngram in enumerate(NGRAM_NAMES):
-                    if ngram not in df.index:
-                        # skip missing ngram rows
-                        continue
-                    y = []
-                    for col in q_cols_sorted:
-                        val = df.loc[ngram, col] if col in df.columns else np.nan
-                        y.append(float(val) if not pd.isna(val) else np.nan) # type: ignore
-
-                    # skip if all NaN
-                    if all(np.isnan(v) for v in y):
-                        continue
-
-                    color = cmap(i % cmap.N)
-                    ls = linestyles[i % len(linestyles)]
-                    plt.plot(list(windows_sorted), y, label=ngram, color=color, linestyle=ls, marker="o")
-                    plotted_any = True
-
-                if not plotted_any:
-                    logger.debug("No data plotted for %s; skipping file generation.", title)
-                    plt.close()
-                    return
-
-                plt.xlabel("Q-learning window size")
-                plt.ylabel("Percent")
-                plt.title(f"{title}: NGrams vs Q-learning windows")
-                plt.grid(True, alpha=0.25)
-                plt.legend(title="Ngram", bbox_to_anchor=(1.05, 1), loc="upper left")
-                plt.tight_layout()
-                out_png = stats_file_path.parent / f"{RUN_ID}_ngrams_vs_qlearning_{suffix}.png"
-                plt.savefig(out_png, dpi=150)
-                plt.close()
-                logger.info("[COMPARISON] Saved ngrams vs qlearning %s to: %s", suffix, out_png.resolve())
-
-            # Plot correlation, anticorrelation, similarity
-            _plot_ngrams_vs_q(correlation_df, "Correlation", "correlation")
-            _plot_ngrams_vs_q(anticorrelation_df, "Anticorrelation", "anticorrelation")
-            _plot_ngrams_vs_q(similarity_df, "Similarity", "similarity")
-    except Exception as e:
-        logger.debug("Could not generate ngrams vs qlearning plots: %s", e, exc_info=True)
+        # LSTM windows
+        plot_ngrams_vs_prefix(
+            correlation_df,
+            NGRAM_NAMES,
+            "LSTM_win",
+            xlabel="Model window size",
+            title="Correlation",
+            out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_LSTM_win_lstm_correlation.png",
+        )
+        plot_ngrams_vs_prefix(
+            anticorrelation_df,
+            NGRAM_NAMES,
+            "LSTM_win",
+            xlabel="Model window size",
+            title="Anticorrelation",
+            out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_LSTM_win_lstm_anticorrelation.png",
+        )
+        plot_ngrams_vs_prefix(
+            similarity_df,
+            NGRAM_NAMES,
+            "LSTM_win",
+            xlabel="Model window size",
+            title="Similarity",
+            out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_LSTM_win_lstm_similarity.png",
+        )
+    except Exception:
+        logger.exception("Could not generate ngrams vs qlearning plots")
 except (ValueError, KeyError, TypeError, ZeroDivisionError, IndexError, OSError, RuntimeError):
     logger.exception("Failed to build cross-reference comparison table")
 

@@ -6,8 +6,26 @@
   },
   "rl": {
     "lr": 0.001,
-    "batch_size": 4,
+    "batch_size": 8,
     "epochs": 20,
     "gamma": 0.99
+  },
+  "lstm": {
+    "vocab_size": 64,
+    "embedding_dim": 64,
+    "hidden_dim": 128,
+    "output_dim": 64
+  },
+  "transformer": {
+    "vocab_size": 64,
+    "embedding_dim": 64,
+    "hidden_dim": 128,
+    "output_dim": 64
+  },
+  "qlearning": {
+    "vocab_size": 32,
+    "embedding_dim": 32,
+    "hidden_dim": 2048,
+    "output_dim": 32
   }
 }

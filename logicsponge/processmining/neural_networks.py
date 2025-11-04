@@ -794,6 +794,8 @@ def train_rnn( # noqa: PLR0913 PLR0915
     batch_size: int,
     epochs: int = 10,
     patience: int = 3,
+    *,
+    window_size: int | None = None,
 ) -> LSTMModel | TransformerModel:
     """
     Train the RNN model on the training set and evaluate on the validation set.
@@ -817,9 +819,34 @@ def train_rnn( # noqa: PLR0913 PLR0915
             for batch in dataloader:
                 sequences = batch[0]
 
-                # Input is the entire sequence except the last element (predict all positions)
-                x_batch = sequences[:, :-1]  # All but the last token are input
-                y_batch = sequences[:, 1:]  # Target: sequence shifted by one
+                # Build teacher-forcing pairs: x is all but last token, y is shifted by one
+                x_full = sequences[:, :-1]
+                y_full = sequences[:, 1:]
+
+                # If a window size is provided, we must slice the last `window_size`
+                # NON-PADDING tokens per row, not the last columns of the padded tensor.
+                if window_size is not None:
+                    x_slices: list[torch.Tensor] = []
+                    y_slices: list[torch.Tensor] = []
+                    # Compute per-row effective lengths (exclude padding=0)
+                    lengths = (x_full != 0).sum(dim=1).tolist()
+                    for b, eff_len in enumerate(lengths):
+                        eff = int(eff_len)
+                        if eff <= 0:
+                            # skip empty row (will contribute nothing to loss via masking)
+                            x_slices.append(torch.zeros(0, dtype=torch.long))
+                            y_slices.append(torch.zeros(0, dtype=torch.long))
+                            continue
+                        start = max(0, eff - window_size)
+                        x_slices.append(x_full[b, start:eff].clone())
+                        y_slices.append(y_full[b, start:eff].clone())
+
+                    # Re-pad windows to a batch tensor
+                    x_batch = pad_sequence(x_slices, batch_first=True, padding_value=0)
+                    y_batch = pad_sequence(y_slices, batch_first=True, padding_value=0)
+                else:
+                    x_batch = x_full
+                    y_batch = y_full
 
                 if model_device is not None:
                     x_batch = x_batch.to(model_device)
@@ -859,7 +886,7 @@ def train_rnn( # noqa: PLR0913 PLR0915
         msg = "Evaluating on validation set..."
         logger.info(msg)
         # updated unpacking to accept extra returned predicted-vector (ignored here)
-        stats, _, _, _ = evaluate_rnn(model, val_sequences)
+        stats, _, _, _ = evaluate_rnn(model, val_sequences, window_size=window_size)
         val_accuracy = stats["accuracy"]
 
         if not isinstance(val_accuracy, float):
@@ -904,6 +931,7 @@ def evaluate_rnn( # noqa: PLR0915
     per_sequence_perplexity: bool = True,
     max_k: int = 3,
     idx_to_activity: dict[int, ActivityName] | None = None,
+    window_size: int | None = None,
 ) -> tuple[dict[str, float | list[int]], list[float], float, list[str]]:
     """
     Evaluate the LSTM/Transformer model on a dataset (train, test, or validation).
@@ -942,6 +970,15 @@ def evaluate_rnn( # noqa: PLR0915
             # Input is all but the last token, target is the sequence shifted by one
             x_input_cpu = single_sequence_trace[:-1]
             y_target_cpu = single_sequence_trace[1:]
+
+            # If windowing is requested, keep only the last `window_size` NON-PADDING tokens.
+            if window_size is not None:
+                # effective length (exclude padding=0) for x_input_cpu
+                eff_len = int((x_input_cpu != 0).sum().item())
+                if eff_len > 0:
+                    start = max(0, eff_len - window_size)
+                    x_input_cpu = x_input_cpu[start:eff_len]
+                    y_target_cpu = y_target_cpu[start:eff_len]
 
             x_input = x_input_cpu.unsqueeze(0)
             y_target = y_target_cpu.unsqueeze(0)
