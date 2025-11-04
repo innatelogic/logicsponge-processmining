@@ -1254,20 +1254,9 @@ for iteration in range(N_ITERATIONS):
                 else:
                     logger.debug("NN stored preds | model=%s | iter=%d | (no preds stored)", nn_name, iteration + 1)
 
-        logger.info("Training and evaluating qlearning model...")
-        process_rl_model(
-            "qlearning",
-            None,
-            iteration_data,
-            nn_train_set_transformed,
-            nn_val_set_transformed,
-            nn_test_set_transformed,
-            epochs=default_run_config["rl"]["epochs"],
-        )
-
         # RL (QNetwork) evaluation in batch mode (no RLMiner). Use process_rl_model to run training/eval
-        for w in WINDOW_RANGE:
-            rl_name = f"qlearning_win{w}"
+        for w in [None, *WINDOW_RANGE] : # Include both no-window and windowed variants
+            rl_name = f"qlearning_win{w}" if w is not None else "qlearning"
             logger.info("Training and evaluating %s model...", rl_name)
 
             metrics, perplexities, eval_time, prediction_vector, training_time = process_rl_model(
