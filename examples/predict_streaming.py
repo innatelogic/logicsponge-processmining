@@ -25,6 +25,7 @@ from logicsponge.core import DataItem, DataItemFilter  # type: ignore # noqa: PG
 # from logicsponge.core import dashboard
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
 from logicsponge.processmining.config import DEFAULT_CONFIG
+from logicsponge.processmining.data_utils import data_statistics, transform_to_seqs
 from logicsponge.processmining.models import (
     AdaptiveVoting,
     BasicMiner,
@@ -33,6 +34,7 @@ from logicsponge.processmining.models import (
     NeuralNetworkMiner,
     RLMiner,  # added RLMiner
     SoftVoting,
+    WindowedNeuralNetworkMiner,
 )
 from logicsponge.processmining.neural_networks import LSTMModel, QNetwork, TransformerModel
 from logicsponge.processmining.streaming import (
@@ -47,6 +49,11 @@ from logicsponge.processmining.streaming import (
     StreamingActivityPredictor,
 )
 from logicsponge.processmining.test_data import data_name, dataset
+
+# Non necessary, but nice for debugging
+data = transform_to_seqs(dataset)
+n_activities, max_seq_length = data_statistics(data)
+
 
 logger = logging.getLogger(__name__)
 RUN_ID = time.strftime("%Y-%m-%d_%H-%M", time.localtime()) + f"_{data_name}"
@@ -116,7 +123,10 @@ SOFT_VOTING_NGRAMS = [
     (2, 3, 4, 5),
 ]  # (2, 3, 6, 8), (2, 3, 5, 6), (2, 3, 4, 6), (2, 3, 6, 7), (2, 3, 7, 8), (2, 3, 6, 8)
 
-WINDOW_RANGE = [1, 2, 3, 4, 5, 8]  # 0, 1, 2, 3, 4, 5, 6, 7, 8 , 9, 10, 12, 14, 16]
+WINDOW_RANGE = [1, 2, 3, 4, 5, 6, 7, 8] # [1, 2, 3, 4, 5, 8]  # 0, 1, 2, 3, 4, 5, 6, 7, 8 , 9, 10, 12, 14, 16]
+
+# NN/RL window range aligned with predict_batch.py
+NN_WINDOW_RANGE = WINDOW_RANGE # [1, 2, 3, 4, 5, 6, 7, 8]
 
 NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 # ] + [
@@ -129,9 +139,10 @@ NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 NGRAM_RETURN_TO_INITIAL = True
 # ============================================================
 
-# RL (QNetwork) window configurations
-RL_WINDOWS = [4, 8, 24]
+# RL (QNetwork) window configurations (align to batch-style windows)
+RL_WINDOWS = NN_WINDOW_RANGE
 RL_NAMES = [f"qlearning_win{w}" for w in RL_WINDOWS]
+RL_BASELINE_NAME = "qlearning"
 
 fpt = StreamingActivityPredictor(
     strategy=BasicMiner(algorithm=FrequencyPrefixTree(), config=config),
@@ -326,7 +337,7 @@ adaptive_voting = StreamingActivityPredictor(
     )
 )
 
-# Initialize LSTMs
+# Initialize LSTMs (base model without window constraint)
 vocab_size = 50  # An upper bound on the number of activities
 embedding_dim = 50
 hidden_dim = 128
@@ -346,11 +357,12 @@ lstm = StreamingActivityPredictor(
 )
 
 
-# Initialize transformer model
+# Initialize transformer model (base model without window constraint)
 hidden_dim = 128
 output_dim = vocab_size  # Output used to predict the next activity
 
 model_transformer = TransformerModel(
+    seq_input_dim=max_seq_length + 2,
     vocab_size=vocab_size,
     embedding_dim=embedding_dim,
     hidden_dim=hidden_dim,
@@ -369,6 +381,50 @@ transformer = StreamingActivityPredictor(
         config=config,
     )
 )
+
+# Windowed LSTM/Transformer models (like batch mode NN windowing)
+LSTM_MODELS: dict[str, StreamingActivityPredictor] = {}
+TRANSFORMER_MODELS: dict[str, StreamingActivityPredictor] = {}
+LSTM_WIN_NAMES = [f"lstm_win{w}" for w in NN_WINDOW_RANGE]
+TRANSFORMER_WIN_NAMES = [f"transformer_win{w}" for w in NN_WINDOW_RANGE]
+
+for w in NN_WINDOW_RANGE:
+    # LSTM windowed variant
+    model_lstm_w = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, device=device, use_one_hot=True)
+    criterion_l = nn.CrossEntropyLoss()
+    optimizer_l = optim.Adam(model_lstm_w.parameters(), lr=0.001)
+    LSTM_MODELS[f"lstm_win{w}"] = StreamingActivityPredictor(
+        strategy=WindowedNeuralNetworkMiner(
+            model=model_lstm_w,
+            criterion=criterion_l,
+            optimizer=optimizer_l,
+            batch_size=8,
+            sequence_buffer_length=w,
+            config=config,
+        )
+    )
+
+    # Transformer windowed variant
+    model_tr_w = TransformerModel(
+        seq_input_dim=max_seq_length + 2,
+        vocab_size=vocab_size,
+        embedding_dim=embedding_dim,
+        hidden_dim=hidden_dim,
+        output_dim=output_dim,
+        use_one_hot=True,
+    )
+    criterion_t = nn.CrossEntropyLoss()
+    optimizer_t = optim.Adam(model_tr_w.parameters(), lr=0.0001)
+    TRANSFORMER_MODELS[f"transformer_win{w}"] = StreamingActivityPredictor(
+        strategy=WindowedNeuralNetworkMiner(
+            model=model_tr_w,
+            criterion=criterion_t,
+            optimizer=optimizer_t,
+            batch_size=8,
+            sequence_buffer_length=w,
+            config=config,
+        )
+    )
 
 # RL (QNetwork) models built in a loop
 RL_MODELS: dict[str, StreamingActivityPredictor] = {}
@@ -395,6 +451,29 @@ for w in RL_WINDOWS:
         )
     )
 
+# Add a single non-windowed qlearning baseline (use a large buffer to approximate no window)
+model_qlearning_base = QNetwork(
+    vocab_size=vocab_size,
+    embedding_dim=embedding_dim,
+    hidden_dim=hidden_dim,
+    output_dim=output_dim,
+    device=device,
+).to(device)
+criterion_q_base = nn.MSELoss()
+optimizer_q_base = optim.Adam(model_qlearning_base.parameters(), lr=0.001)
+
+RL_MODELS[RL_BASELINE_NAME] = StreamingActivityPredictor(
+    strategy=RLMiner(
+        model=model_qlearning_base,
+        criterion=criterion_q_base,
+        optimizer=optimizer_q_base,
+        config=config,
+        sequence_buffer_length=10000,  # effectively unlimited for typical sequences
+        long_term_mem_size=8,
+        short_term_mem_size=16,
+    )
+)
+
 # ====================================================
 # Sponge
 # ====================================================
@@ -419,7 +498,10 @@ models = [
     *list(soft_voting_predictors.keys()),  # Add all soft_voting predictor names
     "lstm",
     "transformer",
+    *LSTM_WIN_NAMES,
+    *TRANSFORMER_WIN_NAMES,
     *RL_NAMES,
+    RL_BASELINE_NAME,
 ]
 
 
@@ -569,12 +651,39 @@ sponge = (
         | (
             (
                 AddStartSymbol(start_symbol=start_symbol)
+                * LSTM_MODELS[name]
+                * DataItemFilter(data_item_filter=start_filter)
+                * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name)
+                * Evaluation(name)
+            )
+            for name in LSTM_WIN_NAMES
+        )
+        | (
+            (
+                AddStartSymbol(start_symbol=start_symbol)
+                * TRANSFORMER_MODELS[name]
+                * DataItemFilter(data_item_filter=start_filter)
+                * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name)
+                * Evaluation(name)
+            )
+            for name in TRANSFORMER_WIN_NAMES
+        )
+        | (
+            (
+                AddStartSymbol(start_symbol=start_symbol)
                 * RL_MODELS[name]
                 * DataItemFilter(data_item_filter=start_filter)
                 * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name)
                 * Evaluation(name)
             )
             for name in RL_NAMES
+        )
+        | (
+            AddStartSymbol(start_symbol=start_symbol)
+            * RL_MODELS[RL_BASELINE_NAME]
+            * DataItemFilter(data_item_filter=start_filter)
+            * PredictionCSVWriter(csv_path=predictions_dir / f"{RL_BASELINE_NAME}.csv", model_name=RL_BASELINE_NAME)
+            * Evaluation(RL_BASELINE_NAME)
         )
     )
     * ls.MergeToSingleStream()

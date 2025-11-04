@@ -1641,6 +1641,105 @@ class NeuralNetworkMiner(StreamingMiner):
         raise NotImplementedError(msg)
 
 
+# ============================================================
+# Windowed Neural Network Miner (limits context by window length)
+# ============================================================
+
+
+class WindowedNeuralNetworkMiner(NeuralNetworkMiner):
+    """Neural Network miner that restricts context to the last N tokens per case.
+
+    This mirrors the "window_size" behavior used in batch mode when training/evaluating
+    LSTM/Transformer models on only the last ``window_size`` tokens. Here we enforce
+    a sequence buffer per case so both training and prediction use at most the most
+    recent ``sequence_buffer_length`` tokens.
+    """
+
+    def __init__(
+        self,
+        *args: dict[str, Any],
+        model: RNNModel | LSTMModel | TransformerModel,
+        batch_size: int,
+        optimizer,  # noqa: ANN001
+        criterion,  # noqa: ANN001
+        sequence_buffer_length: int = 50,
+        **kwargs: Any,  # noqa: ANN401
+    ) -> None:
+        super().__init__(*args, model=model, batch_size=batch_size, optimizer=optimizer, criterion=criterion, **kwargs)
+        if sequence_buffer_length < 1:
+            msg = "sequence_buffer_length must be >= 1"
+            raise ValueError(msg)
+        self.sequence_buffer_length = int(sequence_buffer_length)
+
+    def _trim_sequence(self, case_id: CaseId) -> None:
+        """Keep only the last ``sequence_buffer_length`` tokens for the case."""
+        if case_id in self.sequences:
+            seq = self.sequences[case_id]
+            if len(seq) > self.sequence_buffer_length:
+                # Slice to the last window
+                self.sequences[case_id] = seq[-self.sequence_buffer_length :]
+
+    def update(self, event: Event) -> None:
+        """Same as parent update but ensures window trimming before training step."""
+        case_id = event["case_id"]
+        activity = event["activity"]
+
+        # Dynamically update activity_to_idx if the activity is new
+        if activity not in self.activity_index:
+            current_idx = len(self.activity_index) + 1
+            self.activity_index[activity] = current_idx
+            self.index_activity[current_idx] = activity
+
+        # Convert activity to its corresponding index
+        activity_idx = self.activity_index[activity]
+
+        # Add the activity index to the sequence for the given case_id
+        if case_id not in self.sequences:
+            self.sequences[case_id] = []
+        self.sequences[case_id].append(activity_idx)
+
+        # Enforce window before training
+        self._trim_sequence(case_id)
+
+        # Select batch and proceed as parent
+        batch = self.select_batch(case_id)
+        if len(batch) == 0:
+            logger.info("Skipping training step because no valid sequences were found.")
+            return
+
+        # Training step (same as parent)
+        self.model.train()
+        batch_sequences = [torch.tensor(seq, dtype=torch.long, device=self.device) for seq in batch]
+        x_batch = pad_sequence(batch_sequences, batch_first=True, padding_value=0)
+
+        # Input is all but the last token in each sequence, target is shifted by one position
+        x_input = x_batch[:, :-1]
+        y_target = x_batch[:, 1:].reshape(-1)
+
+        self.optimizer.zero_grad()
+        outputs = self.model(x_input)
+        outputs = outputs.view(-1, outputs.shape[-1])
+
+        mask = y_target != 0
+        outputs = outputs[mask]
+        y_target = y_target[mask]
+
+        loss = self.criterion(outputs, y_target)
+        loss.backward()
+        self.optimizer.step()
+
+    def case_metrics(self, case_id: CaseId) -> Metrics:
+        """Predict using only the last ``sequence_buffer_length`` tokens of the case."""
+        index_sequence = self.get_sequence(case_id)
+        if not index_sequence or len(index_sequence) < 1:
+            return empty_metrics()
+
+        windowed = index_sequence[-self.sequence_buffer_length :]
+        if len(windowed) < 1:
+            return empty_metrics()
+        probs = self.idx_sequence_probs(windowed)
+        return Metrics(state_id=-1, probs=probs, predicted_delays={})
+
 # New: Reinforcement-Learning-style miner (REINFORCE-like updates)
 class RLMiner(NeuralNetworkMiner):
     """
@@ -1711,8 +1810,8 @@ class RLMiner(NeuralNetworkMiner):
         Single-step RL-style update.
 
         - Use current sequence (before this event) as context to get the model prediction.
-        - Reward r = 1.0 if predicted activity == observed activity, else 0.0 (used for logging).
-        - Loss = -log_prob(observed_activity | current_seq) [always applied, no reward gating].
+        - Reward r = 1.0 if predicted activity == observed activity, else 0.0 (or external event['reward'] if present).
+        - Loss = - r * log_prob(observed_activity | current_seq)  (REINFORCE-style scaling).
         - Backpropagate immediately (no batch).
         - Finally, enqueue observed activity into the per-case sequence buffer.
         """
@@ -1728,7 +1827,7 @@ class RLMiner(NeuralNetworkMiner):
             logger.debug("[RLMiner.update] current_seq idx=%s", current_seq)
             logger.debug("[RLMiner.update] current_seq names=%s", seq_names)
 
-        # Compute reward based on model prediction from current context (for logging and optional external reward)
+        # Compute reward based on model prediction from current context (external reward overrides if provided)
         if current_seq and len(current_seq) >= 1:
             probs = self.idx_sequence_probs(current_seq)
             pred = probs_prediction(probs, config=self.config)
@@ -1744,9 +1843,9 @@ class RLMiner(NeuralNetworkMiner):
             if env_reward is not None:
                 self.case_rewards[case_id] = effective_reward
 
-            # Compute policy loss on the observed action. If an external reward is
-            # provided we apply REINFORCE-style scaling (loss = -reward * log_prob).
-            # Otherwise preserve the original behavior (loss = -log_prob).
+            # Compute policy loss on the observed action with REINFORCE-style scaling
+            # (loss = - reward * log_prob). If env reward is not provided, we use
+            # the computed 0/1 reward from match vs observed activity.
             self.model.train()
             self.optimizer.zero_grad()
 
@@ -1765,12 +1864,9 @@ class RLMiner(NeuralNetworkMiner):
 
             if target_idx < log_probs.shape[0]:
                 lp = log_probs[target_idx]
-                if env_reward is not None:
-                    loss = -effective_reward * lp
-                else:
-                    loss = -lp
+                loss = -effective_reward * lp
                 logger.debug(
-                    "[RLMiner.update] target_idx=%s activity=%s log_prob=%.6f reward=%s effective_loss=%.6f vocab=%s",
+                    "[RLMiner.update] target_idx=%s activity=%s log_prob=%.6f reward=%.3f loss=%.6f vocab=%s",
                     target_idx, activity, lp.item(), effective_reward, loss.item(), log_probs.shape[0]
                 )
                 loss.backward()
