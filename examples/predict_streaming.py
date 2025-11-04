@@ -27,7 +27,6 @@ from logicsponge.core import DataItem, DataItemFilter  # type: ignore # noqa: PG
 # from logicsponge.core import dashboard
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
 from logicsponge.processmining.config import DEFAULT_CONFIG
-from logicsponge.processmining.data_utils import data_statistics, transform_to_seqs
 from logicsponge.processmining.models import (
     AdaptiveVoting,
     BasicMiner,
@@ -47,16 +46,10 @@ from logicsponge.processmining.streaming import (
     IteratorStreamer,
     PredictionCSVWriter,
     PrintEval,
-    StreamAlteration,
     StreamingActivityPredictor,
 )
 from logicsponge.processmining.test_data import data_name, dataset
 from logicsponge.processmining.utils import add_file_log_handler, save_run_config
-
-# Non necessary, but nice for debugging
-data = transform_to_seqs(dataset)
-n_activities, max_seq_length = data_statistics(data)
-
 
 logger = logging.getLogger(__name__)
 RUN_ID = time.strftime("%Y-%m-%d_%H-%M", time.localtime()) + f"_{data_name}"
@@ -75,9 +68,9 @@ config_file_path = Path(__file__).parent / "predict_config.json"
 default_run_config = {
     "nn": {"lr": 0.001, "batch_size": 8, "epochs": 20},
     "rl": {"lr": 0.001, "batch_size": 8, "epochs": 20, "gamma": 0.99},
-    "lstm": {"vocab_size": 50, "embedding_dim": 50, "hidden_dim": 128, "output_dim": 50},
-    "transformer": {"vocab_size": 50, "embedding_dim": 50, "hidden_dim": 128, "output_dim": 50},
-    "qlearning": {"vocab_size": 50, "embedding_dim": 50, "hidden_dim": 128, "output_dim": 50},
+    "lstm": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 128, "output_dim": 32},
+    "transformer": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 128, "output_dim": 32},
+    "qlearning": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 512, "output_dim": 32},
 }
 try:
     with config_file_path.open("w") as _f:
@@ -136,7 +129,7 @@ torch.backends.cudnn.benchmark = False
 
 # Select which ML components to train/evaluate (parity with predict_batch.py)
 ML_TRAINING = True
-NN_TRAINING = False
+NN_TRAINING = True
 RL_TRAINING = True
 ALERGIA_TRAINING = False
 SHOW_DELAYS = False
@@ -402,7 +395,7 @@ transformer_cfg = run_config.get("transformer", {})
 hidden_dim_tr = transformer_cfg.get("hidden_dim", hidden_dim)
 output_dim_tr = transformer_cfg.get("output_dim", output_dim)
 model_transformer = TransformerModel(
-    seq_input_dim=max_seq_length + 2,
+    seq_input_dim=512,
     vocab_size=transformer_cfg.get("vocab_size", vocab_size),
     embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
     hidden_dim=hidden_dim_tr,
@@ -446,7 +439,7 @@ for w in NN_WINDOW_RANGE:
 
     # Transformer windowed variant
     model_tr_w = TransformerModel(
-        seq_input_dim=max_seq_length + 2,
+        seq_input_dim=512,
         vocab_size=vocab_size,
         embedding_dim=embedding_dim,
         hidden_dim=hidden_dim,

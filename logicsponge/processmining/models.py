@@ -1864,10 +1864,25 @@ class RLMiner(NeuralNetworkMiner):
 
             if target_idx < log_probs.shape[0]:
                 lp = log_probs[target_idx]
-                loss = -effective_reward * lp
+                # If an external reward was provided, use REINFORCE-style scaling
+                # (loss = - reward * log_prob). If no external reward is provided,
+                # fall back to supervised negative log-likelihood loss (cross-entropy)
+                # so the model learns from the observed action even when it did not
+                # predict it correctly yet.
+                if env_reward is not None:
+                    loss = -effective_reward * lp
+                else:
+                    # supervised learning: minimize -log_prob(target)
+                    loss = -lp
+
                 logger.debug(
-                    "[RLMiner.update] target_idx=%s activity=%s log_prob=%.6f reward=%.3f loss=%.6f vocab=%s",
-                    target_idx, activity, lp.item(), effective_reward, loss.item(), log_probs.shape[0]
+                    "[RLMiner.update] target_idx=%s activity=%s log_prob=%.6f reward=%s loss=%.6f vocab=%s",
+                    target_idx,
+                    activity,
+                    lp.item(),
+                    str(env_reward) if env_reward is not None else "<supervised>",
+                    loss.item(),
+                    log_probs.shape[0],
                 )
                 loss.backward()
                 self.optimizer.step()
