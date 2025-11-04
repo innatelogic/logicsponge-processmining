@@ -515,7 +515,7 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 ML_TRAINING = True
-NN_TRAINING = False
+NN_TRAINING = True
 ALERGIA_TRAINING = False
 SHOW_DELAYS = False
 
