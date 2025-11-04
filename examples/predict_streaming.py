@@ -70,7 +70,7 @@ default_run_config = {
     "rl": {"lr": 0.001, "batch_size": 8, "epochs": 20, "gamma": 0.99},
     "lstm": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 128, "output_dim": 32},
     "transformer": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 128, "output_dim": 32},
-    "qlearning": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 512, "output_dim": 32},
+    "qlearning": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 128, "output_dim": 32},
 }
 try:
     with config_file_path.open("w") as _f:
@@ -154,7 +154,7 @@ SOFT_VOTING_NGRAMS = [
     (2, 3, 4, 5),
 ]  # (2, 3, 6, 8), (2, 3, 5, 6), (2, 3, 4, 6), (2, 3, 6, 7), (2, 3, 7, 8), (2, 3, 6, 8)
 
-WINDOW_RANGE = [1, 2, 3, 4, 5, 8]  # 0, 1, 2, 3, 4, 5, 6, 7, 8 , 9, 10, 12, 14, 16]
+WINDOW_RANGE = [3, 6, 12, 32]  # 0, 1, 2, 3, 4, 5, 6, 7, 8 , 9, 10, 12, 14, 16]
 
 # NN/RL window range aligned with predict_batch.py
 NN_WINDOW_RANGE = WINDOW_RANGE # [1, 2, 3, 4, 5, 6, 7, 8]

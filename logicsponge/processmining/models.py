@@ -1467,7 +1467,7 @@ class NeuralNetworkMiner(StreamingMiner):
         # Ensure each sequence in the batch has at least two tokens
         if len(batch) == 0:
             msg = "Skipping training step because no valid sequences were found."
-            logger.info(msg)
+            logger.debug(msg)
             return
 
         # Set model to training mode
@@ -1511,42 +1511,52 @@ class NeuralNetworkMiner(StreamingMiner):
 
         Only select sequences that have at least two tokens (input + target).
         """
+        # Only consider sequences that have at least two tokens (input + target)
         valid_case_ids = [cid for cid, sequence in self.sequences.items() if len(sequence) > 1]
 
+        # If there are no valid cases, return empty batch
+        if len(valid_case_ids) == 0:
+            return []
+
+        # If there are fewer valid cases than the desired batch size, return what we have
         if len(valid_case_ids) < self.batch_size:
-            msg = f"Not enough case_ids to form a full batch, using {len(valid_case_ids)} case_ids."
-            logger.info(msg)
-            return [self.get_sequence(cid) for cid in valid_case_ids]  # Return all valid sequences
+            # Use DEBUG level to avoid noisy INFO spam during cold-start streaming
+            if len(valid_case_ids) > 0:
+                logger.debug(
+                    "Not enough case_ids to form a full batch, using %d case_ids.",
+                    len(valid_case_ids)
+                )
+            return [self.get_sequence(cid) for cid in valid_case_ids]
 
-        # Prepare the batch, starting with the current case_id
-        batch_case_ids = [case_id] if len(self.sequences[case_id]) > 1 else []
+        # Prepare the batch, starting with the current case_id if it's valid
+        batch_case_ids = []
+        if case_id in valid_case_ids:
+            batch_case_ids.append(case_id)
 
-        original_rr_index = self.rr_index  # Save the original index to detect when we complete a full cycle
-        count = 0
-
-        # Batch size - 1 if we've already added current case_id
-        required_cases = self.batch_size - 1 if batch_case_ids else self.batch_size
+        # Prepare for round-robin selection
+        rr_len = len(valid_case_ids)
+        idx = self.rr_index % rr_len
+        attempts = 0
+        max_attempts = rr_len  # Prevent infinite loops
 
         # Select additional case_ids in a round-robin manner, skipping the current case_id
-        while count < required_cases:
-            candidate_case_id = valid_case_ids[self.rr_index]
+        while len(batch_case_ids) < self.batch_size and attempts < max_attempts:
+            candidate_case_id = valid_case_ids[idx]
 
-            # Skip the current case_id
-            if candidate_case_id != case_id and len(self.sequences[candidate_case_id]) > 1:
+            # Add if not already in batch (handles current case_id and duplicates)
+            if candidate_case_id not in batch_case_ids:
                 batch_case_ids.append(candidate_case_id)
-                count += 1
 
-            # Move to the next index, wrap around if necessary
-            self.rr_index = (self.rr_index + 1) % len(valid_case_ids)
+            # Move to the next index, wrap around
+            idx = (idx + 1) % rr_len
+            attempts += 1
 
-            # Stop if we've completed a full round (returning to original index)
-            if self.rr_index == original_rr_index:
-                break
-
-        # batch = [self.get_sequence(cid) for cid in batch_case_ids]
+        # Update the round-robin index for next call
+        self.rr_index = idx
 
         # Fetch the actual sequences based on the selected case_ids
         return [self.get_sequence(cid) for cid in batch_case_ids]
+
 
     def case_metrics(self, case_id: CaseId) -> Metrics:
         """
@@ -1704,7 +1714,8 @@ class WindowedNeuralNetworkMiner(NeuralNetworkMiner):
         # Select batch and proceed as parent
         batch = self.select_batch(case_id)
         if len(batch) == 0:
-            logger.info("Skipping training step because no valid sequences were found.")
+            # Use DEBUG level to avoid noisy INFO spam during cold-start streaming.
+            logger.debug("Skipping training step because no valid sequences were found.")
             return
 
         # Training step (same as parent)
