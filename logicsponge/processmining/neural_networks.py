@@ -233,7 +233,7 @@ class TransformerModel(nn.Module):
 
     def __init__( # noqa: PLR0913
         self,
-        seq_input_dim: int,  # Was 512. Adjust if needed
+    seq_input_dim: int,  # Interpreted as max_seq_len for positional encodings
         vocab_size: int,
         embedding_dim: int,
         hidden_dim: int,
@@ -261,18 +261,25 @@ class TransformerModel(nn.Module):
         self.vocab_size = vocab_size
         self.embedding_dim = embedding_dim
 
+        # Model dimension for the Transformer (d_model) depends on representation
+        # - If embeddings are used, d_model = embedding_dim
+        # - If one-hot is used, d_model = vocab_size
+        d_model = embedding_dim if not use_one_hot else vocab_size
+        self.d_model = d_model
+        self.max_seq_len = seq_input_dim  # keep arg name for backward-compat
+
         # Conditional embedding layer
         if not use_one_hot:
             self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0, device=device)
         else:
             self.embedding = None
 
-        # Positional encoding: learnable [1, max_seq_len, input_dim]
-        self.pos_embedding = nn.Parameter(torch.zeros(1, seq_input_dim, seq_input_dim, device=device))
+        # Positional encoding: learnable [1, max_seq_len, d_model]
+        self.pos_embedding = nn.Parameter(torch.zeros(1, self.max_seq_len, d_model, device=device))
 
         # Transformer encoder
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=seq_input_dim,
+            d_model=d_model,
             nhead=1,
             dim_feedforward=hidden_dim,
             batch_first=True,
@@ -281,7 +288,7 @@ class TransformerModel(nn.Module):
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=2)
 
         # Output layer
-        self.fc = nn.Linear(seq_input_dim, output_dim, device=device)
+        self.fc = nn.Linear(d_model, output_dim, device=device)
 
         # Custom initialization
         self.apply(self._init_weights)
