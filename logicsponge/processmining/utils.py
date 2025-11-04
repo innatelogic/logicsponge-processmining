@@ -482,7 +482,7 @@ def discover_window_columns(df: pd.DataFrame, prefix: str) -> list[tuple[int, st
     return windows
 
 
-def plot_ngrams_vs_prefix(  # noqa: D417, PLR0913
+def plot_ngrams_vs_prefix(  # noqa: C901, D417, PLR0913, PLR0915
     df: pd.DataFrame,
     ngram_names: list[str],
     prefix: str,
@@ -491,6 +491,8 @@ def plot_ngrams_vs_prefix(  # noqa: D417, PLR0913
     title: str,
     out_png: str | Path,
     grid_alpha: float = 0.25,
+    baseline_tested: str | None = None,
+    baseline_label: str | None = None,
 ) -> bool:
     """
     Plot "NGrams vs {prefix} windows".
@@ -544,6 +546,32 @@ def plot_ngrams_vs_prefix(  # noqa: D417, PLR0913
         ls = linestyles[i % len(linestyles)]
         plt.plot(list(windows_sorted), y, label=ngram, color=color, linestyle=ls, marker="o")
         plotted_any = True
+
+    # Optionally overlay a baseline (non-windowed) tested model across the same reference windows
+    if baseline_tested is not None and baseline_tested in df.index:
+        try:
+            y_base: list[float] = []
+            for col in cols_sorted:
+                try:
+                    val = df.loc[baseline_tested, col] if col in df.columns else np.nan
+                    y_base.append(float(val) if not pd.isna(val) else np.nan)  # type: ignore # noqa: PGH003
+                except (ValueError, TypeError):
+                    y_base.append(np.nan)
+
+            if not all(np.isnan(v) for v in y_base):
+                label = baseline_label or f"baseline: {baseline_tested}"
+                plt.plot(
+                    list(windows_sorted),
+                    y_base,
+                    label=label,
+                    color="black",
+                    linestyle="-",
+                    marker="s",
+                    linewidth=2.5,
+                )
+                plotted_any = True
+        except (ValueError, TypeError, KeyError):
+            logging.getLogger(__name__).exception("Failed plotting baseline tested model: %s", baseline_tested)
 
     if not plotted_any:
         logger.debug("No data plotted for %s vs %s; skipping file generation.", title, prefix)

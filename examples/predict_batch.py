@@ -1632,6 +1632,7 @@ try:
             xlabel="Q-learning window size",
             title="Correlation",
             out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_qlearning_correlation.png",
+            baseline_tested="qlearning",
         )
         plot_ngrams_vs_prefix(
             anticorrelation_df,
@@ -1640,6 +1641,7 @@ try:
             xlabel="Q-learning window size",
             title="Anticorrelation",
             out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_qlearning_anticorrelation.png",
+            baseline_tested="qlearning",
         )
         plot_ngrams_vs_prefix(
             similarity_df,
@@ -1648,6 +1650,7 @@ try:
             xlabel="Q-learning window size",
             title="Similarity",
             out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_qlearning_similarity.png",
+            baseline_tested="qlearning",
         )
 
         # Transformer windows
@@ -1658,6 +1661,7 @@ try:
             xlabel="Model window size",
             title="Correlation",
             out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_transformer_win_transformer_correlation.png",
+            baseline_tested="transformer",
         )
         plot_ngrams_vs_prefix(
             anticorrelation_df,
@@ -1666,6 +1670,7 @@ try:
             xlabel="Model window size",
             title="Anticorrelation",
             out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_transformer_win_transformer_anticorrelation.png",
+            baseline_tested="transformer",
         )
         plot_ngrams_vs_prefix(
             similarity_df,
@@ -1674,6 +1679,7 @@ try:
             xlabel="Model window size",
             title="Similarity",
             out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_transformer_win_transformer_similarity.png",
+            baseline_tested="transformer",
         )
 
         # LSTM windows
@@ -1684,6 +1690,7 @@ try:
             xlabel="Model window size",
             title="Correlation",
             out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_LSTM_win_lstm_correlation.png",
+            baseline_tested="LSTM",
         )
         plot_ngrams_vs_prefix(
             anticorrelation_df,
@@ -1692,6 +1699,7 @@ try:
             xlabel="Model window size",
             title="Anticorrelation",
             out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_LSTM_win_lstm_anticorrelation.png",
+            baseline_tested="LSTM",
         )
         plot_ngrams_vs_prefix(
             similarity_df,
@@ -1700,6 +1708,7 @@ try:
             xlabel="Model window size",
             title="Similarity",
             out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_LSTM_win_lstm_similarity.png",
+            baseline_tested="LSTM",
         )
     except Exception:
         logger.exception("Could not generate ngrams vs qlearning plots")
