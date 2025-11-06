@@ -657,60 +657,53 @@ class AutocompactedTransformer(nn.Module):
         x_device = x.device
         batch_size, seq_len = x.size()
 
-        # Generate cache key
-        cache_key = case_id if case_id is not None else self._get_cache_key(x)
+        # Generate cache key ONLY when an explicit case_id is provided (streaming use-case).
+        # For batched training/eval without case IDs, we avoid caching to prevent batch-size mismatches.
+        cache_key: int | None = case_id if case_id is not None else None
 
-        # Check if we need compaction
+        # Check if we need compaction. Compaction is active in both training and eval;
+        # training uses last-step loss to keep supervision aligned despite length changes.
         needs_compaction = seq_len > self.seq_input_dim
-        has_cached_prefix = cache_key in self.compacted_cache
 
         if needs_compaction and self.compactor is not None:
             compress_size, compressed_size = self.seq_autocompact
 
-            if has_cached_prefix:
-                # Use cached compressed prefix + new tokens
-                compressed_prefix = self.compacted_cache[cache_key].to(x_device)
+            # Embed the full sequence once
+            full_embedded = self._embed_sequence(x)  # [B, seq_len, d_model]
 
-                # Determine how many new tokens to keep
-                prefix_equivalent_len = compressed_size
-                available_space = self.seq_input_dim - prefix_equivalent_len
+            # Amount of space left for recent (uncompressed) tokens after placing the compressed prefix
+            available_space = max(self.seq_input_dim - compressed_size, 0)
 
-                # Embed only the new tokens
-                new_tokens = x[:, -available_space:]
-                new_embedded = self._embed_sequence(new_tokens)
-
-                # Concatenate compressed prefix with new tokens
-                x_embedded = torch.cat([compressed_prefix, new_embedded], dim=1)
-
-                # Update cache if we're overflowing again
-                if new_tokens.size(1) > available_space:
-                    # Need to compact further
-                    tokens_to_compact = x_embedded[:, :compress_size, :]
-                    newly_compressed = self.compactor(tokens_to_compact)
-                    remaining = x_embedded[:, compress_size:, :]
-                    x_embedded = torch.cat([newly_compressed, remaining], dim=1)
-                    self.compacted_cache[cache_key] = newly_compressed.detach()
+            # Retrieve cached compressed prefix only in streaming/eval with explicit case_id
+            use_cache = (not self.training) and (cache_key is not None) and (cache_key in self.compacted_cache)
+            if use_cache:
+                assert cache_key is not None
+                compressed_prefix = self.compacted_cache[cache_key].to(x_device)  # [B?, compressed_size, d_model]
+                # Guard: if cached batch dimension doesn't match, ignore cache to avoid mismatches
+                if compressed_prefix.size(0) != batch_size:
+                    compressed_prefix = None
             else:
-                # First compaction for this sequence
-                # Embed full sequence
-                x_embedded = self._embed_sequence(x)
+                compressed_prefix = None
 
-                # Compact the prefix
-                prefix_to_compact = x_embedded[:, :compress_size, :]
-                compressed_prefix = self.compactor(prefix_to_compact)
+            if compressed_prefix is None:
+                # Compute compressed prefix freshly from the earliest tokens
+                # If the sequence is shorter than compress_size, pad selection is safe due to embedding padding_idx
+                prefix_to_compact = full_embedded[:, :compress_size, :]  # [B, compress_size, d_model]
+                compressed_prefix = self.compactor(prefix_to_compact)    # [B, compressed_size, d_model]
 
-                # Keep remaining tokens
-                remaining_tokens = x_embedded[:, compress_size:, :]
+                # Optionally cache for streaming/eval with explicit case_id
+                if (not self.training) and (cache_key is not None):
+                    self.compacted_cache[cache_key] = compressed_prefix.detach()
+                    # Limit cache size to prevent memory issues
+                    if len(self.compacted_cache) > max_cache_size:
+                        self.compacted_cache.popitem(last=False)
 
-                # Concatenate compressed prefix with remaining
-                x_embedded = torch.cat([compressed_prefix, remaining_tokens], dim=1)
-
-                # Cache the compressed prefix
-                self.compacted_cache[cache_key] = compressed_prefix.detach()
-
-                # Limit cache size to prevent memory issues
-                if len(self.compacted_cache) > max_cache_size:
-                    self.compacted_cache.popitem(last=False)
+            # Keep only the most recent tokens that fit into the remaining space
+            if available_space > 0:
+                recent_tokens = full_embedded[:, -available_space:, :]  # [B, available_space, d_model]
+                x_embedded = torch.cat([compressed_prefix, recent_tokens], dim=1)  # [B, seq_input_dim, d_model]
+            else:
+                x_embedded = compressed_prefix  # [B, compressed_size, d_model] (when compressed_size == seq_input_dim)
         else:
             # No compaction needed
             x_embedded = self._embed_sequence(x)
@@ -1181,26 +1174,54 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 # Forward pass
                 outputs = model(x_batch)
 
-                # Reshape the outputs and targets for loss computation
-                outputs = outputs.view(-1, outputs.shape[-1])  # [batch_size * sequence_length, output_dim]
-                y_batch = y_batch.reshape(-1)  # Flatten the target for CrossEntropyLoss
+                # Loss computation:
+                # - For standard models (LSTM/Transformer), we compute token-level loss on all non-padding steps
+                # - For AutocompactedTransformer, compaction can reduce the output sequence length. To avoid
+                #   alignment issues, we compute loss only on the final token prediction per sequence
+                #   (i.e., predict next token after the entire input prefix).
+                if isinstance(model, AutocompactedTransformer):
+                    batch_logits: list[torch.Tensor] = []
+                    batch_targets: list[torch.Tensor] = []
+                    bsz = y_batch.size(0)
+                    # outputs: [B, L_out, V]
+                    for b in range(bsz):
+                        # effective target length (exclude padding)
+                        eff = int((y_batch[b] != 0).sum().item())
+                        if eff <= 0:
+                            continue
+                        # ensure there is at least one timestep in outputs
+                        if outputs.size(1) == 0:
+                            continue
+                        # last-step logits and last non-padding target
+                        batch_logits.append(outputs[b, -1, :].unsqueeze(0))
+                        batch_targets.append(y_batch[b, eff - 1].view(1))
 
-                # Create a mask for positions that are not padding (non-zero indices)
-                mask = y_batch != 0  # Mask for non-padding targets
+                    if batch_logits:
+                        logits_last = torch.cat(batch_logits, dim=0)
+                        targets_last = torch.cat(batch_targets, dim=0)
+                        loss = criterion(logits_last, targets_last)
 
-                # Apply the mask to outputs and targets
-                outputs_masked = outputs[mask]
-                y_batch_masked = y_batch[mask]
+                        # Backward pass and optimization
+                        loss.backward()
+                        optimizer.step()
 
-                # Compute the loss only for non-padding positions
-                if outputs_masked.size(0) > 0:  # Ensure there are non-padded targets
-                    loss = criterion(outputs_masked, y_batch_masked)
+                        epoch_loss += loss.item()
+                else:
+                    # Token-level loss on all non-padding positions
+                    logits = outputs.view(-1, outputs.shape[-1])  # [batch * seq_len, vocab]
+                    targets = y_batch.reshape(-1)  # [batch * seq_len]
 
-                    # Backward pass and optimization
-                    loss.backward()
-                    optimizer.step()
+                    mask = targets != 0
+                    logits_masked = logits[mask]
+                    targets_masked = targets[mask]
 
-                    epoch_loss += loss.item()
+                    if logits_masked.size(0) > 0:
+                        loss = criterion(logits_masked, targets_masked)
+
+                        loss.backward()
+                        optimizer.step()
+
+                        epoch_loss += loss.item()
                 pbar.update(1)
 
         msg = f"Epoch {epoch + 1}/{epochs}, Average Loss: {epoch_loss / len(dataloader):.4f}"
@@ -1288,6 +1309,60 @@ def evaluate_rnn(  # noqa: PLR0913, PLR0915
     predicted_vector: list[str] = []
 
     with torch.no_grad():
+        # Special-case evaluation for AutocompactedTransformer: produce one prediction per prefix
+        # (take last-timestep logits), so alignment with the baseline "actual" vector is preserved
+        # even when internal compaction changes sequence length.
+        if isinstance(model, AutocompactedTransformer):
+            for i in range(sequences.size(0)):
+                seq = sequences[i]
+                valid_len = int((seq != 0).sum().item())
+                if valid_len < 2:  # need at least one prefix
+                    continue
+                for k in range(1, valid_len):
+                    prefix = seq[:k].unsqueeze(0)  # [1, k]
+                    if window_size is not None and prefix.shape[1] > window_size:
+                        prefix = prefix[:, -window_size:]
+                    if model_device is not None:
+                        prefix = prefix.to(device=model_device)
+
+                    outputs = model(prefix)  # [1, L_out, V]
+                    last_logits = outputs[:, -1, :] if outputs.dim() == 3 else outputs
+                    last_logits = last_logits.squeeze(0)
+
+                    # Metrics and predicted vector
+                    _, topk = torch.topk(last_logits, k=max_k, dim=-1)
+                    pred_idx = int(topk[0].item())
+                    target_idx = int(seq[k].item())
+
+                    # Collect predicted label (map to activity name if provided)
+                    if idx_to_activity is not None and pred_idx in idx_to_activity:
+                        predicted_vector.append(str(idx_to_activity[pred_idx]))
+                    else:
+                        predicted_vector.append(str(pred_idx))
+
+                    total_predictions += 1
+                    if pred_idx == target_idx:
+                        correct_predictions += 1
+                        for j in range(max_k):
+                            top_k_correct_preds[j] += 1
+                    else:
+                        # count inclusion in top-k
+                        for j in range(max_k):
+                            if target_idx in {int(x) for x in topk[: j + 1].tolist()}:
+                                top_k_correct_preds[j] += 1
+
+            eval_time = time.time() - eval_start_time - pause_time
+            accuracy = correct_predictions / total_predictions if total_predictions > 0 else 0
+            stats = {
+                "accuracy": accuracy,
+                "total_predictions": total_predictions,
+                "correct_predictions": correct_predictions,
+                "top_k_correct_preds": top_k_correct_preds,
+            }
+            perplexities = []  # not computed in prefix-mode evaluation
+            return stats, perplexities, eval_time, predicted_vector
+
+        # Default evaluation for LSTM/Transformer (no compaction)
         for i in range(sequences.size(0)):  # Iterate through sequences by index
             single_sequence_trace = sequences[i]
 

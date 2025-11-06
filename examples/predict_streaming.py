@@ -42,6 +42,7 @@ from logicsponge.processmining.streaming import (
     ActualCSVWriter,
     AddStartSymbol,
     CSVStatsWriter,
+    CustomStreamer,
     Evaluation,
     InfiniteDiscriminerSource,
     IteratorStreamer,
@@ -608,9 +609,9 @@ all_attributes = [
 
 streamer = IteratorStreamer(data_iterator=dataset)
 
-streamer = SynInfiniteStreamer(max_prefix_length=10)
-
-streamer = InfiniteDiscriminerSource()
+# streamer = SynInfiniteStreamer(max_prefix_length=10)
+# streamer = InfiniteDiscriminerSource()
+streamer = CustomStreamer(sequence = [1, 1, 0, 0])
 
 def start_filter(item: DataItem) -> bool:
     """Filter function to check if the activity is not the start symbol."""

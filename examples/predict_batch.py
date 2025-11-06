@@ -609,6 +609,7 @@ all_metrics: dict = {
         "alergia",
         "LSTM",
         "transformer",
+        "transformer_auto",
         "qlearning",
         *[f"LSTM_win{w}" for w in WINDOW_RANGE],
         *[f"transformer_win{w}" for w in WINDOW_RANGE],

@@ -94,6 +94,30 @@ class SynInfiniteStreamer(ls.SourceTerm):
 
 
 
+
+class CustomStreamer(ls.SourceTerm):
+    """For streaming synthetic infinite data."""
+
+    def __init__(self, *args: dict, sequence: list[int], **kwargs: dict) -> None:
+        """Create an IteratorStreamer."""
+        super().__init__(*args, **kwargs)
+        self.sequence = sequence
+
+    def run(self) -> None:
+        """Run the IteratorStreamer."""
+        while True:
+            for i in self.sequence:
+                out = DataItem(
+                    {
+                        "case_id": "case_0",
+                        "activity": f"act_{i}",
+                        "timestamp": pd.Timestamp.now(),
+                    }
+                )
+                self.output(out)
+
+                time.sleep(0.01)
+
 class InfiniteDiscriminerSource(ls.SourceTerm):
     """For streaming synthetic infinite data."""
 
