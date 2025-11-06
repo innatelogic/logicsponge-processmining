@@ -465,7 +465,7 @@ stats_to_log = []
 
 
 # Build a run-specific results directory similar to predict_streaming.py
-run_results_dir = Path(f"results/{RUN_ID}")
+run_results_dir = Path(f"results/{RUN_ID}_batch")
 run_results_dir.mkdir(parents=True, exist_ok=True)
 
 # Persist the resolved run configuration into the run-specific results folder so

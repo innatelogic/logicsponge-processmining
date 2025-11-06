@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
 RUN_ID = time.strftime("%Y-%m-%d_%H-%M", time.localtime()) + f"_{data_name}"
 stats_to_log = []
 # create a run-specific results directory: results/{RUN_ID}
-run_results_dir = Path(f"results/{RUN_ID}")
+run_results_dir = Path(f"results/{RUN_ID}_streaming")
 run_results_dir.mkdir(parents=True, exist_ok=True)
 
 # stats and predictions live inside the run folder
