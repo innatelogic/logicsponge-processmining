@@ -24,7 +24,13 @@ from tqdm import tqdm
 
 from logicsponge.processmining.config import DEFAULT_CONFIG, update_config
 from logicsponge.processmining.data_utils import add_input_symbols_sequence
-from logicsponge.processmining.neural_networks import LSTMModel, QNetwork, RNNModel, TransformerModel
+from logicsponge.processmining.neural_networks import (
+    AutocompactedTransformer,
+    LSTMModel,
+    QNetwork,
+    RNNModel,
+    TransformerModel,
+)
 from logicsponge.processmining.types import (
     ActivityDelays,
     ActivityName,
@@ -180,7 +186,7 @@ class StreamingMiner(ABC):
         state: PerStateStats = self.stats["per_state_stats"][state_id]
         state.update(result_str, level=level, visits=visits)
 
-    def update_stats(self, event: Event, prediction: Prediction | None, state_id: StateId | None) -> None:
+    def update_stats(self, event: Event, prediction: Prediction | None, state_id: StateId | None) -> None:  # noqa: C901, PLR0912
         """Update the statistics based on the actual activity, the prediction, and the top-k predictions."""
         case_id = event.get("case_id")
         actual_next_activity = event.get("activity")
@@ -244,10 +250,10 @@ class StreamingMiner(ABC):
 
         self.stats["last_timestamps"][case_id] = timestamp
 
-    def evaluate(
+    def evaluate(  # noqa: C901, PLR0912, PLR0915
         self,
         data: list[list[Event]],
-        mode: str = "incremental",
+        _: str = "incremental",
         *,
         log_likelihood: bool = False,
         compute_perplexity: bool = False,
@@ -1240,11 +1246,11 @@ class Relativize(MultiMiner):
         (state1, state2) = state
 
         probs = self.model1.state_metrics(state1)["probs"]
-        # likelihoods = self.model1.state_metrics(state1)["likelihoods"] # TODO TO BE CHECKED
+        # likelihoods = self.model1.state_metrics(state1)["likelihoods"] # TO BE CHECKED
 
         if probs:
             probs = self.model2.state_metrics(state2)["probs"]
-            # likelihoods = self.model2.state_metrics(state2)["likelihoods"] # TODO TO BE CHECKED
+            # likelihoods = self.model2.state_metrics(state2)["likelihoods"] # TO BE CHECKED
 
         delays_list = [
             model.state_metrics(model_state)["predicted_delays"]
@@ -1397,9 +1403,9 @@ class NeuralNetworkMiner(StreamingMiner):
     device: torch.device | None
 
     def __init__(
-        self, *args,
-        model: RNNModel | LSTMModel | TransformerModel | QNetwork,
-        batch_size: int, optimizer, criterion, **kwargs
+        self, *args,  # noqa: ANN002
+        model: RNNModel | LSTMModel | TransformerModel | AutocompactedTransformer | QNetwork,
+        batch_size: int, optimizer, criterion, **kwargs  # noqa: ANN001, ANN003
     ) -> None:
         """Initialize the NeuralNetworkMiner class."""
         super().__init__(*args, **kwargs)
@@ -1423,11 +1429,13 @@ class NeuralNetworkMiner(StreamingMiner):
     def state_act_likelihood(self, state: ComposedState | None, next_activity: ActivityName) -> float:
         """Return the likelihood of the sequence based on the metrics from the models."""
         # WARNING: This method is not implemented in the neural network miner.
+        _, _ = state, next_activity  # Unused variables
         return -1.0
 
     def get_state_info(self, state_id: StateId) -> ComposedState | None:
         """Return the state information of the algorithm."""
         ### QUESTION: WHAT IS THIS FOR? TESTED?
+        _ = state_id
         return None
 
     def get_sequence(self, case_id: CaseId) -> list[int]:
@@ -1657,7 +1665,8 @@ class NeuralNetworkMiner(StreamingMiner):
 
 
 class WindowedNeuralNetworkMiner(NeuralNetworkMiner):
-    """Neural Network miner that restricts context to the last N tokens per case.
+    """
+    Neural Network miner that restricts context to the last N tokens per case.
 
     This mirrors the "window_size" behavior used in batch mode when training/evaluating
     LSTM/Transformer models on only the last ``window_size`` tokens. Here we enforce
@@ -1675,6 +1684,7 @@ class WindowedNeuralNetworkMiner(NeuralNetworkMiner):
         sequence_buffer_length: int = 50,
         **kwargs: Any,  # noqa: ANN401
     ) -> None:
+        """Initialize the WindowedNeuralNetworkMiner class."""
         super().__init__(*args, model=model, batch_size=batch_size, optimizer=optimizer, criterion=criterion, **kwargs)
         if sequence_buffer_length < 1:
             msg = "sequence_buffer_length must be >= 1"
@@ -1690,7 +1700,7 @@ class WindowedNeuralNetworkMiner(NeuralNetworkMiner):
                 self.sequences[case_id] = seq[-self.sequence_buffer_length :]
 
     def update(self, event: Event) -> None:
-        """Same as parent update but ensures window trimming before training step."""
+        """Ensure window trimming before training step, otherwise same as parent."""
         case_id = event["case_id"]
         activity = event["activity"]
 
@@ -1880,11 +1890,7 @@ class RLMiner(NeuralNetworkMiner):
                 # fall back to supervised negative log-likelihood loss (cross-entropy)
                 # so the model learns from the observed action even when it did not
                 # predict it correctly yet.
-                if env_reward is not None:
-                    loss = -effective_reward * lp
-                else:
-                    # supervised learning: minimize -log_prob(target)
-                    loss = -lp
+                loss = -effective_reward * lp if env_reward is not None else -lp
 
                 logger.debug(
                     "[RLMiner.update] target_idx=%s activity=%s log_prob=%.6f reward=%s loss=%.6f vocab=%s",
