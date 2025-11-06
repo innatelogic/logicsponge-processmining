@@ -16,7 +16,7 @@ import pandas as pd
 import logicsponge.core as ls
 from logicsponge.core import DataItem  # , dashboard
 from logicsponge.processmining.data_utils import handle_keys
-from logicsponge.processmining.models import (
+from logicsponge.processmining.miners import (
     StreamingMiner,
 )
 from logicsponge.processmining.types import ActivityName, Event

@@ -27,7 +27,7 @@ from logicsponge.core import DataItem, DataItemFilter  # type: ignore # noqa: PG
 # from logicsponge.core import dashboard
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
 from logicsponge.processmining.config import DEFAULT_CONFIG
-from logicsponge.processmining.models import (
+from logicsponge.processmining.miners import (
     AdaptiveVoting,
     BasicMiner,
     Fallback,

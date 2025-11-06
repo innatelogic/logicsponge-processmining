@@ -9,7 +9,7 @@ to predict the next activity.
 
 import logicsponge.core as ls
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
-from logicsponge.processmining.models import BasicMiner, SoftVoting
+from logicsponge.processmining.miners import BasicMiner, SoftVoting
 from logicsponge.processmining.streaming import IteratorStreamer, StreamingActivityPredictor
 from logicsponge.processmining.test_data import dataset
 

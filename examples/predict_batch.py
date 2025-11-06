@@ -63,7 +63,7 @@ from logicsponge.processmining.data_utils import (
     split_sequence_data,
     transform_to_seqs,
 )
-from logicsponge.processmining.models import (
+from logicsponge.processmining.miners import (
     AdaptiveVoting,
     Alergia,
     BasicMiner,
