@@ -89,7 +89,7 @@ class SynInfiniteStreamer(ls.SourceTerm):
             prefix_length = random.randint(1, self.max_prefix_length)
             start_seq = (2 * start_seq + prefix_length) % 100
             # repeatedly sleep if done
-            time.sleep(10)
+            time.sleep(1)
 
 
 class AddStartSymbol(ls.FunctionTerm):
