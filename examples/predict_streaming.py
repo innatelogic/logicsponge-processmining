@@ -43,6 +43,7 @@ from logicsponge.processmining.streaming import (
     AddStartSymbol,
     CSVStatsWriter,
     Evaluation,
+    InfiniteDiscriminerSource,
     IteratorStreamer,
     PredictionCSVWriter,
     PrintEval,
@@ -66,7 +67,7 @@ predictions_dir.mkdir(parents=True, exist_ok=True)
 
 # --- Run configuration (defaults + writing config file like predict_batch.py)
 config_file_path = Path(__file__).parent / "predict_config.json"
-MAGIC_VALUE = 32
+MAGIC_VALUE = 5
 default_run_config = {
     "nn": {"lr": 0.001, "batch_size": 8, "epochs": 20},
     "rl": {"lr": 0.001, "batch_size": 8, "epochs": 20, "gamma": 0.99},
@@ -156,7 +157,7 @@ SOFT_VOTING_NGRAMS = [
     (2, 3, 4, 5),
 ]  # (2, 3, 6, 8), (2, 3, 5, 6), (2, 3, 4, 6), (2, 3, 6, 7), (2, 3, 7, 8), (2, 3, 6, 8)
 
-WINDOW_RANGE = [1, 2, 3, 4, 5, 8]  # 0, 1, 2, 3, 4, 5, 6, 7, 8 , 9, 10, 12, 14, 16]
+WINDOW_RANGE = [2, 3, 4, 5]  # 0, 1, 2, 3, 4, 5, 6, 7, 8 , 9, 10, 12, 14, 16]
 
 # NN/RL window range aligned with predict_batch.py
 NN_WINDOW_RANGE = WINDOW_RANGE # [1, 2, 3, 4, 5, 6, 7, 8]
@@ -608,6 +609,8 @@ all_attributes = [
 streamer = IteratorStreamer(data_iterator=dataset)
 
 streamer = SynInfiniteStreamer(max_prefix_length=10)
+
+streamer = InfiniteDiscriminerSource()
 
 def start_filter(item: DataItem) -> bool:
     """Filter function to check if the activity is not the start symbol."""

@@ -93,6 +93,96 @@ class SynInfiniteStreamer(ls.SourceTerm):
             time.sleep(0.1)
 
 
+
+class InfiniteDiscriminerSource(ls.SourceTerm):
+    """For streaming synthetic infinite data."""
+
+    def __init__(self, *args: dict, **kwargs: dict) -> None:
+        """Create an IteratorStreamer."""
+        super().__init__(*args, **kwargs)
+
+
+    def run(self) -> None:
+        """Run the IteratorStreamer."""
+        while True:
+            marker01 = random.choice([0, 1])
+
+            out = DataItem(
+                {
+                    "case_id": "case_23",
+                    "activity": f"act_{marker01}",
+                    "timestamp": pd.Timestamp.now(),
+                }
+            )
+            self.output(out)
+
+            out = DataItem(
+                {
+                    "case_id": "case_23",
+                    "activity": f"act_{marker01}",
+                    "timestamp": pd.Timestamp.now(),
+                }
+            )
+            self.output(out)
+
+            out = DataItem(
+                {
+                    "case_id": "case_23",
+                    "activity": f"act_{(marker01+1)%2}",
+                    "timestamp": pd.Timestamp.now(),
+                }
+            )
+            self.output(out)
+
+            time.sleep(0.2)
+
+
+
+            marker012 = random.choice([0, 1, 2])
+
+            out = DataItem(
+                {
+                    "case_id": "case_34",
+                    "activity": f"act_{marker012}",
+                    "timestamp": pd.Timestamp.now(),
+                }
+            )
+            self.output(out)
+
+            out = DataItem(
+                {
+                    "case_id": "case_34",
+                    "activity": f"act_{marker012}",
+                    "timestamp": pd.Timestamp.now(),
+                }
+            )
+            self.output(out)
+
+            remaining012 = [i for i in [0, 1, 2] if i != marker012]
+            random012 = random.choice(remaining012)
+            last012 = next(i for i in remaining012 if i != random012)
+
+            out = DataItem(
+                {
+                    "case_id": "case_34",
+                    "activity": f"act_{random012}",
+                    "timestamp": pd.Timestamp.now(),
+                }
+            )
+            self.output(out)
+
+            out = DataItem(
+                {
+                    "case_id": "case_34",
+                    "activity": f"act_{last012}",
+                    "timestamp": pd.Timestamp.now(),
+                }
+            )
+            self.output(out)
+
+            time.sleep(0.1)
+
+
 class AddStartSymbol(ls.FunctionTerm):
     """For streaming from list."""
 
