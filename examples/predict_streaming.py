@@ -66,7 +66,7 @@ predictions_dir.mkdir(parents=True, exist_ok=True)
 
 # --- Run configuration (defaults + writing config file like predict_batch.py)
 config_file_path = Path(__file__).parent / "predict_config.json"
-MAGIC_VALUE = 102
+MAGIC_VALUE = 32
 default_run_config = {
     "nn": {"lr": 0.001, "batch_size": 8, "epochs": 20},
     "rl": {"lr": 0.001, "batch_size": 8, "epochs": 20, "gamma": 0.99},
