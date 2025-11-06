@@ -253,7 +253,7 @@ class StreamingMiner(ABC):
     def evaluate(  # noqa: C901, PLR0912, PLR0915
         self,
         data: list[list[Event]],
-        _: str = "incremental",
+        mode: str = "incremental",
         *,
         log_likelihood: bool = False,
         compute_perplexity: bool = False,
