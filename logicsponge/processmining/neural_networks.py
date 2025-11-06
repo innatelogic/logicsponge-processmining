@@ -3,6 +3,7 @@
 import copy
 import logging
 import time
+from collections import OrderedDict
 
 import torch
 import torch.nn.functional as F  # noqa: N812
@@ -233,7 +234,7 @@ class TransformerModel(nn.Module):
 
     def __init__( # noqa: PLR0913
         self,
-    seq_input_dim: int,  # Interpreted as max_seq_len for positional encodings
+        seq_input_dim: int,  # Interpreted as max_seq_len for positional encodings
         vocab_size: int,
         embedding_dim: int,
         hidden_dim: int,
@@ -449,6 +450,312 @@ class QNetwork(nn.Module):
         last = out.gather(dim=1, index=gather_index).squeeze(1)  # [batch, hidden_dim]
         logits = self.fc(last)  # [batch, output_dim]
         return logits.unsqueeze(1)  # match interface [batch, 1, vocab] expected by miners
+
+
+
+
+"""
+Autocompacted Transformer for handling arbitrarily long sequences.
+
+This module extends TransformerModel with automatic sequence compaction
+to handle sequences longer than the model's maximum positional encoding length.
+"""
+
+
+class SequenceCompactor(nn.Module):
+    """Learnable compactor that reduces sequence dimension."""
+
+    def __init__(self, input_dim: int, output_dim: int, d_model: int, device: torch.device | None = None) -> None:
+        """
+        Initialize the sequence compactor.
+
+        Args:
+            input_dim: Number of tokens to compress (seq_autocompact[0])
+            output_dim: Number of compressed tokens (seq_autocompact[1])
+            d_model: Model dimension from transformer
+            device: Device to run on
+
+        """
+        super().__init__()
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.d_model = d_model
+
+        # Learnable compression: maps [batch, input_dim, d_model] -> [batch, output_dim, d_model]
+        # Using a simple linear projection followed by attention-like pooling
+        self.query_proj = nn.Linear(d_model, d_model, device=device)
+        self.key_proj = nn.Linear(d_model, d_model, device=device)
+        self.value_proj = nn.Linear(d_model, d_model, device=device)
+
+        # Learnable queries for output positions
+        self.compression_queries = nn.Parameter(
+            torch.randn(1, output_dim, d_model, device=device) * 0.02
+        )
+
+        self._init_weights()
+
+    def _init_weights(self) -> None:
+        """Initialize weights."""
+        nn.init.xavier_uniform_(self.query_proj.weight)
+        nn.init.xavier_uniform_(self.key_proj.weight)
+        nn.init.xavier_uniform_(self.value_proj.weight)
+        if self.query_proj.bias is not None:
+            nn.init.constant_(self.query_proj.bias, 0)
+        if self.key_proj.bias is not None:
+            nn.init.constant_(self.key_proj.bias, 0)
+        if self.value_proj.bias is not None:
+            nn.init.constant_(self.value_proj.bias, 0)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Compress input sequence.
+
+        Args:
+            x: Input tensor [batch_size, input_dim, d_model]
+
+        Returns:
+            Compressed tensor [batch_size, output_dim, d_model]
+
+        """
+        batch_size = x.size(0)
+
+        # Project input sequence
+        keys = self.key_proj(x)  # [batch, input_dim, d_model]
+        values = self.value_proj(x)  # [batch, input_dim, d_model]
+
+        # Expand compression queries for batch
+        queries = self.compression_queries.expand(batch_size, -1, -1)  # [batch, output_dim, d_model]
+        queries = self.query_proj(queries)  # [batch, output_dim, d_model]
+
+        # Attention mechanism: queries attend to keys/values
+        # Compute attention scores
+        scores = torch.bmm(queries, keys.transpose(1, 2))  # [batch, output_dim, input_dim]
+        scores = scores / (self.d_model ** 0.5)
+        attn_weights = F.softmax(scores, dim=-1)  # [batch, output_dim, input_dim]
+
+        # Apply attention to values
+        return torch.bmm(attn_weights, values)  # [batch, output_dim, d_model]
+
+
+class AutocompactedTransformer(nn.Module):
+    """
+    Transformer with automatic sequence compaction for long sequences.
+
+    When sequence length exceeds seq_input_dim, automatically compacts
+    the oldest seq_autocompact[0] tokens into seq_autocompact[1] tokens.
+    """
+
+    def __init__(  # noqa: PLR0913
+        self,
+        seq_input_dim: int,
+        vocab_size: int,
+        embedding_dim: int,
+        hidden_dim: int,
+        output_dim: int,
+        seq_autocompact: tuple[int, int] = (10, 2),
+        *,
+        use_one_hot: bool = False,
+        device: torch.device | None = None,
+    ) -> None:
+        """
+        Initialize AutocompactedTransformer.
+
+        Args:
+            seq_input_dim: Maximum sequence length before compaction
+            vocab_size: Size of vocabulary
+            embedding_dim: Dimension of embeddings
+            hidden_dim: Hidden dimension for transformer
+            output_dim: Output dimension
+            seq_autocompact: (compress_size, compressed_size) tuple
+            use_one_hot: Whether to use one-hot encoding
+            device: Device to run on
+
+        """
+        super().__init__()
+        self.device = device
+        self.use_one_hot = use_one_hot
+        self.vocab_size = vocab_size
+        self.embedding_dim = embedding_dim
+        self.seq_input_dim = seq_input_dim
+        self.seq_autocompact = seq_autocompact
+
+        # Model dimension
+        d_model = embedding_dim if not use_one_hot else vocab_size
+        self.d_model = d_model
+
+        # Embedding layer
+        if not use_one_hot:
+            self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0, device=device)
+        else:
+            self.embedding = None
+
+        # Positional encoding
+        self.pos_embedding = nn.Parameter(torch.zeros(1, seq_input_dim, d_model, device=device))
+
+        # Transformer encoder
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=1,
+            dim_feedforward=hidden_dim,
+            batch_first=True,
+            device=device,
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=2)
+
+        # Output layer
+        self.fc = nn.Linear(d_model, output_dim, device=device)
+
+        # Sequence compactor
+        compress_size, compressed_size = seq_autocompact
+        if compress_size > 0 and compressed_size > 0:
+            self.compactor = SequenceCompactor(compress_size, compressed_size, d_model, device=device)
+        else:
+            self.compactor = None
+
+        # Storage for compacted sequences (case_id -> compressed_prefix)
+        # Note: In streaming, this should be managed externally per case_id
+        # Here we store by a hash for demonstration
+        self.compacted_cache: OrderedDict[int, torch.Tensor] = OrderedDict()
+
+        # Initialize weights
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m: nn.Module) -> None:
+        """Initialize weights."""
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.Embedding):
+            nn.init.uniform_(m.weight, -0.1, 0.1)
+        elif isinstance(m, nn.Parameter):
+            nn.init.normal_(m, mean=0.0, std=0.02)
+
+    def _get_cache_key(self, x: torch.Tensor) -> int:
+        """Generate cache key from input tensor (for batch processing)."""
+        # Simple hash based on tensor content (first few elements)
+        # In practice, this should use case_id passed externally
+        return hash(tuple(x[0, :min(5, x.size(1))].cpu().tolist()))
+
+    def _embed_sequence(self, x: torch.Tensor) -> torch.Tensor:
+        """Convert indices to embeddings."""
+        x_device = x.device
+        if not self.use_one_hot and self.embedding is not None:
+            return self.embedding(x)
+        return F.one_hot(x, num_classes=self.vocab_size).float().to(x_device)
+
+    def forward(self, x: torch.Tensor, case_id: int | None = None, max_cache_size: int = 10_000) -> torch.Tensor:
+        """
+        Forward pass with automatic compaction.
+
+        Args:
+            x: Input tensor [batch_size, seq_len] of token indices
+            case_id: Optional case identifier for cache management
+            max_cache_size: Maximum size of the compaction cache
+        Returns:
+            Output tensor [batch_size, seq_len, output_dim]
+
+        """
+        x_device = x.device
+        batch_size, seq_len = x.size()
+
+        # Generate cache key
+        cache_key = case_id if case_id is not None else self._get_cache_key(x)
+
+        # Check if we need compaction
+        needs_compaction = seq_len > self.seq_input_dim
+        has_cached_prefix = cache_key in self.compacted_cache
+
+        if needs_compaction and self.compactor is not None:
+            compress_size, compressed_size = self.seq_autocompact
+
+            if has_cached_prefix:
+                # Use cached compressed prefix + new tokens
+                compressed_prefix = self.compacted_cache[cache_key].to(x_device)
+
+                # Determine how many new tokens to keep
+                prefix_equivalent_len = compressed_size
+                available_space = self.seq_input_dim - prefix_equivalent_len
+
+                # Embed only the new tokens
+                new_tokens = x[:, -available_space:]
+                new_embedded = self._embed_sequence(new_tokens)
+
+                # Concatenate compressed prefix with new tokens
+                x_embedded = torch.cat([compressed_prefix, new_embedded], dim=1)
+
+                # Update cache if we're overflowing again
+                if new_tokens.size(1) > available_space:
+                    # Need to compact further
+                    tokens_to_compact = x_embedded[:, :compress_size, :]
+                    newly_compressed = self.compactor(tokens_to_compact)
+                    remaining = x_embedded[:, compress_size:, :]
+                    x_embedded = torch.cat([newly_compressed, remaining], dim=1)
+                    self.compacted_cache[cache_key] = newly_compressed.detach()
+            else:
+                # First compaction for this sequence
+                # Embed full sequence
+                x_embedded = self._embed_sequence(x)
+
+                # Compact the prefix
+                prefix_to_compact = x_embedded[:, :compress_size, :]
+                compressed_prefix = self.compactor(prefix_to_compact)
+
+                # Keep remaining tokens
+                remaining_tokens = x_embedded[:, compress_size:, :]
+
+                # Concatenate compressed prefix with remaining
+                x_embedded = torch.cat([compressed_prefix, remaining_tokens], dim=1)
+
+                # Cache the compressed prefix
+                self.compacted_cache[cache_key] = compressed_prefix.detach()
+
+                # Limit cache size to prevent memory issues
+                if len(self.compacted_cache) > max_cache_size:
+                    self.compacted_cache.popitem(last=False)
+        else:
+            # No compaction needed
+            x_embedded = self._embed_sequence(x)
+
+        # Now x_embedded should fit within seq_input_dim
+        current_seq_len = x_embedded.size(1)
+
+        # Add positional encoding
+        if current_seq_len <= self.pos_embedding.size(1):
+            pos = self.pos_embedding[:, :current_seq_len, :]
+        else:
+            # Should not happen after compaction, but handle gracefully
+            pos = F.interpolate(
+                self.pos_embedding.transpose(1, 2),
+                size=current_seq_len,
+                mode="linear",
+                align_corners=False,
+            ).transpose(1, 2)
+
+        pos = pos.to(x_device)
+        x_embedded = x_embedded + pos
+
+        # Create padding mask
+        # Note: After compaction, we treat compressed tokens as valid (not padding)
+        key_padding_mask = torch.zeros(batch_size, current_seq_len, dtype=torch.bool, device=x_device)
+
+        # Create causal mask
+        mask = torch.triu(torch.ones(current_seq_len, current_seq_len, device=x_device), diagonal=1).bool()
+
+        # Pass through transformer
+        x_out = self.transformer(x_embedded, mask=mask, src_key_padding_mask=key_padding_mask)
+
+        # Output projection
+        return self.fc(x_out)
+
+    def clear_cache(self, case_id: int | None = None) -> None:
+        """Clear compaction cache for specific case_id or all."""
+        if case_id is not None:
+            self.compacted_cache.pop(case_id, None)
+        else:
+            self.compacted_cache.clear()
+
+
 
 # ============================================================
 # Training and Evaluation
