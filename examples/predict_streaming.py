@@ -133,7 +133,7 @@ torch.backends.cudnn.benchmark = False
 
 # Select which ML components to train/evaluate (parity with predict_batch.py)
 ML_TRAINING = True
-NN_TRAINING = False
+NN_TRAINING = True
 RL_TRAINING = True
 ALERGIA_TRAINING = False
 SHOW_DELAYS = False
