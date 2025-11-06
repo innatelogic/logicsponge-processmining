@@ -313,7 +313,6 @@ if DATA == "synthetic":
 
     dataset = iter(interleave_sequences(sequences, random_index=False))
 
-
 # ============================================================
 # PDFA simulation
 # ============================================================

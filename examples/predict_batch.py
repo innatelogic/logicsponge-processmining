@@ -1237,7 +1237,7 @@ for iteration in range(N_ITERATIONS):
         rl_eval_set_transformed = nn_processor.preprocess_data(rl_eval_set_with_start)
 
         if NN_TRAINING:
-            for name in ["LSTM", "transformer"]:
+            for name in ["LSTM", "transformer", "transformer_auto"]:
                 msg = f"Training and evaluating {name} model..."
                 logger.info(msg)
                 process_neural_model(
@@ -1264,7 +1264,7 @@ for iteration in range(N_ITERATIONS):
                         window_size=w,
                     )
             # After NN evaluation in this iteration, print a short summary of NN entries
-            for nn_name in ("LSTM", "transformer"):
+            for nn_name in ("LSTM", "transformer", "transformer_auto"):
                 vecs = prediction_vectors_memory.get(nn_name, [])
                 if vecs:
                     last = vecs[-1]

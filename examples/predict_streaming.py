@@ -47,6 +47,7 @@ from logicsponge.processmining.streaming import (
     PredictionCSVWriter,
     PrintEval,
     StreamingActivityPredictor,
+    SynInfiniteStreamer,
 )
 from logicsponge.processmining.test_data import data_name, dataset
 from logicsponge.processmining.utils import add_file_log_handler, save_run_config
@@ -65,12 +66,13 @@ predictions_dir.mkdir(parents=True, exist_ok=True)
 
 # --- Run configuration (defaults + writing config file like predict_batch.py)
 config_file_path = Path(__file__).parent / "predict_config.json"
+MAGIC_VALUE = 102
 default_run_config = {
     "nn": {"lr": 0.001, "batch_size": 8, "epochs": 20},
     "rl": {"lr": 0.001, "batch_size": 8, "epochs": 20, "gamma": 0.99},
-    "lstm": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 128, "output_dim": 32},
-    "transformer": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 128, "output_dim": 32},
-    "qlearning": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 128, "output_dim": 32},
+    "lstm": {"vocab_size": MAGIC_VALUE, "embedding_dim": MAGIC_VALUE, "hidden_dim": 128, "output_dim": MAGIC_VALUE},
+    "transformer": {"vocab_size": MAGIC_VALUE, "embedding_dim": MAGIC_VALUE, "hidden_dim": 128, "output_dim": MAGIC_VALUE},
+    "qlearning": {"vocab_size": MAGIC_VALUE, "embedding_dim": MAGIC_VALUE, "hidden_dim": 128, "output_dim": MAGIC_VALUE},
 }
 try:
     with config_file_path.open("w") as _f:
@@ -129,7 +131,7 @@ torch.backends.cudnn.benchmark = False
 
 # Select which ML components to train/evaluate (parity with predict_batch.py)
 ML_TRAINING = True
-NN_TRAINING = True
+NN_TRAINING = False
 RL_TRAINING = True
 ALERGIA_TRAINING = False
 SHOW_DELAYS = False
@@ -416,32 +418,32 @@ transformer = StreamingActivityPredictor(
 )
 
 
-# Define autocompaction parameters
-seq_autocompact = (64, 16) # (compress_size, compressed_size)
+# # Define autocompaction parameters
+# seq_autocompact = (64, 16) # (compress_size, compressed_size)
 
-model_transformer_auto = AutocompactedTransformer(
-    seq_input_dim=128,  # Maximum sequence length before compaction
-    vocab_size=transformer_cfg.get("vocab_size", vocab_size),
-    embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
-    hidden_dim=hidden_dim_tr,
-    output_dim=output_dim_tr,
-    seq_autocompact=seq_autocompact,  # (compress_size, compressed_size)
-    use_one_hot=True,
-    device=device,
-)
+# model_transformer_auto = AutocompactedTransformer(
+#     seq_input_dim=128,  # Maximum sequence length before compaction
+#     vocab_size=transformer_cfg.get("vocab_size", vocab_size),
+#     embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
+#     hidden_dim=hidden_dim_tr,
+#     output_dim=output_dim_tr,
+#     seq_autocompact=seq_autocompact,  # (compress_size, compressed_size)
+#     use_one_hot=True,
+#     device=device,
+# )
 
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model_transformer_auto.parameters(), lr=nn_cfg.get("lr", 0.0001))
+# criterion = nn.CrossEntropyLoss()
+# optimizer = optim.Adam(model_transformer_auto.parameters(), lr=nn_cfg.get("lr", 0.0001))
 
-transformer_auto = StreamingActivityPredictor(
-    strategy=NeuralNetworkMiner(
-        model=model_transformer_auto,
-        criterion=criterion,
-        optimizer=optimizer,
-        batch_size=nn_cfg.get("batch_size", 8),
-        config=config,
-    )
-)
+# transformer_auto = StreamingActivityPredictor(
+#     strategy=NeuralNetworkMiner(
+#         model=model_transformer_auto,
+#         criterion=criterion,
+#         optimizer=optimizer,
+#         batch_size=nn_cfg.get("batch_size", 8),
+#         config=config,
+#     )
+# )
 
 # Windowed LSTM/Transformer models (like batch mode NN windowing)
 LSTM_MODELS: dict[str, StreamingActivityPredictor] = {}
@@ -605,6 +607,7 @@ all_attributes = [
 
 streamer = IteratorStreamer(data_iterator=dataset)
 
+streamer = SynInfiniteStreamer(max_prefix_length=10)
 
 def start_filter(item: DataItem) -> bool:
     """Filter function to check if the activity is not the start symbol."""
@@ -679,13 +682,13 @@ if NN_TRAINING and ML_TRAINING:
         * Evaluation("transformer")
     )
 
-    prediction_group = prediction_group | (
-        AddStartSymbol(start_symbol=start_symbol)
-        * transformer_auto
-        * DataItemFilter(data_item_filter=start_filter)
-        * PredictionCSVWriter(csv_path=predictions_dir / "transformer_auto.csv", model_name="transformer_auto")
-        * Evaluation("transformer_auto")
-    )
+    # prediction_group = prediction_group | (
+    #     AddStartSymbol(start_symbol=start_symbol)
+    #     * transformer_auto
+    #     * DataItemFilter(data_item_filter=start_filter)
+    #     * PredictionCSVWriter(csv_path=predictions_dir / "transformer_auto.csv", model_name="transformer_auto")
+    #     * Evaluation("transformer_auto")
+    # )
 
     for name in LSTM_WIN_NAMES:
         prediction_group = prediction_group | (

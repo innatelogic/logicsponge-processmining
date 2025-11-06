@@ -57,6 +57,40 @@ class IteratorStreamer(ls.SourceTerm):
             # repeatedly sleep if done
             time.sleep(10)
 
+class SynInfiniteStreamer(ls.SourceTerm):
+    """For streaming synthetic infinite data."""
+
+    def __init__(self, *args: dict, max_prefix_length=10, **kwargs: dict) -> None:
+        """Create an IteratorStreamer."""
+        super().__init__(*args, **kwargs)
+        self.max_prefix_length = max_prefix_length
+
+
+    def run(self) -> None:
+        """Run the IteratorStreamer."""
+        start_seq = 42
+        prefix_length = 3
+        while True:
+            prefix_length = random.randint(1, self.max_prefix_length)
+            for i in range(start_seq, start_seq + prefix_length):
+                case_id = f"case_{0}"
+                activity = f"act_{i%100}"
+                timestamp = pd.Timestamp.now()
+
+                out = DataItem(
+                    {
+                        "case_id": case_id,
+                        "activity": activity,
+                        "timestamp": timestamp,
+                    }
+                )
+                self.output(out)
+
+            prefix_length = random.randint(1, self.max_prefix_length)
+            start_seq = (2 * start_seq + prefix_length) % 100
+            # repeatedly sleep if done
+            time.sleep(10)
+
 
 class AddStartSymbol(ls.FunctionTerm):
     """For streaming from list."""
