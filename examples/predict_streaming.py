@@ -37,7 +37,7 @@ from logicsponge.processmining.miners import (
     SoftVoting,
     WindowedNeuralNetworkMiner,
 )
-from logicsponge.processmining.neural_networks import LSTMModel, QNetwork, TransformerModel
+from logicsponge.processmining.neural_networks import AutocompactedTransformer, LSTMModel, QNetwork, TransformerModel
 from logicsponge.processmining.streaming import (
     ActualCSVWriter,
     AddStartSymbol,
@@ -415,6 +415,35 @@ transformer = StreamingActivityPredictor(
     )
 )
 
+
+# Define autocompaction parameters
+# Example: compress 10 tokens into 2 tokens when sequence exceeds 512
+seq_autocompact = (64, 16)  # Adjust based on your needs
+
+model_transformer_auto = AutocompactedTransformer(
+    seq_input_dim=128,  # Maximum sequence length before compaction
+    vocab_size=transformer_cfg.get("vocab_size", vocab_size),
+    embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
+    hidden_dim=hidden_dim_tr,
+    output_dim=output_dim_tr,
+    seq_autocompact=seq_autocompact,  # (compress_size, compressed_size)
+    use_one_hot=True,
+    device=device,
+)
+
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model_transformer_auto.parameters(), lr=nn_cfg.get("lr", 0.0001))
+
+transformer_auto = StreamingActivityPredictor(
+    strategy=NeuralNetworkMiner(
+        model=model_transformer_auto,
+        criterion=criterion,
+        optimizer=optimizer,
+        batch_size=nn_cfg.get("batch_size", 8),
+        config=config,
+    )
+)
+
 # Windowed LSTM/Transformer models (like batch mode NN windowing)
 LSTM_MODELS: dict[str, StreamingActivityPredictor] = {}
 TRANSFORMER_MODELS: dict[str, StreamingActivityPredictor] = {}
@@ -649,6 +678,14 @@ if NN_TRAINING and ML_TRAINING:
         * DataItemFilter(data_item_filter=start_filter)
         * PredictionCSVWriter(csv_path=predictions_dir / "transformer.csv", model_name="transformer")
         * Evaluation("transformer")
+    )
+
+    prediction_group = prediction_group | (
+        AddStartSymbol(start_symbol=start_symbol)
+        * transformer_auto
+        * DataItemFilter(data_item_filter=start_filter)
+        * PredictionCSVWriter(csv_path=predictions_dir / "transformer_auto.csv", model_name="transformer_auto")
+        * Evaluation("transformer_auto")
     )
 
     for name in LSTM_WIN_NAMES:
