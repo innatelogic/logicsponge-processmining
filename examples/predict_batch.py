@@ -73,6 +73,7 @@ from logicsponge.processmining.miners import (
     SoftVoting,
 )
 from logicsponge.processmining.neural_networks import (
+    AutocompactedTransformer,
     LSTMModel,
     PreprocessData,
     QNetwork,
@@ -112,7 +113,7 @@ def lstm_model() -> tuple[LSTMModel, optim.Optimizer, nn.Module]:
 def transformer_model() -> tuple[TransformerModel, optim.Optimizer, nn.Module]:
     """Initialize and return a Transformer model, optimizer, and loss function."""
     model = TransformerModel(
-        seq_input_dim=max_seq_length + 2,
+        seq_input_dim=64, # instead of max_seq_length + 2
         vocab_size=run_config.get("transformer", {}).get("vocab_size", 64),
         embedding_dim=run_config.get("transformer", {}).get("embedding_dim", 64),
         hidden_dim=run_config.get("transformer", {}).get("hidden_dim", 128),
@@ -124,6 +125,24 @@ def transformer_model() -> tuple[TransformerModel, optim.Optimizer, nn.Module]:
     optimizer = optim.Adam(model.parameters(), lr=run_config.get("nn", {}).get("lr", 0.001))
     return model, optimizer, criterion
 
+def transformer_auto_model() -> tuple[AutocompactedTransformer, optim.Optimizer, nn.Module]:
+    """Initialize and return a Transformer model with auto-regressive capabilities, optimizer, and loss function."""
+    seq_autocompact = (16, 8) # (compress_size, compressed_size)
+
+    model = AutocompactedTransformer(
+        seq_input_dim=64,  # Maximum sequence length before compaction
+        vocab_size=run_config.get("transformer", {}).get("vocab_size", 64),
+        embedding_dim=run_config.get("transformer", {}).get("embedding_dim", 64),
+        hidden_dim=run_config.get("transformer", {}).get("hidden_dim", 128),
+        output_dim=run_config.get("transformer", {}).get("output_dim", 64),
+        seq_autocompact=seq_autocompact,  # (compress_size, compressed_size)
+        use_one_hot=True,
+        device=device,
+    )
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=run_config.get("nn", {}).get("lr", 0.001))
+    return model, optimizer, criterion
 
 def process_neural_model(  # noqa: C901, PLR0912, PLR0913, PLR0915
     name: str,
@@ -151,6 +170,8 @@ def process_neural_model(  # noqa: C901, PLR0912, PLR0913, PLR0915
             model, optimizer, criterion = lstm_model()
         case "transformer":
             model, optimizer, criterion = transformer_model()
+        case "transformer_auto":
+            model, optimizer, criterion = transformer_auto_model()
         case _:
             msg = "Unknown NN model."
             raise ValueError(msg)

@@ -1112,7 +1112,7 @@ def evaluate_rl(  # noqa: C901, PLR0912
 
 
 def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
-    model: LSTMModel | TransformerModel,
+    model: LSTMModel | TransformerModel | AutocompactedTransformer,
     train_sequences: torch.Tensor,
     val_sequences: torch.Tensor,
     criterion: nn.Module,
@@ -1122,7 +1122,7 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
     patience: int = 3,
     *,
     window_size: int | None = None,
-) -> LSTMModel | TransformerModel:
+) -> LSTMModel | TransformerModel | AutocompactedTransformer:
     """
     Train the RNN model on the training set and evaluate on the validation set.
 
@@ -1251,7 +1251,7 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
 
 
 def evaluate_rnn(  # noqa: PLR0913, PLR0915
-    model: LSTMModel | TransformerModel,
+    model: LSTMModel | TransformerModel | AutocompactedTransformer,
     sequences: torch.Tensor,
     *,
     per_sequence_perplexity: bool = True,

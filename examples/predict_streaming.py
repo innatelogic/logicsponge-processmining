@@ -417,8 +417,7 @@ transformer = StreamingActivityPredictor(
 
 
 # Define autocompaction parameters
-# Example: compress 10 tokens into 2 tokens when sequence exceeds 512
-seq_autocompact = (64, 16)  # Adjust based on your needs
+seq_autocompact = (64, 16) # (compress_size, compressed_size)
 
 model_transformer_auto = AutocompactedTransformer(
     seq_input_dim=128,  # Maximum sequence length before compaction
