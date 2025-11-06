@@ -8,6 +8,7 @@ from collections import OrderedDict
 import torch
 import torch.nn.functional as F  # noqa: N812
 import torch.utils.data
+import math
 from torch import nn
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
@@ -228,7 +229,8 @@ class TransformerModel(nn.Module):
     use_one_hot: bool
     vocab_size: int
     embedding_dim: int
-    pos_embedding: nn.Parameter
+    # positional encodings are computed on-the-fly (sinusoidal), no learned parameter
+    # so no fixed bound on sequence length
     transformer: nn.TransformerEncoder
     fc: nn.Linear
 
@@ -267,7 +269,7 @@ class TransformerModel(nn.Module):
         # - If one-hot is used, d_model = vocab_size
         d_model = embedding_dim if not use_one_hot else vocab_size
         self.d_model = d_model
-        self.max_seq_len = seq_input_dim  # keep arg name for backward-compat
+        self.max_seq_len = seq_input_dim  # kept for backward-compat; not used to bound positions
 
         # Conditional embedding layer
         if not use_one_hot:
@@ -275,8 +277,7 @@ class TransformerModel(nn.Module):
         else:
             self.embedding = None
 
-        # Positional encoding: learnable [1, max_seq_len, d_model]
-        self.pos_embedding = nn.Parameter(torch.zeros(1, self.max_seq_len, d_model, device=device))
+        # Use unbounded sinusoidal positional encoding computed on-the-fly; no learned parameter
 
         # Transformer encoder
         encoder_layer = nn.TransformerEncoderLayer(
@@ -291,8 +292,41 @@ class TransformerModel(nn.Module):
         # Output layer
         self.fc = nn.Linear(d_model, output_dim, device=device)
 
-        # Custom initialization
+        # Custom initialization for linear/embedding layers
         self.apply(self._init_weights)
+
+    @staticmethod
+    def _sinusoidal_positional_encoding(
+        seq_len: int,
+        d_model: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
+        """
+        Create sinusoidal positional encodings of shape [1, seq_len, d_model] on the given device/dtype.
+
+        This matches 'Attention Is All You Need' and works for arbitrary sequence lengths
+        without training a table. Handles odd d_model by generating separate frequency
+        vectors for even and odd channels.
+        """
+        if seq_len <= 0:
+            return torch.zeros(1, 0, d_model, device=device, dtype=dtype)
+        # positions: [L, 1]
+        positions = torch.arange(seq_len, device=device, dtype=dtype).unsqueeze(1)
+        # Generate separate frequency vectors for even and odd channels to support odd d_model
+        n_even = (d_model + 1) // 2  # number of even channels (0,2,4,...)
+        n_odd = d_model // 2         # number of odd channels (1,3,5,...)
+        base = -math.log(10000.0) / max(d_model, 1)
+        div_even = torch.exp(torch.arange(n_even, device=device, dtype=dtype) * base)
+        div_odd = torch.exp(torch.arange(n_odd, device=device, dtype=dtype) * base)
+
+        pe = torch.zeros(seq_len, d_model, device=device, dtype=dtype)
+        # Even dims
+        pe[:, 0::2] = torch.sin(positions * div_even)
+        # Odd dims (if any)
+        if n_odd > 0:
+            pe[:, 1::2] = torch.cos(positions * div_odd)
+        return pe.unsqueeze(0)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -317,25 +351,9 @@ class TransformerModel(nn.Module):
             # Project indices to one-hot vectors on the same device as input
             x = F.one_hot(x, num_classes=self.vocab_size).float().to(x_device)
 
-        # Add positional encoding
+        # Add sinusoidal positional encoding (unbounded in sequence length)
         seq_len = x.size(1)
-        # If the sequence is longer than the learned maximum, interpolate the positional encoding
-        if seq_len <= self.pos_embedding.size(1):
-            pos = self.pos_embedding[:, :seq_len, :]
-        else:
-            msg = f"Sequence length {seq_len} exceeds maximum positional encoding length {self.pos_embedding.size(1)}."
-            logger.warning(msg)
-            # Interpolate along the sequence length dimension to match seq_len
-            # Shape transform: (1, L, D) -> (1, D, L) for interpolation over L -> back to (1, L, D)
-            pos = F.interpolate(
-                self.pos_embedding.transpose(1, 2),
-                size=seq_len,
-                mode="linear",
-                align_corners=False,
-            ).transpose(1, 2)
-
-        # Ensure positional encodings are on the same device as x
-        pos = pos.to(x_device)
+        pos = self._sinusoidal_positional_encoding(seq_len, self.d_model, x_device, x.dtype)
         x = x + pos
 
         # === Add causal (left) mask ===
@@ -356,8 +374,7 @@ class TransformerModel(nn.Module):
                 nn.init.constant_(m.bias, 0)
         elif isinstance(m, nn.Embedding) and m is not None:
             nn.init.uniform_(m.weight, -0.1, 0.1)
-        elif isinstance(m, nn.Parameter):
-            nn.init.normal_(m, mean=0.0, std=0.02)
+        # No learned positional parameter; nothing extra to init here
 
 
 
