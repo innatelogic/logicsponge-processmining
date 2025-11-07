@@ -1,6 +1,9 @@
 """Streaming prediction example for process mining using LogicSponge."""
 
+
+
 import gc
+import json
 import logging
 import time
 from pathlib import Path
@@ -8,18 +11,6 @@ from pathlib import Path
 # ruff: noqa: E402
 import torch
 from torch import nn, optim
-
-logging.basicConfig(
-    level=logging.DEBUG,
-    # format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
-# Ensure module-specific debug logs are visible
-logging.getLogger("logicsponge.processmining.models").setLevel(logging.INFO)
-logging.getLogger("logicsponge.processmining.streaming").setLevel(logging.INFO)
-logging.getLogger("logicsponge.processmining").setLevel(logging.INFO)
-
-
-import json
 
 import logicsponge.core as ls  # type: ignore # noqa: PGH003
 from logicsponge.core import DataItem, DataItemFilter  # type: ignore # noqa: PGH003
@@ -53,6 +44,15 @@ from logicsponge.processmining.streaming import (
 )
 from logicsponge.processmining.test_data import data_name, dataset
 from logicsponge.processmining.utils import add_file_log_handler, save_run_config
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    # format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+# Ensure module-specific debug logs are visible
+logging.getLogger("logicsponge.processmining.models").setLevel(logging.INFO)
+logging.getLogger("logicsponge.processmining.streaming").setLevel(logging.INFO)
+logging.getLogger("logicsponge.processmining").setLevel(logging.INFO)
 
 CUSTOM_GENERATOR_PATTERN = [0, 1, 0, 1, 2, 1, 0, 1, 2, 3, 2, 1]
 # [1, 1, 1, 0, 0, 0]
@@ -430,27 +430,7 @@ transformer = StreamingActivityPredictor(
 
 
 
-model_transformer_2heads = TransformerModel(
-    seq_input_dim=512,
-    vocab_size=transformer_cfg.get("vocab_size", vocab_size),
-    embedding_dim=64,  # ensure divisible by attention_heads
-    hidden_dim=hidden_dim_tr,
-    output_dim=output_dim_tr,
-    attention_heads=2,
-    use_one_hot=False,  # use embedding-based encoding so d_model=embedding_dim
-)
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model_transformer_2heads.parameters(), lr=nn_cfg.get("lr", 0.0001))
 
-transformer_2heads = StreamingActivityPredictor(
-    strategy=NeuralNetworkMiner(
-        model=model_transformer_2heads,
-        criterion=criterion,
-        optimizer=optimizer,
-        batch_size=nn_cfg.get("batch_size", 8),
-        config=config,
-    )
-)
 
 # Windowed LSTM/Transformer models (like batch mode NN windowing)
 LSTM_MODELS: dict[str, StreamingActivityPredictor] = {}
@@ -499,6 +479,40 @@ for w in NN_WINDOW_RANGE:
         )
     )
 
+
+
+ATTENTION_HEADS = [1, 2, 4]
+TRANSFORMER_HEAD_MODELS: dict[str, StreamingActivityPredictor] = {}
+TRANSFORMER_HEAD_NAMES: list[str] = []
+
+for heads in ATTENTION_HEADS:
+    if heads == 1:
+        TRANSFORMER_HEAD_NAMES.append("transformer")
+        continue
+
+    model_tr_h = TransformerModel(
+        seq_input_dim=512,
+        vocab_size=transformer_cfg.get("vocab_size", vocab_size),
+        embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
+        hidden_dim=hidden_dim_tr,
+        output_dim=output_dim_tr,
+        attention_heads=heads,
+        use_one_hot=True,
+    )
+    criterion_h = nn.CrossEntropyLoss()
+    optimizer_h = optim.Adam(model_tr_h.parameters(), lr=nn_cfg.get("lr", 0.0001))
+
+    name = f"transformer_{heads}heads"
+    TRANSFORMER_HEAD_MODELS[name] = StreamingActivityPredictor(
+        strategy=NeuralNetworkMiner(
+            model=model_tr_h,
+            criterion=criterion_h,
+            optimizer=optimizer_h,
+            batch_size=nn_cfg.get("batch_size", 8),
+            config=config,
+        )
+    )
+    TRANSFORMER_HEAD_NAMES.append(name)
 # RL (QNetwork) models built in a loop
 RL_MODELS: dict[str, StreamingActivityPredictor] = {}
 for w in RL_WINDOWS:
@@ -570,7 +584,7 @@ models = [
     *list(soft_voting_predictors.keys()),  # Add all soft_voting predictor names
     "lstm",
     "transformer",
-    "transformer_2heads",
+    *TRANSFORMER_HEAD_NAMES,
     *LSTM_WIN_NAMES,
     *TRANSFORMER_WIN_NAMES,
     *RL_NAMES,
@@ -693,13 +707,24 @@ if NN_TRAINING and ML_TRAINING:
         * Evaluation("transformer")
     )
 
-    prediction_group = prediction_group | (
-        AddStartSymbol(start_symbol=start_symbol)
-        * transformer_2heads
-        * DataItemFilter(data_item_filter=start_filter)
-        * PredictionCSVWriter(csv_path=predictions_dir / "transformer_2heads.csv", model_name="transformer_2heads")
-        * Evaluation("transformer_2heads")
-    )
+    # Add predictions for all transformer attention-head variants.
+    # `TRANSFORMER_HEAD_NAMES` contains the model names; for the
+    # special case "transformer" we reuse the already-created
+    # `transformer` predictor object. Other names are stored in
+    # `TRANSFORMER_HEAD_MODELS` created earlier.
+    for tname in TRANSFORMER_HEAD_NAMES:
+        if tname == "transformer":
+            predictor_obj = transformer
+        else:
+            predictor_obj = TRANSFORMER_HEAD_MODELS[tname]
+
+        prediction_group = prediction_group | (
+            AddStartSymbol(start_symbol=start_symbol)
+            * predictor_obj
+            * DataItemFilter(data_item_filter=start_filter)
+            * PredictionCSVWriter(csv_path=predictions_dir / f"{tname}.csv", model_name=tname)
+            * Evaluation(tname)
+        )
 
     # prediction_group = prediction_group | (
     #     AddStartSymbol(start_symbol=start_symbol)
