@@ -25,7 +25,6 @@ from tqdm import tqdm
 from logicsponge.processmining.config import DEFAULT_CONFIG, update_config
 from logicsponge.processmining.data_utils import add_input_symbols_sequence
 from logicsponge.processmining.neural_networks import (
-    AutocompactedTransformer,
     LSTMModel,
     QNetwork,
     RNNModel,
@@ -1404,7 +1403,7 @@ class NeuralNetworkMiner(StreamingMiner):
 
     def __init__(
         self, *args,  # noqa: ANN002
-        model: RNNModel | LSTMModel | TransformerModel | AutocompactedTransformer | QNetwork,
+        model: RNNModel | LSTMModel | TransformerModel | QNetwork,
         batch_size: int, optimizer, criterion, **kwargs  # noqa: ANN001, ANN003
     ) -> None:
         """Initialize the NeuralNetworkMiner class."""

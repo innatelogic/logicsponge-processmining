@@ -37,7 +37,7 @@ from logicsponge.processmining.miners import (
     SoftVoting,
     WindowedNeuralNetworkMiner,
 )
-from logicsponge.processmining.neural_networks import AutocompactedTransformer, LSTMModel, QNetwork, TransformerModel
+from logicsponge.processmining.neural_networks import LSTMModel, QNetwork, TransformerModel
 from logicsponge.processmining.streaming import (
     ActualCSVWriter,
     AddStartSymbol,
@@ -404,6 +404,7 @@ model_transformer = TransformerModel(
     embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
     hidden_dim=hidden_dim_tr,
     output_dim=output_dim_tr,
+    attention_heads=1,
     use_one_hot=True,
 )
 criterion = nn.CrossEntropyLoss()
@@ -420,32 +421,29 @@ transformer = StreamingActivityPredictor(
 )
 
 
-# # Define autocompaction parameters
-# seq_autocompact = (64, 16) # (compress_size, compressed_size)
 
-# model_transformer_auto = AutocompactedTransformer(
-#     seq_input_dim=128,  # Maximum sequence length before compaction
-#     vocab_size=transformer_cfg.get("vocab_size", vocab_size),
-#     embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
-#     hidden_dim=hidden_dim_tr,
-#     output_dim=output_dim_tr,
-#     seq_autocompact=seq_autocompact,  # (compress_size, compressed_size)
-#     use_one_hot=True,
-#     device=device,
-# )
 
-# criterion = nn.CrossEntropyLoss()
-# optimizer = optim.Adam(model_transformer_auto.parameters(), lr=nn_cfg.get("lr", 0.0001))
+model_transformer_2heads = TransformerModel(
+    seq_input_dim=512,
+    vocab_size=transformer_cfg.get("vocab_size", vocab_size),
+    embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
+    hidden_dim=hidden_dim_tr,
+    output_dim=output_dim_tr,
+    attention_heads=2,
+    use_one_hot=True,
+)
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model_transformer_2heads.parameters(), lr=nn_cfg.get("lr", 0.0001))
 
-# transformer_auto = StreamingActivityPredictor(
-#     strategy=NeuralNetworkMiner(
-#         model=model_transformer_auto,
-#         criterion=criterion,
-#         optimizer=optimizer,
-#         batch_size=nn_cfg.get("batch_size", 8),
-#         config=config,
-#     )
-# )
+transformer_2heads = StreamingActivityPredictor(
+    strategy=NeuralNetworkMiner(
+        model=model_transformer_2heads,
+        criterion=criterion,
+        optimizer=optimizer,
+        batch_size=nn_cfg.get("batch_size", 8),
+        config=config,
+    )
+)
 
 # Windowed LSTM/Transformer models (like batch mode NN windowing)
 LSTM_MODELS: dict[str, StreamingActivityPredictor] = {}
@@ -476,6 +474,7 @@ for w in NN_WINDOW_RANGE:
         embedding_dim=embedding_dim,
         hidden_dim=hidden_dim,
         output_dim=output_dim,
+        attention_heads=1,
         use_one_hot=True,
     )
     criterion_t = nn.CrossEntropyLoss()
@@ -564,6 +563,7 @@ models = [
     *list(soft_voting_predictors.keys()),  # Add all soft_voting predictor names
     "lstm",
     "transformer",
+    "transformer_2heads",
     *LSTM_WIN_NAMES,
     *TRANSFORMER_WIN_NAMES,
     *RL_NAMES,
@@ -684,6 +684,14 @@ if NN_TRAINING and ML_TRAINING:
         * DataItemFilter(data_item_filter=start_filter)
         * PredictionCSVWriter(csv_path=predictions_dir / "transformer.csv", model_name="transformer")
         * Evaluation("transformer")
+    )
+
+    prediction_group = prediction_group | (
+        AddStartSymbol(start_symbol=start_symbol)
+        * transformer_2heads
+        * DataItemFilter(data_item_filter=start_filter)
+        * PredictionCSVWriter(csv_path=predictions_dir / "transformer_2heads.csv", model_name="transformer_2heads")
+        * Evaluation("transformer_2heads")
     )
 
     # prediction_group = prediction_group | (
