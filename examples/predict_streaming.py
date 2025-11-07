@@ -54,7 +54,8 @@ logging.getLogger("logicsponge.processmining.models").setLevel(logging.INFO)
 logging.getLogger("logicsponge.processmining.streaming").setLevel(logging.INFO)
 logging.getLogger("logicsponge.processmining").setLevel(logging.INFO)
 
-CUSTOM_GENERATOR_PATTERN = [0, 1, 0, 1, 2, 1, 0, 1, 2, 3, 2, 1]
+CUSTOM_GENERATOR_PATTERN = [1, 1, 1, 0, 0, 0]
+# [0, 1, 0, 1, 2, 1, 0, 1, 2, 3, 2, 1]
 # [1, 1, 1, 0, 0, 0]
 str_pattern = s = "".join(map(str, CUSTOM_GENERATOR_PATTERN))
 
@@ -463,7 +464,7 @@ for w in NN_WINDOW_RANGE:
         embedding_dim=embedding_dim,
         hidden_dim=hidden_dim,
         output_dim=output_dim,
-        attention_heads=1,
+        attention_heads=4,
         use_one_hot=True,
     )
     criterion_t = nn.CrossEntropyLoss()
@@ -713,10 +714,11 @@ if NN_TRAINING and ML_TRAINING:
     # `transformer` predictor object. Other names are stored in
     # `TRANSFORMER_HEAD_MODELS` created earlier.
     for tname in TRANSFORMER_HEAD_NAMES:
+        # The base 'transformer' predictor was already added above; skip re-adding it
         if tname == "transformer":
-            predictor_obj = transformer
-        else:
-            predictor_obj = TRANSFORMER_HEAD_MODELS[tname]
+            continue
+
+        predictor_obj = TRANSFORMER_HEAD_MODELS[tname]
 
         prediction_group = prediction_group | (
             AddStartSymbol(start_symbol=start_symbol)
