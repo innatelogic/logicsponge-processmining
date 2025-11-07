@@ -100,7 +100,6 @@ def lstm_model() -> tuple[LSTMModel, optim.Optimizer, nn.Module]:
         vocab_size=run_config.get("lstm", {}).get("vocab_size", 64),
         embedding_dim=run_config.get("lstm", {}).get("embedding_dim", 64),
         hidden_dim=run_config.get("lstm", {}).get("hidden_dim", 128),
-        output_dim=run_config.get("lstm", {}).get("output_dim", 64),
         use_one_hot=True,
         device=device
     )
@@ -377,7 +376,6 @@ def qnetwork_model() -> tuple[QNetwork, optim.Optimizer, nn.Module]:
         vocab_size=run_config.get("qlearning", {}).get("vocab_size", 32),
         embedding_dim=run_config.get("qlearning", {}).get("embedding_dim", 32),
         hidden_dim=run_config.get("qlearning", {}).get("hidden_dim", 1024),
-        output_dim=run_config.get("qlearning", {}).get("output_dim", 32),
         device=device,
     ).to(device)
     optimizer = optim.Adam(model.parameters(), lr=run_config.get("rl", {}).get("lr", 0.001))

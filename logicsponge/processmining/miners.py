@@ -12,13 +12,14 @@ import math
 import random
 import time
 from abc import ABC, abstractmethod
-from collections import Counter, OrderedDict
+from collections import Counter, OrderedDict, defaultdict, deque
 from datetime import timedelta
 from typing import Any
 
 import matplotlib as mpl
 import pandas as pd
 import torch
+from torch import nn
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
 
@@ -1401,24 +1402,43 @@ class NeuralNetworkMiner(StreamingMiner):
 
     device: torch.device | None
 
-    def __init__(
-        self, *args,  # noqa: ANN002
+    STEP_OUTPUT_TUPLE_LEN = 2  # length of (logits, hidden) tuple returned by step()/forward
+
+    def __init__(  # noqa: PLR0913
+        self,
         model: RNNModel | LSTMModel | TransformerModel | QNetwork,
-        batch_size: int, optimizer, criterion, **kwargs  # noqa: ANN001, ANN003
+        batch_size: int,
+        optimizer: torch.optim.Optimizer,
+        *,
+        criterion: nn.Module | None = None,
+        mode: str = "batch",
+        sequence_buffer_length: int = 128,
+        config: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the NeuralNetworkMiner class."""
-        super().__init__(*args, **kwargs)
-        self.device = model.device
-        self.model = model.to(device=self.device)  # The neural network, make sure it's at the device
+        super().__init__(config=config)
+        self.model = model
         self.optimizer = optimizer
-        self.criterion = criterion
+        self.criterion = criterion or nn.CrossEntropyLoss()
+        self.mode = mode
+        # Prefer model.device when exposed; fallback to CPU to avoid None-device errors
+        self.device = getattr(model, "device", None) or torch.device("cpu")
+        self.sequence_buffer_length = sequence_buffer_length
 
-        self.sequences: OrderedDict[CaseId, list[int]] = OrderedDict()  # Ordered dictionary to maintain insertion order
+        # Store per-case sequences as indices (int tokens). Mapping maintained below.
+        # Ordered dictionary to maintain insertion order (used by round-robin batching)
+        self.sequences: OrderedDict[CaseId, list[int]] = OrderedDict()
+
+        # incremental caches
+        self._case_rnn_state: dict[CaseId, Any] = {}  # stores hidden states for RNN/LSTM/GRU
+        self._recent_tail: dict[CaseId, deque[int]] = defaultdict(lambda: deque(maxlen=self.sequence_buffer_length))
+
         self.rr_index = 0  # Keeps track of the round-robin index
         self.batch_size = batch_size
 
-        self.activity_index = {}
-        self.index_activity = {}
+        # Bi-directional mapping between activity names and indices (0 reserved for padding)
+        self.activity_index: dict[ActivityName, int] = {}
+        self.index_activity: dict[int, ActivityName] = {}
 
     def get_state_from_case(self, case_id: CaseId) -> StateId:
         """Not implemented."""
@@ -1438,7 +1458,7 @@ class NeuralNetworkMiner(StreamingMiner):
         return None
 
     def get_sequence(self, case_id: CaseId) -> list[int]:
-        """Return the index sequence for a specific case_id."""
+        """Return the token-index sequence for a specific case_id."""
         return self.sequences.get(case_id, [])
 
     def get_modified_cases(self) -> set[CaseId]:
@@ -1454,19 +1474,37 @@ class NeuralNetworkMiner(StreamingMiner):
         case_id = event["case_id"]
         activity = event["activity"]
 
-        # Dynamically update activity_to_idx if the activity is new
+        # Dynamically map activity to an index (0 is reserved for padding)
         if activity not in self.activity_index:
-            current_idx = len(self.activity_index) + 1  # Get the next available index
-            self.activity_index[activity] = current_idx
-            self.index_activity[current_idx] = activity
+            new_idx = len(self.activity_index) + 1
+            self.activity_index[activity] = new_idx
+            self.index_activity[new_idx] = activity
 
-        # Convert activity to its corresponding index
-        activity_idx = self.activity_index[activity]
+        activity_idx = int(self.activity_index[activity])
 
-        # Add the activity index to the sequence for the given case_id
+        # Initialize sequence container for new case_id
         if case_id not in self.sequences:
-            self.sequences[case_id] = []  # New case added
+            self.sequences[case_id] = []
+
+        # Append index to per-case buffers
         self.sequences[case_id].append(activity_idx)
+        self._recent_tail[case_id].append(activity_idx)
+
+        # Optional incremental hidden-state update (no grad) for models exposing step()
+        if self.mode == "incremental" and hasattr(self.model, "step"):
+            last_token = torch.tensor([activity_idx], dtype=torch.long, device=self.device)
+            hidden = self._case_rnn_state.get(case_id, None)
+            try:
+                with torch.no_grad():
+                    _out = self.model.step(last_token, hidden)  # type: ignore[attr-defined]
+                # Support both (logits, new_hidden) or just new_hidden (unlikely)
+                if isinstance(_out, tuple) and len(_out) == self.STEP_OUTPUT_TUPLE_LEN:
+                    _, new_hidden = _out
+                else:
+                    new_hidden = _out  # type: ignore[assignment]
+                self._case_rnn_state[case_id] = new_hidden
+            except Exception:
+                logger.exception("Incremental step() failed; continuing without hidden-state cache.")
 
         # Continue with the training step using the updated sequence
         batch = self.select_batch(case_id)
@@ -1492,6 +1530,9 @@ class NeuralNetworkMiner(StreamingMiner):
 
         # Forward pass through the model
         outputs = self.model(x_input)
+        # Support models returning either logits or (logits, hidden)
+        if isinstance(outputs, tuple):
+            outputs = outputs[0]
 
         # Reshape outputs to [batch_size * sequence_length, vocab_size] for loss calculation
         outputs = outputs.view(-1, outputs.shape[-1])
@@ -1511,6 +1552,36 @@ class NeuralNetworkMiner(StreamingMiner):
 
         self.optimizer.step()
         # loss.item()
+
+
+
+
+    def train_on_batch(self, batch_case_ids: list[str]) -> torch.Tensor | None:
+        """
+        Construct a batch from case ids (their full sequences) and perform a training step.
+
+        This method leaves incremental caches untouched; you may want to recompute caches after training.
+        """
+        sequences = [torch.tensor(self.sequences[cid], dtype=torch.long, device=self.device) for cid in batch_case_ids]
+        # pad
+        lengths = [s.size(0) for s in sequences]
+        max_l = max(lengths)
+        batch = torch.zeros(len(sequences), max_l, dtype=torch.long, device=self.device)
+        for i, s in enumerate(sequences):
+            batch[i, :s.size(0)] = s
+        # teacher-forcing next-token prediction
+        x = batch[:, :-1]
+        y = batch[:, 1:]
+        logits, _ = self.model(x)
+        logits = logits.reshape(-1, self.model.vocab_size)
+        targets = y.reshape(-1)
+        # mask padding targets
+        mask = targets != 0
+        if mask.sum().item() == 0:
+            return None
+        logits = logits[mask]
+        targets = targets[mask]
+        return self.criterion(logits, targets) # loss
 
     def select_batch(self, case_id: CaseId) -> list[list[int]]:
         """
@@ -1596,46 +1667,41 @@ class NeuralNetworkMiner(StreamingMiner):
         """
         msg = "NeuralNetworkMiner does not support sequence metrics."
         raise NotImplementedError(msg)
-        if not sequence or len(sequence) < 1:
-            return empty_metrics()
-
-        # Convert each activity name to its corresponding index, return None if any activity is unknown
-        index_sequence = []
-        for event in sequence:
-            activity = event["activity"]
-            activity_idx = self.activity_index.get(activity)
-            if activity_idx is None:
-                return empty_metrics()
-            index_sequence.append(activity_idx)
-
-        probs = self.idx_sequence_probs(index_sequence)
-        return Metrics(
-            probs=probs,
-            predicted_delays={},
-            # likelihoods=probs
-        )
+        # If the method were supported, below is the intended implementation template:
+        # if not sequence or len(sequence) < 1:
+        #     return empty_metrics()
+        # index_sequence: list[int] = []
+        # for event in sequence:
+        #     activity = event["activity"]
+        #     activity_idx = self.activity_index.get(activity)
+        #     if activity_idx is None:
+        #         return empty_metrics()
+        #     index_sequence.append(activity_idx)
+        # probs = self.idx_sequence_probs(index_sequence)
+        # return Metrics(probs=probs, predicted_delays={})
 
     def idx_sequence_probs(self, index_sequence: list[int]) -> ProbDistr:
-        """Predict the next activity for a given sequence of activity indices."""
-        # Convert to a tensor and add a batch dimension
-        input_sequence = torch.tensor(index_sequence, dtype=torch.long, device=self.device).unsqueeze(
-            0
-        )  # Shape [1, sequence_length]
+        """Predict next-activity probabilities from a given index sequence."""
+        if not index_sequence:
+            # Return uniform-zero over known activities (no context); empty dict is fine
+            return {}
 
-        # Pass the sequence through the model to get the output
+        # Convert to tensor [1, L]
+        input_sequence = torch.as_tensor([index_sequence], dtype=torch.long, device=self.device)
+
         self.model.eval()
         with torch.no_grad():
-            output = self.model(input_sequence)
+            outputs = self.model(input_sequence)
+            # Support models that return (logits, hidden)
+            if isinstance(outputs, tuple):
+                outputs = outputs[0]
 
-        # Get the logits for the last time step (most recent activity in the sequence)
-        logits = output[:, -1, :]  # Shape [1, vocab_size]
+        # Get logits for last time step and softmax
+        logits_last = outputs[:, -1, :]
+        probabilities_t = torch.softmax(logits_last, dim=-1).squeeze(0)
 
-        # Apply softmax to get the probabilities
-        probabilities = torch.softmax(logits, dim=-1)  # Shape [1, vocab_size]
-
-        # Convert the tensor to a list of probabilities
-        probabilities = probabilities.squeeze(0).tolist()  # Shape [vocab_size]
-
+        # Map back to activity names using index_activity
+        probabilities = probabilities_t.tolist()
         return {
             self.index_activity[idx]: prob
             for idx, prob in enumerate(probabilities)
@@ -1673,18 +1739,27 @@ class WindowedNeuralNetworkMiner(NeuralNetworkMiner):
     recent ``sequence_buffer_length`` tokens.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
-        *args: dict[str, Any],
         model: RNNModel | LSTMModel | TransformerModel,
         batch_size: int,
-        optimizer,  # noqa: ANN001
-        criterion,  # noqa: ANN001
+        optimizer: torch.optim.Optimizer,
+        *,
+        criterion: nn.Module | None = None,
         sequence_buffer_length: int = 50,
-        **kwargs: Any,  # noqa: ANN401
+        mode: str = "batch",
+        config: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the WindowedNeuralNetworkMiner class."""
-        super().__init__(*args, model=model, batch_size=batch_size, optimizer=optimizer, criterion=criterion, **kwargs)
+        super().__init__(
+            model=model,
+            batch_size=batch_size,
+            optimizer=optimizer,
+            criterion=criterion,
+            mode=mode,
+            sequence_buffer_length=sequence_buffer_length,
+            config=config,
+        )
         if sequence_buffer_length < 1:
             msg = "sequence_buffer_length must be >= 1"
             raise ValueError(msg)
@@ -1738,6 +1813,8 @@ class WindowedNeuralNetworkMiner(NeuralNetworkMiner):
 
         self.optimizer.zero_grad()
         outputs = self.model(x_input)
+        if isinstance(outputs, tuple):
+            outputs = outputs[0]
         outputs = outputs.view(-1, outputs.shape[-1])
 
         mask = y_target != 0
@@ -1776,13 +1853,29 @@ class RLMiner(NeuralNetworkMiner):
     - optional: event['reward'] (numeric). If not present, reward defaults to 0.0 (no update).
     """
 
-    def __init__(self, *args: dict[str, Any], model: QNetwork,  # noqa: PLR0913
-                 optimizer, criterion,  # noqa: ANN001
-                 sequence_buffer_length: int = 50, long_term_mem_size: int = 10,
-                 short_term_mem_size: int | None = None, **kwargs: dict[str, Any]) -> None:
+    def __init__(  # noqa: PLR0913
+        self,
+        model: QNetwork,
+        optimizer: torch.optim.Optimizer,
+        *,
+        criterion: nn.Module | None = None,
+        sequence_buffer_length: int = 50,
+        long_term_mem_size: int = 10,
+        short_term_mem_size: int | None = None,
+        mode: str = "batch",
+        config: dict[str, Any] | None = None,
+    ) -> None:
         """Initialize the RLMiner class."""
         # Initialize parent
-        super().__init__(*args, model=model, batch_size=8, optimizer=optimizer, criterion=criterion, **kwargs)
+        super().__init__(
+            model=model,
+            batch_size=8,
+            optimizer=optimizer,
+            criterion=criterion,
+            mode=mode,
+            sequence_buffer_length=sequence_buffer_length,
+            config=config,
+        )
 
         # Buffering parameters
         if short_term_mem_size is None:

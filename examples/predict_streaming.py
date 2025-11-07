@@ -379,7 +379,7 @@ vocab_size = lstm_cfg.get("vocab_size", 50)  # An upper bound on the number of a
 embedding_dim = lstm_cfg.get("embedding_dim", 50)
 hidden_dim = lstm_cfg.get("hidden_dim", 128)
 output_dim = lstm_cfg.get("output_dim", vocab_size)
-model_lstm = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, device=device, use_one_hot=True)
+model_lstm = LSTMModel(vocab_size, embedding_dim=embedding_dim, hidden_dim=hidden_dim, device=device, use_one_hot=True)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model_lstm.parameters(), lr=nn_cfg.get("lr", 0.001))
 
@@ -453,7 +453,9 @@ TRANSFORMER_WIN_NAMES = [f"transformer_win{w}" for w in NN_WINDOW_RANGE]
 
 for w in NN_WINDOW_RANGE:
     # LSTM windowed variant
-    model_lstm_w = LSTMModel(vocab_size, embedding_dim, hidden_dim, output_dim, device=device, use_one_hot=True)
+    model_lstm_w = LSTMModel(
+        vocab_size, embedding_dim=embedding_dim, hidden_dim=hidden_dim, device=device, use_one_hot=True
+    )
     criterion_l = nn.CrossEntropyLoss()
     optimizer_l = optim.Adam(model_lstm_w.parameters(), lr=nn_cfg.get("lr", 0.001))
     LSTM_MODELS[f"lstm_win{w}"] = StreamingActivityPredictor(
@@ -498,7 +500,6 @@ for w in RL_WINDOWS:
         vocab_size=q_cfg.get("vocab_size", vocab_size),
         embedding_dim=q_cfg.get("embedding_dim", embedding_dim),
         hidden_dim=q_cfg.get("hidden_dim", hidden_dim),
-        output_dim=q_cfg.get("output_dim", output_dim),
         device=device,
     ).to(device)
     criterion_q = nn.MSELoss()
@@ -521,7 +522,6 @@ model_qlearning_base = QNetwork(
     vocab_size=run_config.get("qlearning", {}).get("vocab_size", vocab_size),
     embedding_dim=run_config.get("qlearning", {}).get("embedding_dim", embedding_dim),
     hidden_dim=run_config.get("qlearning", {}).get("hidden_dim", hidden_dim),
-    output_dim=run_config.get("qlearning", {}).get("output_dim", output_dim),
     device=device,
 ).to(device)
 criterion_q_base = nn.MSELoss()

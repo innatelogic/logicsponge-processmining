@@ -2,13 +2,12 @@
 
 import copy
 import logging
+import math
 import time
-from collections import OrderedDict
 
 import torch
 import torch.nn.functional as F  # noqa: N812
 import torch.utils.data
-import math
 from torch import nn
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
@@ -106,6 +105,10 @@ class LSTMModel(nn.Module):
         use_one_hot (bool): Whether to use one-hot encoding instead of embeddings.
         device (torch.device | None): Device to run the model on (CPU or GPU).
 
+    Methods:
+    - forward(x, hidden=None) -> (logits, new_hidden) where logits shape is [B, L, V]
+    - step(input_token, hidden=None) -> (logits_last_step, new_hidden) where logits_last_step shape is [B, V]
+
     """
 
     device: torch.device | None
@@ -120,10 +123,11 @@ class LSTMModel(nn.Module):
     def __init__( # noqa: PLR0913
         self,
         vocab_size: int,
-        embedding_dim: int,
-        hidden_dim: int,
-        output_dim: int,
         *,
+        embedding_dim: int = 64,
+        hidden_dim: int = 128,
+        num_layers: int = 2,
+        padding_idx: int = 0,
         use_one_hot: bool = False,
         device: torch.device | None = None,
     ) -> None:
@@ -134,7 +138,8 @@ class LSTMModel(nn.Module):
             vocab_size (int): Size of the vocabulary.
             embedding_dim (int): Dimension of the embeddings.
             hidden_dim (int): Dimension of the hidden layers in the LSTM.
-            output_dim (int): Dimension of the output layer.
+            num_layers (int): Number of LSTM layers.
+            padding_idx (int): Padding index for the embedding layer.
             use_one_hot (bool): Whether to use one-hot encoding instead of embeddings.
             device (torch.device | None): Device to run the model on (CPU or GPU).
 
@@ -144,31 +149,35 @@ class LSTMModel(nn.Module):
         self.use_one_hot = use_one_hot
         self.vocab_size = vocab_size
         self.embedding_dim = embedding_dim
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
 
         # Conditional embedding layer
         if not use_one_hot:
-            self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0, device=device)
+            self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=padding_idx, device=device)
         else:
             self.embedding = None
 
         # Input dimension to LSTM depends on the encoding method
         input_dim = vocab_size if use_one_hot else embedding_dim
 
-        # LSTM layers
-        self.lstm1 = nn.LSTM(input_dim, hidden_dim, batch_first=True, device=device)
-        self.lstm2 = nn.LSTM(hidden_dim, hidden_dim, batch_first=True, device=device)
-
-        self.fc = nn.Linear(hidden_dim, output_dim, device=device)
+        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers=num_layers, batch_first=True, device=device)
+        self.fc = nn.Linear(hidden_dim, vocab_size, device=device)
 
         # Apply custom weight initialization
         self.apply(self._init_weights)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+            self,
+            x: torch.Tensor,
+            hidden: torch.Tensor | None = None
+        ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass through the LSTM model.
 
         Args:
             x (torch.Tensor): Input tensor of shape (batch_size, seq_len), where each element is an activity index.
+            hidden (tuple[torch.Tensor, torch.Tensor] | None): Optional initial hidden and cell states for the LSTM.
 
         Returns:
             torch.Tensor: Output tensor of shape (batch_size, seq_len, output_dim),
@@ -185,10 +194,10 @@ class LSTMModel(nn.Module):
             x = torch.nn.functional.one_hot(x, num_classes=self.vocab_size).float().to(x.device)
 
         # Pass through LSTM layers
-        lstm_out, _ = self.lstm1(x)
-        lstm_out, _ = self.lstm2(lstm_out)
+        lstm_out, new_hidden = self.lstm(x, hidden)
+        logits = self.fc(lstm_out)
 
-        return self.fc(lstm_out)
+        return logits, new_hidden
 
     def _init_weights(self, m: nn.Module) -> None:
         if isinstance(m, nn.Linear):
@@ -238,11 +247,13 @@ class TransformerModel(nn.Module):
         self,
         seq_input_dim: int,  # Interpreted as max_seq_len for positional encodings
         vocab_size: int,
-        embedding_dim: int,
-        hidden_dim: int,
-        output_dim: int,
-        attention_heads: int,
         *,
+        embedding_dim: int = 64,
+        hidden_dim: int = 128,
+        num_layers: int = 2,
+        padding_idx: int = 0,
+        output_dim: int = 64,
+        attention_heads: int = 4,
         use_one_hot: bool = False,
         device: torch.device | None = None,
     ) -> None:
@@ -254,7 +265,10 @@ class TransformerModel(nn.Module):
             vocab_size (int): Size of the vocabulary.
             embedding_dim (int): Dimension of the embeddings.
             hidden_dim (int): Dimension of the hidden layers in the transformer.
+            num_layers (int): Number of transformer layers.
+            padding_idx (int): Padding index for the embedding layer.
             output_dim (int): Dimension of the output layer.
+            attention_heads (int): Number of attention heads in the transformer.
             use_one_hot (bool): Whether to use one-hot encoding instead of embeddings.
             device (torch.device | None): Device to run the model on (CPU or GPU).
 
@@ -274,7 +288,7 @@ class TransformerModel(nn.Module):
 
         # Conditional embedding layer
         if not use_one_hot:
-            self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0, device=device)
+            self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=padding_idx, device=device)
         else:
             self.embedding = None
 
@@ -288,7 +302,7 @@ class TransformerModel(nn.Module):
             batch_first=True,
             device=device,
         )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=2)
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
         # Output layer
         self.fc = nn.Linear(d_model, output_dim, device=device)
@@ -396,11 +410,12 @@ class QNetwork(nn.Module):
     def __init__(  # noqa: PLR0913
         self,
         vocab_size: int,
-        embedding_dim: int,
-        hidden_dim: int,
-        output_dim: int,
-        device: torch.device | None = None,
         *,
+        embedding_dim: int = 64,
+        hidden_dim: int = 128,
+        num_layers: int = 1,
+        padding_idx: int = 0,
+        device: torch.device | None = None,
         use_one_hot: bool = False,
     ) -> None:
         """
@@ -410,7 +425,8 @@ class QNetwork(nn.Module):
             vocab_size (int): Size of the vocabulary.
             embedding_dim (int): Dimension of the embeddings (feature size per timestep when embeddings are used).
             hidden_dim (int): Dimension of the hidden layer in the GRU.
-            output_dim (int): Dimension of the output layer.
+            num_layers (int): Number of GRU layers (currently unused, single layer GRU is used).
+            padding_idx (int): Padding index for the embedding layer.
             device (torch.device | None): Device to run the model on (CPU or GPU).
             use_one_hot (bool): Whether to use one-hot encoding instead of
                 embeddings. If True, the GRU input size is set to
@@ -422,25 +438,32 @@ class QNetwork(nn.Module):
         # Optionally disable embedding and process raw one-hot inputs directly.
         self.use_one_hot = use_one_hot
         self.vocab_size = vocab_size
+
         if not self.use_one_hot:
             # simple embedding (use embedding indices like other NN models)
-            self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0, device=device)
-            gru_input_dim = embedding_dim
+            self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=padding_idx, device=device)
         else:
             # when using raw one-hot inputs, we don't create an embedding layer
             self.embedding = None
-            gru_input_dim = vocab_size
 
         # GRU input dimension depends on whether we use embedding or one-hot
-        self.gru = nn.GRU(gru_input_dim, hidden_dim, batch_first=True, device=device)
-        self.fc = nn.Linear(hidden_dim, output_dim, device=device)
+        self.gru = nn.GRU(embedding_dim, hidden_dim, num_layers=num_layers, batch_first=True, device=device)
+        self.fc = nn.Linear(hidden_dim, vocab_size, device=device)
+        self.num_layers = num_layers
+        self.hidden_dim = hidden_dim
+        self.vocab_size = vocab_size
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+            self,
+            x: torch.Tensor,
+            hidden: torch.Tensor | None = None
+        ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass through the Q-network.
 
         Args:
             x (torch.Tensor): Input tensor of shape (batch_size, seq_len), where each element is an activity index.
+            hidden (torch.Tensor | None): Hidden state tensor from the previous timestep.
 
         Returns:
             torch.Tensor: Output tensor of shape (batch_size, 1, output_dim),
@@ -454,20 +477,40 @@ class QNetwork(nn.Module):
             # Convert indices to one-hot; padding index 0 -> all-zeros vector
             emb = F.one_hot(x, num_classes=self.vocab_size).float().to(x.device)
 
-        out, _ = self.gru(emb)  # out: [batch, seq_len, hidden_dim]
-        # Select per-row last valid (non-padding) timestep to avoid using padded steps
-        # lengths: number of non-zero tokens per row
-        lengths = (x != 0).sum(dim=1)  # [batch]
-        # When length is 0 (all padding), fall back to index 0 (safe due to padding embedding -> zeros)
-        last_indices = torch.clamp(lengths - 1, min=0)  # [batch]
-        # Gather last valid hidden state per row
-        batch_size, hidden_dim = out.size(0), out.size(2)
-        gather_index = last_indices.view(batch_size, 1, 1).expand(-1, 1, hidden_dim)
-        last = out.gather(dim=1, index=gather_index).squeeze(1)  # [batch, hidden_dim]
-        logits = self.fc(last)  # [batch, output_dim]
-        return logits.unsqueeze(1)  # match interface [batch, 1, vocab] expected by miners
+        gru_output, new_hidden = self.gru(emb, hidden)  # out: [batch, seq_len, hidden_dim]
+        logits = self.fc(gru_output)
+        return logits, new_hidden
 
+    def step(
+            self,
+            input_token: torch.Tensor,
+            hidden: torch.Tensor | None = None
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Step through the GRU with a single input token.
 
+        Args:
+            input_token (torch.LongTensor): Input tensor of shape (batch_size,) or (batch_size, 1),
+                where each element is an activity index.
+            hidden (torch.Tensor | None): Hidden state tensor from the previous timestep.
+
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, output_dim),
+            where each element is the predicted Q-value for the next activity.
+
+        """
+        if input_token.dim() == 1:
+            input_token = input_token.unsqueeze(1)
+
+        if not self.use_one_hot and self.embedding is not None:
+            emb = self.embedding(input_token)  # [batch, 1, embedding_dim]
+        else:
+            # Convert indices to one-hot; padding index 0 -> all-zeros vector
+            emb = F.one_hot(input_token, num_classes=self.vocab_size).float().to(input_token.device)
+
+        gru_output, new_hidden = self.gru(emb, hidden)
+        logits = self.fc(gru_output[:, -1, :])
+        return logits, new_hidden
 
 # ============================================================
 # Training and Evaluation
