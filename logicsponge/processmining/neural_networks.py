@@ -106,13 +106,8 @@ class LSTMModel(nn.Module):
         device (torch.device | None): Device to run the model on (CPU or GPU).
 
     Methods:
-
     - forward(x, hidden=None) -> (logits, new_hidden) where logits shape is [B, L, V]
     - step(input_token, hidden=None) -> (logits_last_step, new_hidden) where logits_last_step shape is [B, V]
-
-
-
-
 
     """
 
@@ -670,9 +665,16 @@ class QNetwork(nn.Module):
             self.gru = nn.GRU(in_dim, hidden_dim, num_layers=num_layers, batch_first=True, device=device)
             self.fc = nn.Linear(hidden_dim, vocab_size, device=device)
         elif self.model_architecture == "linear":
-            # Simple per-timestep linear projection (no recurrence)
+            # 3-layer feed-forward MLP applied per timestep independently (no recurrence)
+            # Shape in: [..., in_dim] -> hidden_dim -> hidden_dim -> vocab_size
             self.gru = None
-            self.fc = nn.Linear(in_dim, vocab_size, device=device)
+            self.fc = nn.Sequential(
+                nn.Linear(in_dim, hidden_dim, device=device),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim, device=device),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, vocab_size, device=device),
+            )
         else:
             msg = f"Unsupported model_architecture '{model_architecture}'. Use 'gru' or 'linear'."
             raise ValueError(msg)
