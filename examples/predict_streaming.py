@@ -79,6 +79,7 @@ config_file_path = Path(__file__).parent / "predict_config.json"
 MAGIC_VALUE = 8
 default_run_config = {
     "nn": {"lr": 0.001, "batch_size": 8, "epochs": 20},
+    "transf": {"lr": 0.0001, "batch_size": 8, "epochs": 20},
     "rl": {"lr": 0.001, "batch_size": 8, "epochs": 20, "gamma": 0.99},
     "lstm": {
         "vocab_size": MAGIC_VALUE,
@@ -171,15 +172,17 @@ SHOW_DELAYS = False
 # Model selector: enable/disable specific models and their variants
 MODEL_SELECTOR = {
     # Base NN models
-    "lstm": True,
-    "gru": True,
+    "lstm": False,
+    "gru": False,
     "transformer": True,
     # Attention-head variants for transformer (transformer_2heads, transformer_4heads, ...)
     "transformer_heads": True,
+    # transformer variants with different positional encodings
+    "transformer_pos_encodings": True,
     # Windowed NN variants
     "window": True,
     # RL models
-    "qlearning": True,
+    "qlearning": False,
 }
 
 # ====================================================
@@ -420,6 +423,7 @@ adaptive_voting = StreamingActivityPredictor(
 
 # Initialize LSTMs/GRUs (base models without window constraint) using run_config
 nn_cfg = run_config.get("nn", {})
+transf_cfg = run_config.get("transf", {})
 lstm_cfg = run_config.get("lstm", {})
 gru_cfg = run_config.get("gru", {})
 vocab_size = lstm_cfg.get("vocab_size", 50)  # An upper bound on the number of activities
@@ -479,14 +483,14 @@ model_transformer = TransformerModel(
     use_one_hot=True,
 )
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model_transformer.parameters(), lr=nn_cfg.get("lr", 0.0001))
+optimizer = optim.Adam(model_transformer.parameters(), lr=transf_cfg.get("lr", 0.0001))
 
 transformer = StreamingActivityPredictor(
     strategy=NeuralNetworkMiner(
         model=model_transformer,
         criterion=criterion,
         optimizer=optimizer,
-        batch_size=nn_cfg.get("batch_size", 8),
+        batch_size=transf_cfg.get("batch_size", 8),
         config=config,
     )
 )
@@ -554,13 +558,13 @@ for w in NN_WINDOW_RANGE:
         use_one_hot=True,
     )
     criterion_t = nn.CrossEntropyLoss()
-    optimizer_t = optim.Adam(model_tr_w.parameters(), lr=nn_cfg.get("lr", 0.0001))
+    optimizer_t = optim.Adam(model_tr_w.parameters(), lr=transf_cfg.get("lr", 0.0001))
     TRANSFORMER_MODELS[f"transformer_win{w}"] = StreamingActivityPredictor(
         strategy=WindowedNeuralNetworkMiner(
             model=model_tr_w,
             criterion=criterion_t,
             optimizer=optimizer_t,
-            batch_size=nn_cfg.get("batch_size", 8),
+            batch_size=transf_cfg.get("batch_size", 8),
             sequence_buffer_length=w,
             config=config,
         )
@@ -587,7 +591,7 @@ for heads in ATTENTION_HEADS:
         use_one_hot=True,
     )
     criterion_h = nn.CrossEntropyLoss()
-    optimizer_h = optim.Adam(model_tr_h.parameters(), lr=nn_cfg.get("lr", 0.0001))
+    optimizer_h = optim.Adam(model_tr_h.parameters(), lr=transf_cfg.get("lr", 0.0001))
 
     name = f"transformer_{heads}heads"
     TRANSFORMER_HEAD_MODELS[name] = StreamingActivityPredictor(
@@ -595,11 +599,142 @@ for heads in ATTENTION_HEADS:
             model=model_tr_h,
             criterion=criterion_h,
             optimizer=optimizer_h,
-            batch_size=nn_cfg.get("batch_size", 8),
+            batch_size=transf_cfg.get("batch_size", 8),
             config=config,
         )
     )
     TRANSFORMER_HEAD_NAMES.append(name)
+# ------------------------------------------------------------------
+# Create transformer variants using different positional encodings
+# ------------------------------------------------------------------
+POS_ENCODINGS = [
+    # ("sinusoidal", None),
+    # ("periodic", None),
+    # ("sharp_relative", "square"),
+    ("learnable_relative", None),
+]
+
+# Also include additional sharp modes for sharper comparisons
+SHARP_MODES = [] #["square", "sawtooth", "quantized"]
+
+TRANSFORMER_POSENC_MODELS: dict[str, StreamingActivityPredictor] = {}
+TRANSFORMER_POSENC_NAMES: list[str] = []
+
+# Build base variants: sinusoidal and periodic
+for name_enc, _ in POS_ENCODINGS:
+    # for sharp_relative we'll build specialized ones below
+    if name_enc == "sharp_relative":
+        continue
+    model_name = f"transformer_pos_{name_enc}"
+    model_tr_pe = TransformerModel(
+        seq_input_dim=transformer_cfg.get("seq_input_dim", 512),
+        vocab_size=transformer_cfg.get("vocab_size", vocab_size),
+        embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
+        hidden_dim=hidden_dim_tr,
+        output_dim=output_dim_tr,
+        attention_heads=1,
+        use_one_hot=True,
+        pos_encoding_type=name_enc,
+    )
+    criterion_pe = nn.CrossEntropyLoss()
+    optimizer_pe = optim.Adam(model_tr_pe.parameters(), lr=transf_cfg.get("lr", 0.0001))
+    TRANSFORMER_POSENC_MODELS[model_name] = StreamingActivityPredictor(
+        strategy=NeuralNetworkMiner(
+            model=model_tr_pe,
+            criterion=criterion_pe,
+            optimizer=optimizer_pe,
+            batch_size=transf_cfg.get("batch_size", 8),
+            config=config,
+        )
+    )
+    TRANSFORMER_POSENC_NAMES.append(model_name)
+
+# Build sharp_relative variants for the different sharp modes
+for s_mode in SHARP_MODES:
+    model_name = f"transformer_pos_sharp_{s_mode}"
+    model_tr_sharp = TransformerModel(
+        seq_input_dim=transformer_cfg.get("seq_input_dim", 512),
+        vocab_size=transformer_cfg.get("vocab_size", vocab_size),
+        embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
+        hidden_dim=hidden_dim_tr,
+        output_dim=output_dim_tr,
+        attention_heads=1,
+        use_one_hot=True,
+        pos_encoding_type="sharp_relative",
+        sharp_mode=s_mode,
+    )
+    criterion_sh = nn.CrossEntropyLoss()
+    optimizer_sh = optim.Adam(model_tr_sharp.parameters(), lr=transf_cfg.get("lr", 0.0001))
+    TRANSFORMER_POSENC_MODELS[model_name] = StreamingActivityPredictor(
+        strategy=NeuralNetworkMiner(
+            model=model_tr_sharp,
+            criterion=criterion_sh,
+            optimizer=optimizer_sh,
+            batch_size=transf_cfg.get("batch_size", 8),
+            config=config,
+        )
+    )
+    TRANSFORMER_POSENC_NAMES.append(model_name)
+
+# Build windowed variants for each positional encoding and each window size
+for w in NN_WINDOW_RANGE:
+    # sinusoidal and periodic windowed variants
+    for name_enc, _ in POS_ENCODINGS:
+        if name_enc == "sharp_relative":
+            continue
+        model_name = f"transformer_pos_{name_enc}_win{w}"
+        model_tr_pe_w = TransformerModel(
+            seq_input_dim=transformer_cfg.get("seq_input_dim", 512),
+            vocab_size=transformer_cfg.get("vocab_size", vocab_size),
+            embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
+            hidden_dim=hidden_dim_tr,
+            output_dim=output_dim_tr,
+            attention_heads=1,
+            use_one_hot=True,
+            pos_encoding_type=name_enc,
+        )
+        criterion_pe_w = nn.CrossEntropyLoss()
+        optimizer_pe_w = optim.Adam(model_tr_pe_w.parameters(), lr=transf_cfg.get("lr", 0.0001))
+        TRANSFORMER_POSENC_MODELS[model_name] = StreamingActivityPredictor(
+            strategy=WindowedNeuralNetworkMiner(
+                model=model_tr_pe_w,
+                criterion=criterion_pe_w,
+                optimizer=optimizer_pe_w,
+                batch_size=transf_cfg.get("batch_size", 8),
+                sequence_buffer_length=w,
+                config=config,
+            )
+        )
+        TRANSFORMER_POSENC_NAMES.append(model_name)
+
+    # sharp_relative windowed variants for each sharp mode
+    for s_mode in SHARP_MODES:
+        model_name = f"transformer_pos_sharp_{s_mode}_win{w}"
+        model_tr_sharp_w = TransformerModel(
+            seq_input_dim=transformer_cfg.get("seq_input_dim", 512),
+            vocab_size=transformer_cfg.get("vocab_size", vocab_size),
+            embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
+            hidden_dim=hidden_dim_tr,
+            output_dim=output_dim_tr,
+            attention_heads=1,
+            use_one_hot=True,
+            pos_encoding_type="sharp_relative",
+            sharp_mode=s_mode,
+        )
+        criterion_sh_w = nn.CrossEntropyLoss()
+        optimizer_sh_w = optim.Adam(model_tr_sharp_w.parameters(), lr=transf_cfg.get("lr", 0.0001))
+        TRANSFORMER_POSENC_MODELS[model_name] = StreamingActivityPredictor(
+            strategy=WindowedNeuralNetworkMiner(
+                model=model_tr_sharp_w,
+                criterion=criterion_sh_w,
+                optimizer=optimizer_sh_w,
+                batch_size=transf_cfg.get("batch_size", 8),
+                sequence_buffer_length=w,
+                config=config,
+            )
+        )
+        TRANSFORMER_POSENC_NAMES.append(model_name)
+
 # RL (QNetwork) models built in a loop
 RL_MODELS: dict[str, StreamingActivityPredictor] = {}
 for w in RL_WINDOWS:
@@ -742,6 +877,8 @@ if MODEL_SELECTOR.get("qlearning", False):
         models.extend(RL_NAMES)
 if MODEL_SELECTOR.get("transformer_heads", False):
     models.extend(TRANSFORMER_HEAD_NAMES)
+if MODEL_SELECTOR.get("transformer_pos_encodings", False):
+    models.extend(TRANSFORMER_POSENC_NAMES)
 
 metrics_attributes = [
     "accuracy",
@@ -879,6 +1016,18 @@ if NN_TRAINING and ML_TRAINING:
             if tname == "transformer":
                 continue
             predictor_obj = TRANSFORMER_HEAD_MODELS[tname]
+            prediction_group = prediction_group | (
+                AddStartSymbol(start_symbol=start_symbol)
+                * predictor_obj
+                * DataItemFilter(data_item_filter=start_filter)
+                * PredictionCSVWriter(csv_path=predictions_dir / f"{tname}.csv", model_name=tname)
+                * Evaluation(tname)
+            )
+
+    # Add predictions for transformer positional-encoding variants
+    if MODEL_SELECTOR.get("transformer_pos_encodings", False):
+        for tname in TRANSFORMER_POSENC_NAMES:
+            predictor_obj = TRANSFORMER_POSENC_MODELS[tname]
             prediction_group = prediction_group | (
                 AddStartSymbol(start_symbol=start_symbol)
                 * predictor_obj

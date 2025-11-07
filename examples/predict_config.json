@@ -4,6 +4,11 @@
     "batch_size": 8,
     "epochs": 20
   },
+  "transf": {
+    "lr": 0.0001,
+    "batch_size": 8,
+    "epochs": 20
+  },
   "rl": {
     "lr": 0.001,
     "batch_size": 8,

@@ -2,7 +2,6 @@
 
 import copy
 import logging
-import math
 import time
 
 import torch
@@ -12,6 +11,12 @@ from torch import nn
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
 
+from logicsponge.processmining.encodings import (
+    LearnableRelativePositionalEncoding,
+    PeriodicPositionalEncoding,
+    SharpPeriodicRelativeEncoding,
+    SinusoidalPositionalEncoding,
+)
 from logicsponge.processmining.types import ActivityName, Event
 
 logger = logging.getLogger(__name__)
@@ -384,6 +389,8 @@ class TransformerModel(nn.Module):
         attention_heads: int = 4,
         use_one_hot: bool = False,
         device: torch.device | None = None,
+        pos_encoding_type: str = "periodic",  # 'sinusoidal', 'periodic', or 'sharp_relative'
+        sharp_mode: str = "square",
     ) -> None:
         """
         Initialize the Transformer model.
@@ -399,6 +406,9 @@ class TransformerModel(nn.Module):
             attention_heads (int): Number of attention heads in the transformer.
             use_one_hot (bool): Whether to use one-hot encoding instead of embeddings.
             device (torch.device | None): Device to run the model on (CPU or GPU).
+            pos_encoding_type (str): Type of positional encoding to use.
+                Options: 'sinusoidal', 'periodic', 'sharp_relative'.
+            sharp_mode (str): Mode for sharp periodic relative encoding. Options: 'square', 'sawtooth', 'quantized'.
 
         """
         super().__init__()
@@ -417,6 +427,20 @@ class TransformerModel(nn.Module):
         self.pos_encoder = PeriodicPositionalEncoding(d_model=d_model)
 
         self.max_seq_len = seq_input_dim  # kept for backward-compat; not used to bound positions
+
+
+        # Select positional encoder
+        if pos_encoding_type == "sinusoidal":
+            self.pos_encoder = SinusoidalPositionalEncoding(d_model)
+        elif pos_encoding_type == "periodic":
+            self.pos_encoder = PeriodicPositionalEncoding(d_model)
+        elif pos_encoding_type == "sharp_relative":
+            self.pos_encoder = SharpPeriodicRelativeEncoding(d_model, mode=sharp_mode)
+        elif pos_encoding_type == "learnable_relative":
+            self.pos_encoder = LearnableRelativePositionalEncoding(d_model)
+        else:
+            msg = f"Unknown pos_encoding_type: {pos_encoding_type}"
+            raise ValueError(msg)
 
         # Conditional embedding layer
         if not use_one_hot:
@@ -442,39 +466,6 @@ class TransformerModel(nn.Module):
         # Custom initialization for linear/embedding layers
         self.apply(self._init_weights)
 
-    @staticmethod
-    def _sinusoidal_positional_encoding(
-        seq_len: int,
-        d_model: int,
-        device: torch.device,
-        dtype: torch.dtype,
-    ) -> torch.Tensor:
-        """
-        Create sinusoidal positional encodings of shape [1, seq_len, d_model] on the given device/dtype.
-
-        This matches 'Attention Is All You Need' and works for arbitrary sequence lengths
-        without training a table. Handles odd d_model by generating separate frequency
-        vectors for even and odd channels.
-        """
-        if seq_len <= 0:
-            return torch.zeros(1, 0, d_model, device=device, dtype=dtype)
-        # positions: [L, 1]
-        positions = torch.arange(seq_len, device=device, dtype=dtype).unsqueeze(1)
-        # Generate separate frequency vectors for even and odd channels to support odd d_model
-        n_even = (d_model + 1) // 2  # number of even channels (0,2,4,...)
-        n_odd = d_model // 2         # number of odd channels (1,3,5,...)
-        base = -math.log(10000.0) / max(d_model, 1)
-        div_even = torch.exp(torch.arange(n_even, device=device, dtype=dtype) * base)
-        div_odd = torch.exp(torch.arange(n_odd, device=device, dtype=dtype) * base)
-
-        pe = torch.zeros(seq_len, d_model, device=device, dtype=dtype)
-        # Even dims
-        pe[:, 0::2] = torch.sin(positions * div_even)
-        # Odd dims (if any)
-        if n_odd > 0:
-            pe[:, 1::2] = torch.cos(positions * div_odd)
-        return pe.unsqueeze(0)
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Forward pass through the Transformer model.
@@ -499,13 +490,11 @@ class TransformerModel(nn.Module):
             x = F.one_hot(x, num_classes=self.vocab_size).float().to(x_device)
 
         # # Add sinusoidal positional encoding (unbounded in sequence length)
-        # seq_len = x.size(1)
-        # pos = self._sinusoidal_positional_encoding(seq_len, self.d_model, x_device, x.dtype)
-        # x = x + pos
         seq_len = x.size(1)
         pos = self.pos_encoder(seq_len, x_device, x.dtype)  # [1, seq_len, d_model]
-        x = x + pos
-
+        if pos.dim() == 3 and pos.size(0) == 1:  # absolute encodings  # noqa: PLR2004
+            x = x + pos
+        # for relative encoding, integration would be inside attention
 
         # === Add causal (left) mask ===
         # Shape: [seq_len, seq_len]
@@ -526,77 +515,6 @@ class TransformerModel(nn.Module):
         elif isinstance(m, nn.Embedding) and m is not None:
             nn.init.uniform_(m.weight, -0.1, 0.1)
         # No learned positional parameter; nothing extra to init here
-
-
-
-class PeriodicPositionalEncoding(nn.Module):
-    """
-    Learnable periodic positional encoding using Fourier features.
-
-    For each position p we compute for a set of frequencies f_j:
-        [sin(p * f_j + phi_j), cos(p * f_j + phi_j)]_j
-    Concatenated to size ~d_model. Frequencies and phases are learnable.
-    Frequencies are initialized log-spaced (to cover very long to short periods),
-    which helps representing arbitrarily long sequences.
-    """
-
-    def __init__(self, d_model: int, n_freqs: int | None = None, min_exp: float = -6.0, max_exp: float = 0.0) -> None:
-        """
-        Initialize the periodic positional encoding.
-
-        Args:
-            d_model: output embedding size (will be matched as closely as possible).
-            n_freqs: number of frequency channels (if None -> d_model//2).
-            min_exp: init freqs ~ 2π * 10^{linspace(min_exp, max_exp)}
-                              min_exp controls the longest period (~10^{-min_exp}).
-            max_exp: max exponent for frequency initialization.
-
-        """
-        super().__init__()
-        if n_freqs is None:
-            n_freqs = d_model // 2
-        self.n_freqs = n_freqs
-        self.d_model = d_model
-
-        # Initialize frequency magnitudes (multiply by 2π to make them angular freqs)
-        # log-space gives coverage of many scales including very small frequencies.
-        init_exps = torch.linspace(min_exp, max_exp, steps=n_freqs)
-        freqs_init = (2.0 * math.pi) * torch.pow(10.0, init_exps)  # shape [n_freqs]
-        # store as learnable parameters (we keep them positive by parameterizing in log-domain)
-        self.log_freqs = nn.Parameter(torch.log(freqs_init))
-
-        # optional learnable phases
-        self.phases = nn.Parameter(torch.zeros(n_freqs))
-
-        # if d_model is not exactly 2*n_freqs, we'll project the concat to d_model
-        if 2 * n_freqs != d_model:
-            self.proj = nn.Linear(2 * n_freqs, d_model, bias=True)
-        else:
-            self.proj = None
-
-    def forward(self, seq_len: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
-        """
-        Compute positional encodings for sequence of given length.
-
-        Returns: tensor of shape [1, seq_len, d_model], ready to be added to token embeddings.
-        """
-        positions = torch.arange(seq_len, device=device, dtype=dtype).unsqueeze(1)  # [seq_len, 1]
-        # freqs shape [n_freqs]
-        freqs = torch.exp(self.log_freqs).to(device=device, dtype=dtype)  # ensure dtype/device match
-        phases = self.phases.to(device=device, dtype=dtype)
-
-        # compute outer product pos * freqs -> [seq_len, n_freqs]
-        theta = positions * freqs.unsqueeze(0)  # [seq_len, n_freqs]
-        theta = theta + phases.unsqueeze(0)      # add phase
-
-        sinpart = torch.sin(theta)
-        cospart = torch.cos(theta)
-        feat = torch.cat([sinpart, cospart], dim=-1)  # [seq_len, 2*n_freqs]
-
-        if self.proj is not None:
-            feat = self.proj(feat)  # [seq_len, d_model]
-
-        return feat.unsqueeze(0)  # [1, seq_len, d_model]
 
 
 # Small Q-network compatible with sequence input (embedding + GRU + linear)
