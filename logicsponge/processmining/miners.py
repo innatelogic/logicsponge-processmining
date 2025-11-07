@@ -1411,7 +1411,7 @@ class NeuralNetworkMiner(StreamingMiner):
         optimizer: torch.optim.Optimizer,
         *,
         criterion: nn.Module | None = None,
-        mode: str = "batch",
+        mode: str = "incremental",
         sequence_buffer_length: int = 128,
         config: dict[str, Any] | None = None,
     ) -> None:
@@ -1747,7 +1747,7 @@ class WindowedNeuralNetworkMiner(NeuralNetworkMiner):
         *,
         criterion: nn.Module | None = None,
         sequence_buffer_length: int = 50,
-        mode: str = "batch",
+        mode: str = "incremental",
         config: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the WindowedNeuralNetworkMiner class."""
@@ -1862,7 +1862,7 @@ class RLMiner(NeuralNetworkMiner):
         sequence_buffer_length: int = 50,
         long_term_mem_size: int = 10,
         short_term_mem_size: int | None = None,
-        mode: str = "batch",
+        mode: str = "incremental",
         config: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the RLMiner class."""
@@ -1963,7 +1963,9 @@ class RLMiner(NeuralNetworkMiner):
             self.optimizer.zero_grad()
 
             x_input = torch.tensor(current_seq, dtype=torch.long, device=self.device).unsqueeze(0)  # [1, L]
-            outputs = self.model(x_input)  # [1, L, vocab]
+            outputs = self.model(x_input)  # [1, L, vocab] or (logits, hidden)
+            if isinstance(outputs, tuple):
+                outputs = outputs[0]
             logits_last = outputs[:, -1, :]  # [1, vocab]
             log_probs = torch.log_softmax(logits_last, dim=-1).squeeze(0)  # [vocab]
 
@@ -2042,7 +2044,8 @@ class RLMiner(NeuralNetworkMiner):
         self.model.eval()
         with torch.no_grad():
             output = self.model(input_sequence)
-
+            if isinstance(output, tuple):
+                output = output[0]
         # Get the logits for the last time step (most recent activity in the sequence)
         logits = output[:, -1, :]  # Shape [1, vocab_size]
 

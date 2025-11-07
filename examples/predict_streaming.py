@@ -54,8 +54,15 @@ from logicsponge.processmining.streaming import (
 from logicsponge.processmining.test_data import data_name, dataset
 from logicsponge.processmining.utils import add_file_log_handler, save_run_config
 
+CUSTOM_GENERATOR_PATTERN = [0, 1, 0, 1, 2, 1, 0, 1, 2, 3, 2, 1]
+# [1, 1, 1, 0, 0, 0]
+str_pattern = s = "".join(map(str, CUSTOM_GENERATOR_PATTERN))
+
 logger = logging.getLogger(__name__)
-RUN_ID = time.strftime("%Y-%m-%d_%H-%M", time.localtime()) + f"_{data_name}"
+RUN_ID = (
+    time.strftime("%Y-%m-%d_%H-%M", time.localtime())
+    + f"_{str_pattern if CUSTOM_GENERATOR_PATTERN else data_name}"
+)
 stats_to_log = []
 # create a run-specific results directory: results/{RUN_ID}
 run_results_dir = Path(f"results/{RUN_ID}_streaming")
@@ -68,7 +75,7 @@ predictions_dir.mkdir(parents=True, exist_ok=True)
 
 # --- Run configuration (defaults + writing config file like predict_batch.py)
 config_file_path = Path(__file__).parent / "predict_config.json"
-MAGIC_VALUE = 5
+MAGIC_VALUE = 8
 default_run_config = {
     "nn": {"lr": 0.001, "batch_size": 8, "epochs": 20},
     "rl": {"lr": 0.001, "batch_size": 8, "epochs": 20, "gamma": 0.99},
@@ -426,11 +433,11 @@ transformer = StreamingActivityPredictor(
 model_transformer_2heads = TransformerModel(
     seq_input_dim=512,
     vocab_size=transformer_cfg.get("vocab_size", vocab_size),
-    embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
+    embedding_dim=64,  # ensure divisible by attention_heads
     hidden_dim=hidden_dim_tr,
     output_dim=output_dim_tr,
     attention_heads=2,
-    use_one_hot=True,
+    use_one_hot=False,  # use embedding-based encoding so d_model=embedding_dim
 )
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model_transformer_2heads.parameters(), lr=nn_cfg.get("lr", 0.0001))
@@ -611,7 +618,7 @@ streamer = IteratorStreamer(data_iterator=dataset)
 
 # streamer = SynInfiniteStreamer(max_prefix_length=10)
 # streamer = InfiniteDiscriminerSource()
-streamer = CustomStreamer(sequence = [1, 1, 1, 0, 0, 0])
+streamer = CustomStreamer(sequence = CUSTOM_GENERATOR_PATTERN)
 
 def start_filter(item: DataItem) -> bool:
     """Filter function to check if the activity is not the start symbol."""
