@@ -171,8 +171,8 @@ SHOW_DELAYS = False
 # Model selector: enable/disable specific models and their variants
 MODEL_SELECTOR = {
     # Base NN models
-    "lstm": False,
-    "gru": False,
+    "lstm": True,
+    "gru": True,
     "transformer": True,
     # Attention-head variants for transformer (transformer_2heads, transformer_4heads, ...)
     "transformer_heads": True,
@@ -221,7 +221,9 @@ NGRAM_RETURN_TO_INITIAL = True
 # RL (QNetwork) window configurations (align to batch-style windows)
 RL_WINDOWS = NN_WINDOW_RANGE
 RL_NAMES = [f"qlearning_linear_win{w}" for w in RL_WINDOWS] + [f"qlearning_gru_win{w}" for w in RL_WINDOWS]
-RL_BASELINE_NAME = "qlearning"
+# Two non-windowed baselines (user request): one GRU architecture and one linear architecture
+RL_BASELINE_GRU_NAME = "qlearning_gru"
+RL_BASELINE_LINEAR_NAME = "qlearning_linear"
 
 fpt = StreamingActivityPredictor(
     strategy=BasicMiner(algorithm=FrequencyPrefixTree(), config=config),
@@ -646,23 +648,51 @@ for w in RL_WINDOWS:
         )
     )
 
-# Add a single non-windowed qlearning baseline (use a large buffer to approximate no window)
-model_qlearning_base = QNetwork(
+"""Add two non-windowed baselines (large buffer approximates "no window")"""
+# GRU baseline
+model_qlearning_gru_base = QNetwork(
     vocab_size=run_config.get("qlearning", {}).get("vocab_size", vocab_size),
     embedding_dim=run_config.get("qlearning", {}).get("embedding_dim", embedding_dim),
     hidden_dim=run_config.get("qlearning", {}).get("hidden_dim", hidden_dim),
     device=device,
+    model_architecture="gru",
 ).to(device)
-criterion_q_base = nn.MSELoss()
-optimizer_q_base = optim.Adam(model_qlearning_base.parameters(), lr=run_config.get("rl", {}).get("lr", 0.001))
+criterion_q_gru_base = nn.MSELoss()
+optimizer_q_gru_base = optim.Adam(model_qlearning_gru_base.parameters(), lr=run_config.get("rl", {}).get("lr", 0.001))
 
-RL_MODELS[RL_BASELINE_NAME] = StreamingActivityPredictor(
+RL_MODELS[RL_BASELINE_GRU_NAME] = StreamingActivityPredictor(
     strategy=RLMiner(
-        model=model_qlearning_base,
-        criterion=criterion_q_base,
-        optimizer=optimizer_q_base,
+        model=model_qlearning_gru_base,
+        criterion=criterion_q_gru_base,
+        optimizer=optimizer_q_gru_base,
         config=config,
-        sequence_buffer_length=10000,  # effectively unlimited for typical sequences
+        sequence_buffer_length=10000,
+        long_term_mem_size=8,
+        short_term_mem_size=16,
+    )
+)
+
+# Linear baseline
+model_qlearning_linear_base = QNetwork(
+    vocab_size=run_config.get("qlearning", {}).get("vocab_size", vocab_size),
+    embedding_dim=run_config.get("qlearning", {}).get("embedding_dim", embedding_dim),
+    hidden_dim=run_config.get("qlearning", {}).get("hidden_dim", hidden_dim),
+    device=device,
+    model_architecture="linear",
+).to(device)
+criterion_q_linear_base = nn.MSELoss()
+optimizer_q_linear_base = optim.Adam(
+    model_qlearning_linear_base.parameters(),
+    lr=run_config.get("rl", {}).get("lr", 0.001),
+)
+
+RL_MODELS[RL_BASELINE_LINEAR_NAME] = StreamingActivityPredictor(
+    strategy=RLMiner(
+        model=model_qlearning_linear_base,
+        criterion=criterion_q_linear_base,
+        optimizer=optimizer_q_linear_base,
+        config=config,
+        sequence_buffer_length=10000,
         long_term_mem_size=8,
         short_term_mem_size=16,
     )
@@ -705,7 +735,9 @@ if MODEL_SELECTOR.get("transformer", False):
     if MODEL_SELECTOR.get("window", False):
         models.extend(TRANSFORMER_WIN_NAMES)
 if MODEL_SELECTOR.get("qlearning", False):
-    models.append(RL_BASELINE_NAME)
+    # Add both baselines
+    models.append(RL_BASELINE_GRU_NAME)
+    models.append(RL_BASELINE_LINEAR_NAME)
     if MODEL_SELECTOR.get("window", False):
         models.extend(RL_NAMES)
 if MODEL_SELECTOR.get("transformer_heads", False):
@@ -906,12 +938,25 @@ if RL_TRAINING and ML_TRAINING:
             )
 
     if MODEL_SELECTOR.get("qlearning", False):
+        # GRU baseline predictions
         prediction_group = prediction_group | (
             AddStartSymbol(start_symbol=start_symbol)
-            * RL_MODELS[RL_BASELINE_NAME]
+            * RL_MODELS[RL_BASELINE_GRU_NAME]
             * DataItemFilter(data_item_filter=start_filter)
-            * PredictionCSVWriter(csv_path=predictions_dir / f"{RL_BASELINE_NAME}.csv", model_name=RL_BASELINE_NAME)
-            * Evaluation(RL_BASELINE_NAME)
+            * PredictionCSVWriter(
+                csv_path=predictions_dir / f"{RL_BASELINE_GRU_NAME}.csv", model_name=RL_BASELINE_GRU_NAME
+            )
+            * Evaluation(RL_BASELINE_GRU_NAME)
+        )
+        # Linear baseline predictions
+        prediction_group = prediction_group | (
+            AddStartSymbol(start_symbol=start_symbol)
+            * RL_MODELS[RL_BASELINE_LINEAR_NAME]
+            * DataItemFilter(data_item_filter=start_filter)
+            * PredictionCSVWriter(
+                csv_path=predictions_dir / f"{RL_BASELINE_LINEAR_NAME}.csv", model_name=RL_BASELINE_LINEAR_NAME
+            )
+            * Evaluation(RL_BASELINE_LINEAR_NAME)
         )
 
 # Assemble the full sponge
