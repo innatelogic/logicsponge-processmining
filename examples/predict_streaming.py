@@ -28,7 +28,7 @@ from logicsponge.processmining.miners import (
     SoftVoting,
     WindowedNeuralNetworkMiner,
 )
-from logicsponge.processmining.neural_networks import LSTMModel, QNetwork, TransformerModel
+from logicsponge.processmining.neural_networks import GRUModel, LSTMModel, QNetwork, TransformerModel
 from logicsponge.processmining.streaming import (
     ActualCSVWriter,
     AddStartSymbol,
@@ -80,9 +80,31 @@ MAGIC_VALUE = 8
 default_run_config = {
     "nn": {"lr": 0.001, "batch_size": 8, "epochs": 20},
     "rl": {"lr": 0.001, "batch_size": 8, "epochs": 20, "gamma": 0.99},
-    "lstm": {"vocab_size": MAGIC_VALUE, "embedding_dim": MAGIC_VALUE, "hidden_dim": 128, "output_dim": MAGIC_VALUE},
-    "transformer": {"vocab_size": MAGIC_VALUE, "embedding_dim": MAGIC_VALUE, "hidden_dim": 128, "output_dim": MAGIC_VALUE},
-    "qlearning": {"vocab_size": MAGIC_VALUE, "embedding_dim": MAGIC_VALUE, "hidden_dim": 128, "output_dim": MAGIC_VALUE},
+    "lstm": {
+        "vocab_size": MAGIC_VALUE,
+        "embedding_dim": MAGIC_VALUE,
+        "hidden_dim": 128,
+        "output_dim": MAGIC_VALUE,
+    },
+    "gru": {
+        "vocab_size": MAGIC_VALUE,
+        "embedding_dim": MAGIC_VALUE,
+        "hidden_dim": 128,
+        "output_dim": MAGIC_VALUE,
+    },
+    "transformer": {
+        "seq_input_dim": 32,
+        "vocab_size": MAGIC_VALUE,
+        "embedding_dim": MAGIC_VALUE,
+        "hidden_dim": 128,
+        "output_dim": MAGIC_VALUE,
+    },
+    "qlearning": {
+        "vocab_size": MAGIC_VALUE,
+        "embedding_dim": MAGIC_VALUE,
+        "hidden_dim": 128,
+        "output_dim": MAGIC_VALUE,
+    },
 }
 try:
     with config_file_path.open("w") as _f:
@@ -146,6 +168,20 @@ RL_TRAINING = True
 ALERGIA_TRAINING = False
 SHOW_DELAYS = False
 
+# Model selector: enable/disable specific models and their variants
+MODEL_SELECTOR = {
+    # Base NN models
+    "lstm": False,
+    "gru": False,
+    "transformer": True,
+    # Attention-head variants for transformer (transformer_2heads, transformer_4heads, ...)
+    "transformer_heads": True,
+    # Windowed NN variants
+    "window": True,
+    # RL models
+    "qlearning": True,
+}
+
 # ====================================================
 # Initialize models
 # ====================================================
@@ -166,7 +202,7 @@ SOFT_VOTING_NGRAMS = [
     (2, 3, 4, 5),
 ]  # (2, 3, 6, 8), (2, 3, 5, 6), (2, 3, 4, 6), (2, 3, 6, 7), (2, 3, 7, 8), (2, 3, 6, 8)
 
-WINDOW_RANGE = [1, 2, 3, 4, 5]  # 0, 1, 2, 3, 4, 5, 6, 7, 8 , 9, 10, 12, 14, 16]
+WINDOW_RANGE = [1, 2, 3, 4, 5, 6, 7]  # 0, 1, 2, 3, 4, 5, 6, 7, 8 , 9, 10, 12, 14, 16]
 
 # NN/RL window range aligned with predict_batch.py
 NN_WINDOW_RANGE = WINDOW_RANGE # [1, 2, 3, 4, 5, 6, 7, 8]
@@ -184,7 +220,7 @@ NGRAM_RETURN_TO_INITIAL = True
 
 # RL (QNetwork) window configurations (align to batch-style windows)
 RL_WINDOWS = NN_WINDOW_RANGE
-RL_NAMES = [f"qlearning_win{w}" for w in RL_WINDOWS]
+RL_NAMES = [f"qlearning_linear_win{w}" for w in RL_WINDOWS] + [f"qlearning_gru_win{w}" for w in RL_WINDOWS]
 RL_BASELINE_NAME = "qlearning"
 
 fpt = StreamingActivityPredictor(
@@ -380,9 +416,10 @@ adaptive_voting = StreamingActivityPredictor(
     )
 )
 
-# Initialize LSTMs (base model without window constraint) using run_config
+# Initialize LSTMs/GRUs (base models without window constraint) using run_config
 nn_cfg = run_config.get("nn", {})
 lstm_cfg = run_config.get("lstm", {})
+gru_cfg = run_config.get("gru", {})
 vocab_size = lstm_cfg.get("vocab_size", 50)  # An upper bound on the number of activities
 embedding_dim = lstm_cfg.get("embedding_dim", 50)
 hidden_dim = lstm_cfg.get("hidden_dim", 128)
@@ -401,13 +438,37 @@ lstm = StreamingActivityPredictor(
     )
 )
 
+# GRU model (parity with LSTM settings)
+gru_hidden_dim = gru_cfg.get("hidden_dim", hidden_dim)
+gru_embedding_dim = gru_cfg.get("embedding_dim", embedding_dim)
+gru_vocab = gru_cfg.get("vocab_size", vocab_size)
+model_gru = GRUModel(
+    gru_vocab,
+    embedding_dim=gru_embedding_dim,
+    hidden_dim=gru_hidden_dim,
+    device=device,
+    use_one_hot=True,
+)
+criterion_gru = nn.CrossEntropyLoss()
+optimizer_gru = optim.Adam(model_gru.parameters(), lr=nn_cfg.get("lr", 0.001))
+
+gru = StreamingActivityPredictor(
+    strategy=NeuralNetworkMiner(
+        model=model_gru,
+        criterion=criterion_gru,
+        optimizer=optimizer_gru,
+        batch_size=nn_cfg.get("batch_size", 8),
+        config=config,
+    )
+)
+
 
 # Initialize transformer model (base model without window constraint) using run_config
 transformer_cfg = run_config.get("transformer", {})
 hidden_dim_tr = transformer_cfg.get("hidden_dim", hidden_dim)
 output_dim_tr = transformer_cfg.get("output_dim", output_dim)
 model_transformer = TransformerModel(
-    seq_input_dim=512,
+    seq_input_dim=transformer_cfg.get("seq_input_dim", 512),
     vocab_size=transformer_cfg.get("vocab_size", vocab_size),
     embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
     hidden_dim=hidden_dim_tr,
@@ -435,8 +496,10 @@ transformer = StreamingActivityPredictor(
 
 # Windowed LSTM/Transformer models (like batch mode NN windowing)
 LSTM_MODELS: dict[str, StreamingActivityPredictor] = {}
+GRU_MODELS: dict[str, StreamingActivityPredictor] = {}
 TRANSFORMER_MODELS: dict[str, StreamingActivityPredictor] = {}
 LSTM_WIN_NAMES = [f"lstm_win{w}" for w in NN_WINDOW_RANGE]
+GRU_WIN_NAMES = [f"gru_win{w}" for w in NN_WINDOW_RANGE]
 TRANSFORMER_WIN_NAMES = [f"transformer_win{w}" for w in NN_WINDOW_RANGE]
 
 for w in NN_WINDOW_RANGE:
@@ -457,14 +520,35 @@ for w in NN_WINDOW_RANGE:
         )
     )
 
+    # GRU windowed variant
+    model_gru_w = GRUModel(
+        vocab_size,
+        embedding_dim=embedding_dim,
+        hidden_dim=hidden_dim,
+        device=device,
+        use_one_hot=True,
+    )
+    criterion_g = nn.CrossEntropyLoss()
+    optimizer_g = optim.Adam(model_gru_w.parameters(), lr=nn_cfg.get("lr", 0.001))
+    GRU_MODELS[f"gru_win{w}"] = StreamingActivityPredictor(
+        strategy=WindowedNeuralNetworkMiner(
+            model=model_gru_w,
+            criterion=criterion_g,
+            optimizer=optimizer_g,
+            batch_size=nn_cfg.get("batch_size", 8),
+            sequence_buffer_length=w,
+            config=config,
+        )
+    )
+
     # Transformer windowed variant
     model_tr_w = TransformerModel(
-        seq_input_dim=512,
+        seq_input_dim=transformer_cfg.get("seq_input_dim", 512),
         vocab_size=vocab_size,
         embedding_dim=embedding_dim,
         hidden_dim=hidden_dim,
         output_dim=output_dim,
-        attention_heads=4,
+        attention_heads=1,
         use_one_hot=True,
     )
     criterion_t = nn.CrossEntropyLoss()
@@ -492,7 +576,7 @@ for heads in ATTENTION_HEADS:
         continue
 
     model_tr_h = TransformerModel(
-        seq_input_dim=512,
+        seq_input_dim=transformer_cfg.get("seq_input_dim", 512),
         vocab_size=transformer_cfg.get("vocab_size", vocab_size),
         embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
         hidden_dim=hidden_dim_tr,
@@ -523,11 +607,34 @@ for w in RL_WINDOWS:
         embedding_dim=q_cfg.get("embedding_dim", embedding_dim),
         hidden_dim=q_cfg.get("hidden_dim", hidden_dim),
         device=device,
+        model_architecture="gru"
     ).to(device)
     criterion_q = nn.MSELoss()
     optimizer_q = optim.Adam(model_qlearning.parameters(), lr=run_config.get("rl", {}).get("lr", 0.001))
 
-    RL_MODELS[f"qlearning_win{w}"] = StreamingActivityPredictor(
+    RL_MODELS[f"qlearning_gru_win{w}"] = StreamingActivityPredictor(
+        strategy=RLMiner(
+            model=model_qlearning,
+            criterion=criterion_q,
+            optimizer=optimizer_q,
+            config=config,
+            sequence_buffer_length=w,  # has to be enough to cover short_term_mem_size
+            long_term_mem_size=8,
+            short_term_mem_size=16,  # ~n in n-gram
+        )
+    )
+
+    model_qlearning = QNetwork(
+        vocab_size=q_cfg.get("vocab_size", vocab_size),
+        embedding_dim=q_cfg.get("embedding_dim", embedding_dim),
+        hidden_dim=q_cfg.get("hidden_dim", hidden_dim),
+        device=device,
+        model_architecture="linear"
+    ).to(device)
+    criterion_q = nn.MSELoss()
+    optimizer_q = optim.Adam(model_qlearning.parameters(), lr=run_config.get("rl", {}).get("lr", 0.001))
+
+    RL_MODELS[f"qlearning_linear_win{w}"] = StreamingActivityPredictor(
         strategy=RLMiner(
             model=model_qlearning,
             criterion=criterion_q,
@@ -565,11 +672,11 @@ RL_MODELS[RL_BASELINE_NAME] = StreamingActivityPredictor(
 # Sponge
 # ====================================================
 
-# Model names
+# Model names (filtered by MODEL_SELECTOR)
 models = [
     "fpt",
     "bag",
-    *NGRAM_NAMES,  # Add all NGRAM_NAMES
+    *NGRAM_NAMES,
     "fallback",
     "fallback_ngram8to2",
     "fallback_ngram8to3",
@@ -582,17 +689,27 @@ models = [
     "adaptive_voting",
     "soft_voting",
     "soft_voting_star",
-    *list(soft_voting_predictors.keys()),  # Add all soft_voting predictor names
-    "lstm",
-    "transformer",
-    *TRANSFORMER_HEAD_NAMES,
-    *LSTM_WIN_NAMES,
-    *TRANSFORMER_WIN_NAMES,
-    *RL_NAMES,
-    RL_BASELINE_NAME,
+    *list(soft_voting_predictors.keys()),
 ]
 
-
+if MODEL_SELECTOR.get("lstm", False):
+    models.append("lstm")
+    if MODEL_SELECTOR.get("window", False):
+        models.extend(LSTM_WIN_NAMES)
+if MODEL_SELECTOR.get("gru", False):
+    models.append("gru")
+    if MODEL_SELECTOR.get("window", False):
+        models.extend(GRU_WIN_NAMES)
+if MODEL_SELECTOR.get("transformer", False):
+    models.append("transformer")
+    if MODEL_SELECTOR.get("window", False):
+        models.extend(TRANSFORMER_WIN_NAMES)
+if MODEL_SELECTOR.get("qlearning", False):
+    models.append(RL_BASELINE_NAME)
+    if MODEL_SELECTOR.get("window", False):
+        models.extend(RL_NAMES)
+if MODEL_SELECTOR.get("transformer_heads", False):
+    models.extend(TRANSFORMER_HEAD_NAMES)
 
 metrics_attributes = [
     "accuracy",
@@ -692,41 +809,51 @@ for name, predictor in soft_voting_predictors.items():
 
 # Optionally include NN models (only if NN_TRAINING is enabled)
 if NN_TRAINING and ML_TRAINING:
-    prediction_group = prediction_group | (
-        AddStartSymbol(start_symbol=start_symbol)
-        * lstm
-        * DataItemFilter(data_item_filter=start_filter)
-        * PredictionCSVWriter(csv_path=predictions_dir / "lstm.csv", model_name="lstm")
-        * Evaluation("lstm")
-    )
+    if MODEL_SELECTOR.get("lstm", False):
+        prediction_group = prediction_group | (
+            AddStartSymbol(start_symbol=start_symbol)
+            * lstm
+            * DataItemFilter(data_item_filter=start_filter)
+            * PredictionCSVWriter(csv_path=predictions_dir / "lstm.csv", model_name="lstm")
+            * Evaluation("lstm")
+        )
 
-    prediction_group = prediction_group | (
-        AddStartSymbol(start_symbol=start_symbol)
-        * transformer
-        * DataItemFilter(data_item_filter=start_filter)
-        * PredictionCSVWriter(csv_path=predictions_dir / "transformer.csv", model_name="transformer")
-        * Evaluation("transformer")
-    )
+    if MODEL_SELECTOR.get("gru", False):
+        prediction_group = prediction_group | (
+            AddStartSymbol(start_symbol=start_symbol)
+            * gru
+            * DataItemFilter(data_item_filter=start_filter)
+            * PredictionCSVWriter(csv_path=predictions_dir / "gru.csv", model_name="gru")
+            * Evaluation("gru")
+        )
+
+    if MODEL_SELECTOR.get("transformer", False):
+        prediction_group = prediction_group | (
+            AddStartSymbol(start_symbol=start_symbol)
+            * transformer
+            * DataItemFilter(data_item_filter=start_filter)
+            * PredictionCSVWriter(csv_path=predictions_dir / "transformer.csv", model_name="transformer")
+            * Evaluation("transformer")
+        )
 
     # Add predictions for all transformer attention-head variants.
     # `TRANSFORMER_HEAD_NAMES` contains the model names; for the
     # special case "transformer" we reuse the already-created
     # `transformer` predictor object. Other names are stored in
     # `TRANSFORMER_HEAD_MODELS` created earlier.
-    for tname in TRANSFORMER_HEAD_NAMES:
-        # The base 'transformer' predictor was already added above; skip re-adding it
-        if tname == "transformer":
-            continue
-
-        predictor_obj = TRANSFORMER_HEAD_MODELS[tname]
-
-        prediction_group = prediction_group | (
-            AddStartSymbol(start_symbol=start_symbol)
-            * predictor_obj
-            * DataItemFilter(data_item_filter=start_filter)
-            * PredictionCSVWriter(csv_path=predictions_dir / f"{tname}.csv", model_name=tname)
-            * Evaluation(tname)
-        )
+    if MODEL_SELECTOR.get("transformer_heads", False):
+        for tname in TRANSFORMER_HEAD_NAMES:
+            # The base 'transformer' predictor was already added above; skip re-adding it
+            if tname == "transformer":
+                continue
+            predictor_obj = TRANSFORMER_HEAD_MODELS[tname]
+            prediction_group = prediction_group | (
+                AddStartSymbol(start_symbol=start_symbol)
+                * predictor_obj
+                * DataItemFilter(data_item_filter=start_filter)
+                * PredictionCSVWriter(csv_path=predictions_dir / f"{tname}.csv", model_name=tname)
+                * Evaluation(tname)
+            )
 
     # prediction_group = prediction_group | (
     #     AddStartSymbol(start_symbol=start_symbol)
@@ -736,42 +863,56 @@ if NN_TRAINING and ML_TRAINING:
     #     * Evaluation("transformer_auto")
     # )
 
-    for name in LSTM_WIN_NAMES:
-        prediction_group = prediction_group | (
-            AddStartSymbol(start_symbol=start_symbol)
-            * LSTM_MODELS[name]
-            * DataItemFilter(data_item_filter=start_filter)
-            * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name)
-            * Evaluation(name)
-        )
+    if MODEL_SELECTOR.get("lstm", False) and MODEL_SELECTOR.get("window", False):
+        for name in LSTM_WIN_NAMES:
+            prediction_group = prediction_group | (
+                AddStartSymbol(start_symbol=start_symbol)
+                * LSTM_MODELS[name]
+                * DataItemFilter(data_item_filter=start_filter)
+                * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name)
+                * Evaluation(name)
+            )
 
-    for name in TRANSFORMER_WIN_NAMES:
-        prediction_group = prediction_group | (
-            AddStartSymbol(start_symbol=start_symbol)
-            * TRANSFORMER_MODELS[name]
-            * DataItemFilter(data_item_filter=start_filter)
-            * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name)
-            * Evaluation(name)
-        )
+    if MODEL_SELECTOR.get("gru", False) and MODEL_SELECTOR.get("window", False):
+        for name in GRU_WIN_NAMES:
+            prediction_group = prediction_group | (
+                AddStartSymbol(start_symbol=start_symbol)
+                * GRU_MODELS[name]
+                * DataItemFilter(data_item_filter=start_filter)
+                * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name)
+                * Evaluation(name)
+            )
+
+    if MODEL_SELECTOR.get("transformer", False) and MODEL_SELECTOR.get("window", False):
+        for name in TRANSFORMER_WIN_NAMES:
+            prediction_group = prediction_group | (
+                AddStartSymbol(start_symbol=start_symbol)
+                * TRANSFORMER_MODELS[name]
+                * DataItemFilter(data_item_filter=start_filter)
+                * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name)
+                * Evaluation(name)
+            )
 
 # Optionally include RL models (if ML_TRAINING enabled)
 if RL_TRAINING and ML_TRAINING:
-    for name in RL_NAMES:
+    if MODEL_SELECTOR.get("qlearning", False) and MODEL_SELECTOR.get("window", False):
+        for name in RL_NAMES:
+            prediction_group = prediction_group | (
+                AddStartSymbol(start_symbol=start_symbol)
+                * RL_MODELS[name]
+                * DataItemFilter(data_item_filter=start_filter)
+                * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name)
+                * Evaluation(name)
+            )
+
+    if MODEL_SELECTOR.get("qlearning", False):
         prediction_group = prediction_group | (
             AddStartSymbol(start_symbol=start_symbol)
-            * RL_MODELS[name]
+            * RL_MODELS[RL_BASELINE_NAME]
             * DataItemFilter(data_item_filter=start_filter)
-            * PredictionCSVWriter(csv_path=predictions_dir / f"{name}.csv", model_name=name)
-            * Evaluation(name)
+            * PredictionCSVWriter(csv_path=predictions_dir / f"{RL_BASELINE_NAME}.csv", model_name=RL_BASELINE_NAME)
+            * Evaluation(RL_BASELINE_NAME)
         )
-
-    prediction_group = prediction_group | (
-        AddStartSymbol(start_symbol=start_symbol)
-        * RL_MODELS[RL_BASELINE_NAME]
-        * DataItemFilter(data_item_filter=start_filter)
-        * PredictionCSVWriter(csv_path=predictions_dir / f"{RL_BASELINE_NAME}.csv", model_name=RL_BASELINE_NAME)
-        * Evaluation(RL_BASELINE_NAME)
-    )
 
 # Assemble the full sponge
 sponge = (

@@ -26,6 +26,7 @@ from tqdm import tqdm
 from logicsponge.processmining.config import DEFAULT_CONFIG, update_config
 from logicsponge.processmining.data_utils import add_input_symbols_sequence
 from logicsponge.processmining.neural_networks import (
+    GRUModel,
     LSTMModel,
     QNetwork,
     RNNModel,
@@ -1406,7 +1407,7 @@ class NeuralNetworkMiner(StreamingMiner):
 
     def __init__(  # noqa: PLR0913
         self,
-        model: RNNModel | LSTMModel | TransformerModel | QNetwork,
+    model: RNNModel | LSTMModel | GRUModel | TransformerModel | QNetwork,
         batch_size: int,
         optimizer: torch.optim.Optimizer,
         *,
@@ -1741,7 +1742,7 @@ class WindowedNeuralNetworkMiner(NeuralNetworkMiner):
 
     def __init__(  # noqa: PLR0913
         self,
-        model: RNNModel | LSTMModel | TransformerModel,
+    model: RNNModel | LSTMModel | GRUModel | TransformerModel,
         batch_size: int,
         optimizer: torch.optim.Optimizer,
         *,

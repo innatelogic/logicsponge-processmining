@@ -106,8 +106,13 @@ class LSTMModel(nn.Module):
         device (torch.device | None): Device to run the model on (CPU or GPU).
 
     Methods:
+
     - forward(x, hidden=None) -> (logits, new_hidden) where logits shape is [B, L, V]
     - step(input_token, hidden=None) -> (logits_last_step, new_hidden) where logits_last_step shape is [B, V]
+
+
+
+
 
     """
 
@@ -216,6 +221,134 @@ class LSTMModel(nn.Module):
             nn.init.uniform_(m.weight, -0.1, 0.1)
 
 
+class GRUModel(nn.Module):
+    """
+    GRU model for sequence prediction (LSTM-like API).
+
+    Supports either an embedding lookup or one-hot input representation.
+
+    Methods:
+    - forward(x, hidden=None) -> (logits, new_hidden) where logits shape is [B, L, V]
+    - step(input_token, hidden=None) -> (logits_last_step, new_hidden) where logits_last_step shape is [B, V]
+
+    """
+
+    device: torch.device | None
+    embedding: nn.Embedding | None
+    use_one_hot: bool
+    vocab_size: int
+    embedding_dim: int
+    hidden_dim: int
+    num_layers: int
+    gru: nn.GRU
+    fc: nn.Linear
+
+    def __init__(  # noqa: PLR0913
+        self,
+        vocab_size: int,
+        *,
+        embedding_dim: int = 64,
+        hidden_dim: int = 128,
+        num_layers: int = 2,
+        padding_idx: int = 0,
+        use_one_hot: bool = False,
+        device: torch.device | None = None,
+    ) -> None:
+        """Initialize the GRU model with optional one-hot input representation."""
+        super().__init__()
+        self.device = device
+        self.use_one_hot = use_one_hot
+        self.vocab_size = vocab_size
+        self.embedding_dim = embedding_dim
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
+
+        # Conditional embedding layer
+        if not use_one_hot:
+            self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=padding_idx, device=device)
+        else:
+            self.embedding = None
+
+        # Input dim depends on representation
+        input_dim = vocab_size if use_one_hot else embedding_dim
+
+        self.gru = nn.GRU(input_dim, hidden_dim, num_layers=num_layers, batch_first=True, device=device)
+        self.fc = nn.Linear(hidden_dim, vocab_size, device=device)
+
+        self.apply(self._init_weights)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        hidden: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Forward pass through the GRU.
+
+        Args:
+            x: [batch, seq_len] int64 token indices
+            hidden: optional hidden state
+
+        Returns:
+            logits: [batch, seq_len, vocab_size]
+            new_hidden: GRU hidden state
+
+        """
+        if not self.use_one_hot and self.embedding is not None:
+            x = self.embedding(x)
+        else:
+            x = F.one_hot(x, num_classes=self.vocab_size).float().to(x.device)
+
+        gru_out, new_hidden = self.gru(x, hidden)
+        logits = self.fc(gru_out)
+        return logits, new_hidden
+
+    def step(
+        self,
+        input_token: torch.Tensor,
+        hidden: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Single-timestep update compatible with streaming caches.
+
+        Args:
+            input_token: [batch] or [batch, 1] indices
+            hidden: prior hidden state
+
+        Returns:
+            logits_last: [batch, vocab_size]
+            new_hidden: updated hidden
+
+        """
+        if input_token.dim() == 1:
+            input_token = input_token.unsqueeze(1)
+
+        if not self.use_one_hot and self.embedding is not None:
+            x = self.embedding(input_token)
+        else:
+            x = F.one_hot(input_token, num_classes=self.vocab_size).float().to(input_token.device)
+
+        gru_out, new_hidden = self.gru(x, hidden)
+        logits_last = self.fc(gru_out[:, -1, :])
+        return logits_last, new_hidden
+
+    def _init_weights(self, m: nn.Module) -> None:
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.GRU):
+            for name, param in m.named_parameters():
+                if "weight_ih" in name:
+                    nn.init.xavier_uniform_(param.data)
+                elif "weight_hh" in name:
+                    nn.init.orthogonal_(param.data)
+                elif "bias" in name:
+                    nn.init.constant_(param.data, 0)
+        elif isinstance(m, nn.Embedding) and m is not None:
+            nn.init.uniform_(m.weight, -0.1, 0.1)
+
+
 class TransformerModel(nn.Module):
     """
     Transformer model for sequence prediction.
@@ -284,6 +417,10 @@ class TransformerModel(nn.Module):
         # - If one-hot is used, d_model = vocab_size
         d_model = embedding_dim if not use_one_hot else vocab_size
         self.d_model = d_model
+
+        # after self.d_model = d_model (or wherever d_model is set), add:
+        self.pos_encoder = PeriodicPositionalEncoding(d_model=d_model)
+
         self.max_seq_len = seq_input_dim  # kept for backward-compat; not used to bound positions
 
         # Conditional embedding layer
@@ -366,10 +503,14 @@ class TransformerModel(nn.Module):
             # Project indices to one-hot vectors on the same device as input
             x = F.one_hot(x, num_classes=self.vocab_size).float().to(x_device)
 
-        # Add sinusoidal positional encoding (unbounded in sequence length)
+        # # Add sinusoidal positional encoding (unbounded in sequence length)
+        # seq_len = x.size(1)
+        # pos = self._sinusoidal_positional_encoding(seq_len, self.d_model, x_device, x.dtype)
+        # x = x + pos
         seq_len = x.size(1)
-        pos = self._sinusoidal_positional_encoding(seq_len, self.d_model, x_device, x.dtype)
+        pos = self.pos_encoder(seq_len, x_device, x.dtype)  # [1, seq_len, d_model]
         x = x + pos
+
 
         # === Add causal (left) mask ===
         # Shape: [seq_len, seq_len]
@@ -391,6 +532,76 @@ class TransformerModel(nn.Module):
             nn.init.uniform_(m.weight, -0.1, 0.1)
         # No learned positional parameter; nothing extra to init here
 
+
+
+class PeriodicPositionalEncoding(nn.Module):
+    """
+    Learnable periodic positional encoding using Fourier features.
+
+    For each position p we compute for a set of frequencies f_j:
+        [sin(p * f_j + phi_j), cos(p * f_j + phi_j)]_j
+    Concatenated to size ~d_model. Frequencies and phases are learnable.
+    Frequencies are initialized log-spaced (to cover very long to short periods),
+    which helps representing arbitrarily long sequences.
+    """
+
+    def __init__(self, d_model: int, n_freqs: int | None = None, min_exp: float = -6.0, max_exp: float = 0.0) -> None:
+        """
+        Initialize the periodic positional encoding.
+
+        Args:
+            d_model: output embedding size (will be matched as closely as possible).
+            n_freqs: number of frequency channels (if None -> d_model//2).
+            min_exp: init freqs ~ 2π * 10^{linspace(min_exp, max_exp)}
+                              min_exp controls the longest period (~10^{-min_exp}).
+            max_exp: max exponent for frequency initialization.
+
+        """
+        super().__init__()
+        if n_freqs is None:
+            n_freqs = d_model // 2
+        self.n_freqs = n_freqs
+        self.d_model = d_model
+
+        # Initialize frequency magnitudes (multiply by 2π to make them angular freqs)
+        # log-space gives coverage of many scales including very small frequencies.
+        init_exps = torch.linspace(min_exp, max_exp, steps=n_freqs)
+        freqs_init = (2.0 * math.pi) * torch.pow(10.0, init_exps)  # shape [n_freqs]
+        # store as learnable parameters (we keep them positive by parameterizing in log-domain)
+        self.log_freqs = nn.Parameter(torch.log(freqs_init))
+
+        # optional learnable phases
+        self.phases = nn.Parameter(torch.zeros(n_freqs))
+
+        # if d_model is not exactly 2*n_freqs, we'll project the concat to d_model
+        if 2 * n_freqs != d_model:
+            self.proj = nn.Linear(2 * n_freqs, d_model, bias=True)
+        else:
+            self.proj = None
+
+    def forward(self, seq_len: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+        """
+        Compute positional encodings for sequence of given length.
+
+        Returns: tensor of shape [1, seq_len, d_model], ready to be added to token embeddings.
+        """
+        positions = torch.arange(seq_len, device=device, dtype=dtype).unsqueeze(1)  # [seq_len, 1]
+        # freqs shape [n_freqs]
+        freqs = torch.exp(self.log_freqs).to(device=device, dtype=dtype)  # ensure dtype/device match
+        phases = self.phases.to(device=device, dtype=dtype)
+
+        # compute outer product pos * freqs -> [seq_len, n_freqs]
+        theta = positions * freqs.unsqueeze(0)  # [seq_len, n_freqs]
+        theta = theta + phases.unsqueeze(0)      # add phase
+
+        sinpart = torch.sin(theta)
+        cospart = torch.cos(theta)
+        feat = torch.cat([sinpart, cospart], dim=-1)  # [seq_len, 2*n_freqs]
+
+        if self.proj is not None:
+            feat = self.proj(feat)  # [seq_len, d_model]
+
+        return feat.unsqueeze(0)  # [1, seq_len, d_model]
 
 
 # Small Q-network compatible with sequence input (embedding + GRU + linear)
@@ -417,6 +628,7 @@ class QNetwork(nn.Module):
         padding_idx: int = 0,
         device: torch.device | None = None,
         use_one_hot: bool = False,
+        model_architecture: str = "gru"
     ) -> None:
         """
         Initialize the Q-network.
@@ -431,6 +643,9 @@ class QNetwork(nn.Module):
             use_one_hot (bool): Whether to use one-hot encoding instead of
                 embeddings. If True, the GRU input size is set to
                 `vocab_size`.
+            model_architecture (str): Which architecture to use for the Q-network.
+                Supported values: "gru" (default) or "linear". "linear" applies a
+                per-timestep linear projection without any recurrence.
 
         """
         super().__init__()
@@ -438,6 +653,7 @@ class QNetwork(nn.Module):
         # Optionally disable embedding and process raw one-hot inputs directly.
         self.use_one_hot = use_one_hot
         self.vocab_size = vocab_size
+        self.model_architecture = (model_architecture or "gru").lower()
 
         if not self.use_one_hot:
             # simple embedding (use embedding indices like other NN models)
@@ -446,9 +662,20 @@ class QNetwork(nn.Module):
             # when using raw one-hot inputs, we don't create an embedding layer
             self.embedding = None
 
-        # GRU input dimension depends on whether we use embedding or one-hot
-        self.gru = nn.GRU(embedding_dim, hidden_dim, num_layers=num_layers, batch_first=True, device=device)
-        self.fc = nn.Linear(hidden_dim, vocab_size, device=device)
+        # Input dim depends on whether we use embedding or one-hot
+        in_dim = vocab_size if self.use_one_hot else embedding_dim
+
+        if self.model_architecture == "gru":
+            # Recurrent architecture (default)
+            self.gru = nn.GRU(in_dim, hidden_dim, num_layers=num_layers, batch_first=True, device=device)
+            self.fc = nn.Linear(hidden_dim, vocab_size, device=device)
+        elif self.model_architecture == "linear":
+            # Simple per-timestep linear projection (no recurrence)
+            self.gru = None
+            self.fc = nn.Linear(in_dim, vocab_size, device=device)
+        else:
+            msg = f"Unsupported model_architecture '{model_architecture}'. Use 'gru' or 'linear'."
+            raise ValueError(msg)
         self.num_layers = num_layers
         self.hidden_dim = hidden_dim
         self.vocab_size = vocab_size
@@ -457,7 +684,7 @@ class QNetwork(nn.Module):
             self,
             x: torch.Tensor,
             hidden: torch.Tensor | None = None
-        ) -> tuple[torch.Tensor, torch.Tensor]:
+        ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """
         Forward pass through the Q-network.
 
@@ -477,15 +704,22 @@ class QNetwork(nn.Module):
             # Convert indices to one-hot; padding index 0 -> all-zeros vector
             emb = F.one_hot(x, num_classes=self.vocab_size).float().to(x.device)
 
-        gru_output, new_hidden = self.gru(emb, hidden)  # out: [batch, seq_len, hidden_dim]
-        logits = self.fc(gru_output)
-        return logits, new_hidden
+        if self.model_architecture == "gru":
+            if self.gru is None:
+                msg = "GRU module is not initialized for architecture 'gru'"
+                raise RuntimeError(msg)
+            gru_output, new_hidden = self.gru(emb, hidden)  # out: [batch, seq_len, hidden_dim]
+            logits = self.fc(gru_output)
+            return logits, new_hidden
+        # linear: project each timestep independently
+        logits = self.fc(emb)
+        return logits, None
 
     def step(
             self,
             input_token: torch.Tensor,
             hidden: torch.Tensor | None = None
-        ) -> tuple[torch.Tensor, torch.Tensor]:
+        ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """
         Step through the GRU with a single input token.
 
@@ -508,9 +742,16 @@ class QNetwork(nn.Module):
             # Convert indices to one-hot; padding index 0 -> all-zeros vector
             emb = F.one_hot(input_token, num_classes=self.vocab_size).float().to(input_token.device)
 
-        gru_output, new_hidden = self.gru(emb, hidden)
-        logits = self.fc(gru_output[:, -1, :])
-        return logits, new_hidden
+        if self.model_architecture == "gru":
+            if self.gru is None:
+                msg = "GRU module is not initialized for architecture 'gru'"
+                raise RuntimeError(msg)
+            gru_output, new_hidden = self.gru(emb, hidden)
+            logits = self.fc(gru_output[:, -1, :])
+            return logits, new_hidden
+        # linear: single-timestep projection
+        logits = self.fc(emb[:, -1, :])
+        return logits, None
 
 # ============================================================
 # Training and Evaluation

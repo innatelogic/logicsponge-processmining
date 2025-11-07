@@ -16,7 +16,14 @@
     "hidden_dim": 128,
     "output_dim": 8
   },
+  "gru": {
+    "vocab_size": 8,
+    "embedding_dim": 8,
+    "hidden_dim": 128,
+    "output_dim": 8
+  },
   "transformer": {
+    "seq_input_dim": 32,
     "vocab_size": 8,
     "embedding_dim": 8,
     "hidden_dim": 128,
