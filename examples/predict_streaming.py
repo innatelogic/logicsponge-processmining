@@ -35,12 +35,12 @@ from logicsponge.processmining.streaming import (
     CSVStatsWriter,
     CustomStreamer,
     Evaluation,
-    InfiniteDiscriminerSource,
+    InfiniteDiscriminerSource,  # noqa: F401
     IteratorStreamer,
     PredictionCSVWriter,
     PrintEval,
     StreamingActivityPredictor,
-    SynInfiniteStreamer,
+    SynInfiniteStreamer,  # noqa: F401
 )
 from logicsponge.processmining.test_data import data_name, dataset
 from logicsponge.processmining.utils import add_file_log_handler, save_run_config

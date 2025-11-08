@@ -888,7 +888,17 @@ def train_rl(  # noqa: PLR0913, PLR0915, C901
                 y_batch = y_batch_loop.to(device)
 
                 # Forward pass: get Q-values (logits) for all actions
-                q_values = model(x_batch).squeeze(1)  # [batch_size, vocab_size]
+                outputs = model(x_batch)
+                # Some model.forward() implementations return (logits, hidden). We only need logits.
+                if isinstance(outputs, tuple):
+                    outputs = outputs[0]
+                # outputs: [batch, seq_len, vocab]
+                # We need logits for the last (non-padding) timestep of each prefix in the batch.
+                lengths = (x_batch != 0).sum(dim=1)
+                # last index per row (lengths >= 1 since prefixes are non-empty)
+                last_idx = lengths - 1
+                batch_idx = torch.arange(x_batch.size(0), device=outputs.device)
+                q_values = outputs[batch_idx, last_idx, :]  # [batch_size, vocab_size]
 
                 # Cross-entropy loss = negative log-likelihood = MLE training
                 # This makes the model learn P(next_activity | prefix) from the data
@@ -994,7 +1004,10 @@ def evaluate_rl(  # noqa: C901, PLR0912
                 # "Expected all tensors to be on the same device" runtime error.
                 if model_device is not None:
                     prefix = prefix.to(device=model_device)
-                q_vals = model(prefix).squeeze(1).squeeze(0)  # [vocab]
+                outputs = model(prefix)
+                if isinstance(outputs, tuple):
+                    outputs = outputs[0]
+                q_vals = outputs.squeeze(1).squeeze(0)  # [vocab]
                 topk = torch.topk(q_vals, k=max_k)
                 pred_idx = int(topk.indices[0].item())
 
@@ -1099,6 +1112,10 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
 
                 # Forward pass
                 outputs = model(x_batch)
+                # Some model forward() implementations (e.g., LSTMModel/GRUModel/QNetwork) return
+                # a tuple (logits, hidden). We only need the logits for the loss below.
+                if isinstance(outputs, tuple):  # (logits, hidden)
+                    outputs = outputs[0]
 
                 # Loss computation:
                 # Token-level loss on all non-padding positions
@@ -1228,6 +1245,8 @@ def evaluate_rnn(  # noqa: PLR0913, PLR0915
                 y_target = y_target.to(device=model_device)
 
             outputs = model(x_input)
+            if isinstance(outputs, tuple):  # handle (logits, hidden)
+                outputs = outputs[0]
 
             # Flatten for comparison
             predicted_indices = torch.argmax(outputs, dim=-1)

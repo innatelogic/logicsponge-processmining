@@ -9,12 +9,9 @@ from pathlib import Path
 from typing import Any
 
 import matplotlib as mpl
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
 import torch
-from aalpy.learning_algs import run_Alergia
 from torch import nn, optim
 from tqdm import tqdm
 
@@ -46,11 +43,14 @@ except OSError as _e:
     run_config = default_run_config
 
 from logicsponge.processmining.algorithms_and_structures import (
-    Bag,
     BayesianClassifier,
-    FrequencyPrefixTree,
-    NGram,
-    Parikh,
+)
+from logicsponge.processmining.batch_helpers import (
+    build_and_save_comparison_matrices,
+    build_strategies,
+    prefix_evaluate_rnn,
+    record_model_results,
+    write_prediction_vectors,
 )
 from logicsponge.processmining.config import DEFAULT_CONFIG
 from logicsponge.processmining.data_utils import (
@@ -59,19 +59,10 @@ from logicsponge.processmining.data_utils import (
     add_stop_to_sequences,
     data_statistics,
     interleave_sequences,
-    retain_sequences_of_length_x_than,
     split_sequence_data,
     transform_to_seqs,
 )
-from logicsponge.processmining.miners import (
-    AdaptiveVoting,
-    Alergia,
-    BasicMiner,
-    Fallback,
-    HardVoting,
-    Relativize,
-    SoftVoting,
-)
+from logicsponge.processmining.miners import BasicMiner
 from logicsponge.processmining.neural_networks import (
     LSTMModel,
     PreprocessData,
@@ -84,9 +75,7 @@ from logicsponge.processmining.neural_networks import (
 )
 from logicsponge.processmining.test_data import data_name, dataset, dataset_test
 from logicsponge.processmining.utils import (
-    RED_TO_GREEN_CMAP,
     add_file_log_handler,
-    compare_models_comparison,
     compute_perplexity_stats,
     save_run_config,
 )
@@ -124,7 +113,7 @@ def transformer_model(attention_heads: int) -> tuple[TransformerModel, optim.Opt
     optimizer = optim.Adam(model.parameters(), lr=run_config.get("nn", {}).get("lr", 0.001))
     return model, optimizer, criterion
 
-def process_neural_model(  # noqa: C901, PLR0912, PLR0913, PLR0915
+def process_neural_model(  # noqa: PLR0913
     name: str,
     iteration_data: dict,
     all_metrics: dict,
@@ -183,68 +172,14 @@ def process_neural_model(  # noqa: C901, PLR0912, PLR0913, PLR0915
             window_size=None,
         )
     else:
-        # Local prefix-mode evaluation for RNN/Transformer: iterate prefixes and
-        # make a single prediction per prefix (cropping the input to the last
-        # `window_size` tokens before passing to the model). This mirrors
-        # evaluate_rl behavior and ensures alignment with `actual`.
-        eval_start = time.time()
-        correct = 0
-        total = 0
-        top_k_correct = [0] * config["top_k"]
-        prediction_vector = []
-
-        model.eval()
-        model_device = getattr(model, "device", None)
-
-        with torch.no_grad():
-            for i in range(nn_test_set_transformed.shape[0]):
-                seq = nn_test_set_transformed[i]
-                valid_len = int((seq != 0).sum().item())
-                # Skip sequences too short to have a prefix
-                if valid_len < 2:  # noqa: PLR2004
-                    continue
-                # iterate prefixes (k = 1..valid_len-1) to produce one pred per event
-                for k in range(1, valid_len):
-                    prefix = seq[:k].unsqueeze(0)  # [1, k]
-                    if prefix.shape[1] > window_size:
-                        prefix = prefix[:, -window_size:]
-                    if model_device is not None:
-                        prefix = prefix.to(device=model_device)
-
-                    outputs = model(prefix)
-                    # outputs shape: [batch=1, seq_len=maybe<=window_size, vocab]
-                    # We take the last timestep's logits as the prediction for the next token
-                    last_logits = outputs[:, -1, :].squeeze(0) if outputs.dim() == 3 else outputs.squeeze(0)  # noqa: PLR2004
-
-                    topk = torch.topk(last_logits, k=config["top_k"])
-                    pred_idx = int(topk.indices[0].item())
-
-                    # Map to activity names
-                    if nn_processor.idx_to_activity and pred_idx in nn_processor.idx_to_activity:
-                        prediction_vector.append(str(nn_processor.idx_to_activity[pred_idx]))
-                    else:
-                        prediction_vector.append(str(pred_idx))
-
-                    target_idx = int(seq[k].item())
-                    total += 1
-                    if pred_idx == target_idx:
-                        correct += 1
-                        for j in range(config["top_k"]):
-                            top_k_correct[j] += 1
-                    else:
-                        # count inclusion in top-k
-                        for j in range(config["top_k"]):
-                            if target_idx in {int(x) for x in topk.indices[: j + 1].tolist()}:
-                                top_k_correct[j] += 1
-
-        eval_time = time.time() - eval_start
-        stats = {
-            "accuracy": (correct / total) if total > 0 else 0.0,
-            "total_predictions": total,
-            "correct_predictions": correct,
-            "top_k_correct_preds": top_k_correct,
-        }
-        perplexities = []
+        # Refactored: use helper preserving original behavior
+        stats, perplexities, eval_time, prediction_vector = prefix_evaluate_rnn(
+            model=model,
+            sequences=nn_test_set_transformed,
+            idx_to_activity=nn_processor.idx_to_activity,
+            max_k=config["top_k"],
+            window_size=window_size,
+        )
 
     # Store neural model prediction vector in global memory under display name
     prediction_vectors_memory.setdefault(display_name, []).append(prediction_vector)
@@ -277,75 +212,24 @@ def process_neural_model(  # noqa: C901, PLR0912, PLR0913, PLR0915
         msg = f"{display_name} stats are not in the expected format."
         raise TypeError(msg)
 
-    # Append data to the iteration data dictionary
-    iteration_data["Model"].append(display_name)
-
-    iteration_data["PP Harmo"].append(perplexity_stats["pp_harmonic_mean"])
-    iteration_data["PP Arithm"].append(perplexity_stats["pp_arithmetic_mean"])
-    iteration_data["PP Median"].append(perplexity_stats["pp_median"])
-    iteration_data["PP Q1"].append(perplexity_stats["pp_q1"])
-    iteration_data["PP Q3"].append(perplexity_stats["pp_q3"])
-
-    iteration_data["Correct (%)"].append(stats["accuracy"] * 100)
-    iteration_data["Wrong (%)"].append(100 - stats["accuracy"] * 100)
-    iteration_data["Empty (%)"].append(0.0)
-
-    for k in range(1, config["top_k"]):
-        iteration_data[f"Top-{k + 1}"].append(stats["top_k_correct_preds"][k] / stats["total_predictions"] * 100)
-
-    iteration_data["Pred Time"].append(eval_time)
-    iteration_data["Train Time"].append(training_time)
-
-    iteration_data["Good Preds"].append(stats["correct_predictions"])
-    iteration_data["Tot Preds"].append(stats["total_predictions"])
-    iteration_data["Nb States"].append(None)
-
-    stats_to_log.append(
-        {
-            "strategy": display_name,
-            "strategy_accuracy": stats["accuracy"] * 100,
-            "strategy_perplexity": perplexity_stats["pp_harmonic_mean"],
-            "strategy_eval_time": eval_time,
-        }
+    # Unified recording
+    record_model_results(
+        display_name=display_name,
+        stats={
+            "accuracy": stats["accuracy"],
+            "total_predictions": stats["total_predictions"],
+            "correct_predictions": stats["correct_predictions"],
+            "top_k_correct_preds": stats["top_k_correct_preds"],
+        },
+        perplexity_stats=perplexity_stats,
+        eval_time_micro=eval_time,
+        train_time_micro=training_time,
+        num_states=None,
+        top_k=config["top_k"],
+        iteration_data=iteration_data,
+        all_metrics=all_metrics,
+        stats_to_log=stats_to_log,
     )
-
-    # Ensure the all_metrics dict has an entry for display_name
-    if display_name not in all_metrics:
-        all_metrics[display_name] = {
-            "accuracies": [],
-            "pp_arithmetic_mean": [],
-            "pp_harmonic_mean": [],
-            "pp_median": [],
-            "pp_q1": [],
-            "pp_q3": [],
-            "top-2": [],
-            "top-3": [],
-            "num_states": [],
-            "train_time": [],
-            "pred_time": [],
-            "mean_delay_error": [],
-            "mean_actual_delay": [],
-            "mean_normalized_error": [],
-            "num_delay_predictions": [],
-        }
-
-    all_metrics[display_name]["accuracies"].append(stats["accuracy"])
-    all_metrics[display_name]["pp_arithmetic_mean"].append(perplexity_stats["pp_arithmetic_mean"])
-    all_metrics[display_name]["pp_harmonic_mean"].append(perplexity_stats["pp_harmonic_mean"])
-    all_metrics[display_name]["pp_median"].append(perplexity_stats["pp_median"])
-    all_metrics[display_name]["pp_q1"].append(perplexity_stats["pp_q1"])
-    all_metrics[display_name]["pp_q3"].append(perplexity_stats["pp_q3"])
-    for k in range(1, config["top_k"]):
-        all_metrics[display_name][f"top-{k + 1}"].append(iteration_data[f"Top-{k + 1}"][-1])
-
-    all_metrics[display_name]["pred_time"].append(eval_time)
-    all_metrics[display_name]["train_time"].append(training_time)
-
-    all_metrics[display_name]["num_states"].append(0)
-    all_metrics[display_name]["mean_delay_error"].append(None)
-    all_metrics[display_name]["mean_actual_delay"].append(None)
-    all_metrics[display_name]["mean_normalized_error"].append(None)
-    all_metrics[display_name]["num_delay_predictions"].append(None)
 
 
 # ============================================================
@@ -668,11 +552,7 @@ for iteration in range(N_ITERATIONS):
     # Initialize Process Miners
     # ============================================================
 
-    fpt = BasicMiner(algorithm=FrequencyPrefixTree(), config=config)
-
-    bag = BasicMiner(algorithm=Bag(), config=config)
-
-    parikh = BasicMiner(algorithm=Parikh(upper_bound=2), config=config)
+    # (miners constructed inside build_strategies helper below)
 
     # Build and store baseline vector of actual next activities (one entry per event, stringified)
     actual_vector: list[str] = []
@@ -686,202 +566,15 @@ for iteration in range(N_ITERATIONS):
         actual_vector[:10],
     )
 
-    # NGram models
-    NGRAM_MODELS: dict[str, BasicMiner] = {}
-    for ngram_name in NGRAM_NAMES:
-        window_length = int(ngram_name.split("_")[1]) - 1
-        recovery_lengths = list(range(window_length, -1, -1))
-
-        if "recovery" in ngram_name or "shorts" in ngram_name:
-            NGRAM_MODELS[ngram_name] = BasicMiner(
-                algorithm=NGram(
-                    window_length=window_length,
-                    recover_lengths=recovery_lengths,
-                ),
-                config=config,
-            )
-        else:
-            # Use the default NGram algorithm without recovery
-            NGRAM_MODELS[ngram_name] = BasicMiner(
-                algorithm=NGram(window_length=window_length, recover_lengths=[]),
-                config=config,
-            )
-        # logger.debug(f"Stats of {ngram_name}: {NGRAM_MODELS[ngram_name].stats}")
-
-    # ngram_8_test = BasicMiner(algorithm=NGram(window_length=7), config=config)
-    # ngram_8_test_train = BasicMiner(algorithm=NGram(window_length=7), config=config)
-
-    fallback = Fallback(
-        models=[
-            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-            BasicMiner(algorithm=NGram(window_length=4)),
-        ],
+    # Strategies refactored into helper (miners / ngrams / fallback / voting)
+    strategies = build_strategies(
         config=config,
+        test_set_transformed=test_set_transformed,
+        ngram_names=NGRAM_NAMES,
+        voting_ngrams=VOTING_NGRAMS,
     )
 
-    fallback_ngram8to2 = Fallback(
-        models=[
-            BasicMiner(algorithm=NGram(window_length=7)),
-            BasicMiner(algorithm=NGram(window_length=1)),
-        ],
-        config=config,
-    )
-
-    fallback_ngram8to3 = Fallback(
-        models=[
-            BasicMiner(algorithm=NGram(window_length=7)),
-            BasicMiner(algorithm=NGram(window_length=2)),
-        ],
-        config=config,
-    )
-
-    fallback_ngram8to4 = Fallback(
-        models=[
-            BasicMiner(algorithm=NGram(window_length=7)),
-            BasicMiner(algorithm=NGram(window_length=3)),
-        ],
-        config=config,
-    )
-
-    fallback_ngram10to2 = Fallback(
-        models=[
-            BasicMiner(algorithm=NGram(window_length=9)),
-            BasicMiner(algorithm=NGram(window_length=1)),
-        ],
-        config=config,
-    )
-
-    fallback_ngram13to2 = Fallback(
-        models=[
-            BasicMiner(algorithm=NGram(window_length=12)),
-            BasicMiner(algorithm=NGram(window_length=1)),
-        ],
-        config=config,
-    )
-
-    fallback_ngram8to_ooo = Fallback(
-        models=[
-            BasicMiner(algorithm=NGram(window_length=7, min_total_visits=10)),
-            BasicMiner(algorithm=NGram(window_length=6, min_total_visits=10)),
-            BasicMiner(algorithm=NGram(window_length=5)),
-            BasicMiner(algorithm=NGram(window_length=4)),
-            BasicMiner(algorithm=NGram(window_length=3)),
-            BasicMiner(algorithm=NGram(window_length=2)),
-            BasicMiner(algorithm=NGram(window_length=1)),
-            BasicMiner(algorithm=NGram(window_length=0)),
-        ],
-        config=config,
-    )
-
-    complex_fallback = Fallback(
-        models=[
-            BasicMiner(algorithm=NGram(window_length=9, min_total_visits=10, min_max_prob=0.9)),
-            BasicMiner(algorithm=NGram(window_length=8, min_total_visits=10, min_max_prob=0.9)),
-            BasicMiner(algorithm=NGram(window_length=7, min_total_visits=10, min_max_prob=0.8)),
-            BasicMiner(algorithm=NGram(window_length=6, min_total_visits=10, min_max_prob=0.7)),
-            BasicMiner(algorithm=NGram(window_length=5, min_total_visits=10, min_max_prob=0.6)),
-            BasicMiner(algorithm=NGram(window_length=4, min_total_visits=10, min_max_prob=0.0)),
-            BasicMiner(
-                algorithm=NGram(window_length=3, min_total_visits=10, min_max_prob=0.0),
-            ),
-            BasicMiner(algorithm=NGram(window_length=2, min_total_visits=10, min_max_prob=0.0)),
-            BasicMiner(algorithm=NGram(window_length=1)),
-        ],
-        config=config,
-    )
-
-    hard_voting = HardVoting(
-        models=[
-            BasicMiner(algorithm=Bag()),
-            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-            BasicMiner(algorithm=NGram(window_length=2)),
-            BasicMiner(algorithm=NGram(window_length=3)),
-            BasicMiner(algorithm=NGram(window_length=4)),
-            # BasicMiner(algorithm=NGram(window_length=5)),
-            # BasicMiner(algorithm=NGram(window_length=6)),
-        ],
-        config=config,
-    )
-
-    optional_num_ngrams = 3
-    adaptive_voting_list = [
-        AdaptiveVoting(
-            models=[
-                BasicMiner(algorithm=Bag()),
-                BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-                BasicMiner(algorithm=NGram(window_length=grams[0], min_total_visits=10)),
-                BasicMiner(algorithm=NGram(window_length=grams[1], min_total_visits=10)),
-                BasicMiner(algorithm=NGram(window_length=grams[2], min_total_visits=10)),
-            ]
-            + (
-                [BasicMiner(algorithm=NGram(window_length=grams[optional_num_ngrams], min_total_visits=10))]
-                if len(grams) > optional_num_ngrams
-                else []
-            ),
-            select_best=select_best_arg,
-            config=config,
-        )
-        for grams in VOTING_NGRAMS
-        for select_best_arg in SELECT_BEST_ARGS
-    ]
-
-    # soft_voting = SoftVoting(
-    #     models=[
-    #         BasicMiner(algorithm=Bag()),
-    #         BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-    #         BasicMiner(algorithm=NGram(window_length=2)),
-    #         BasicMiner(algorithm=NGram(window_length=3)),
-    #         BasicMiner(algorithm=NGram(window_length=4)),
-    #         # BasicMiner(algorithm=NGram(window_length=5)),
-    #         # BasicMiner(algorithm=NGram(window_length=6)),
-    #     ],
-    #     config=config,
-    # )
-
-    soft_voting_list = [
-        SoftVoting(
-            models=[
-                BasicMiner(algorithm=Bag()),
-                BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-                BasicMiner(algorithm=NGram(window_length=grams[0])),
-                BasicMiner(algorithm=NGram(window_length=grams[1])),
-                BasicMiner(algorithm=NGram(window_length=grams[2])),
-            ]
-            + (
-                [BasicMiner(algorithm=NGram(window_length=grams[optional_num_ngrams]))]
-                if len(grams) > optional_num_ngrams
-                else []
-            ),
-            config=config,
-        )
-        for grams in VOTING_NGRAMS
-    ] + [
-        SoftVoting(
-            models=[
-                BasicMiner(algorithm=Bag()),
-                BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-                BasicMiner(algorithm=NGram(window_length=grams[0], min_total_visits=10)),
-                BasicMiner(algorithm=NGram(window_length=grams[1], min_total_visits=10)),
-                BasicMiner(algorithm=NGram(window_length=grams[2], min_total_visits=10)),
-            ]
-            + (
-                [BasicMiner(algorithm=NGram(window_length=grams[optional_num_ngrams], min_total_visits=10))]
-                if len(grams) > optional_num_ngrams
-                else []
-            ),
-        )
-        for grams in VOTING_NGRAMS
-    ]
-
-    relativize = Relativize(
-        models=[
-            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
-            BasicMiner(algorithm=NGram(window_length=3)),
-        ],
-        config=config,
-    )
-
-    # ============================================================
+    # Bayesian classifier models (not part of strategies dict, but trained separately)
     BAYESIAN_MODELS = {
         "bayesian train": BayesianClassifier(config=config),
         "bayesian test": BayesianClassifier(config=config),
@@ -890,71 +583,8 @@ for iteration in range(N_ITERATIONS):
         "bayesian t+t nonsingle": BayesianClassifier(single_occurence_allowed=False, config=config),
     }
 
-    # All strategies (without LSTM)
-    ngram_strategies = {
-        ngram_name: (
-            ngram_model,
-            test_set_transformed
-            if "shorts" not in ngram_name
-            else retain_sequences_of_length_x_than(test_set_transformed, 10, mode="lower"),
-        )
-        for ngram_name, ngram_model in NGRAM_MODELS.items()
-    }
-    # Repeat each tuple in VOTING_NGRAMS 3 times for adaptive voting strategies
-    repeated_ngrams = [gram for grams in VOTING_NGRAMS for gram in [grams] * len(SELECT_BEST_ARGS)]
-    adaptive_voting_strategies = {
-        f"adaptive voting {grams} {adaptive_voting.select_best}": (adaptive_voting, test_set_transformed)
-        for grams, adaptive_voting in zip(repeated_ngrams, adaptive_voting_list, strict=False)
-    }
-
-    soft_voting_strategies1 = {
-        f"soft voting {grams}": (soft_voting_test, test_set_transformed)
-        for grams, soft_voting_test in zip(VOTING_NGRAMS, soft_voting_list[: len(VOTING_NGRAMS)], strict=False)
-    }
-    soft_voting_strategies2 = {
-        f"soft voting {grams}*": (soft_voting_test, test_set_transformed)
-        for grams, soft_voting_test in zip(VOTING_NGRAMS, soft_voting_list[len(VOTING_NGRAMS) :], strict=False)
-    }
-    soft_voting_strategies = {**soft_voting_strategies1, **soft_voting_strategies2}
-    bayesian_strategies = {} #{model_name: (model, test_set_transformed) for model_name, model in BAYESIAN_MODELS.items()} # noqa: E501
-    strategies = {
-        "fpt": (fpt, test_set_transformed),
-        "bag": (bag, test_set_transformed),
-        **ngram_strategies,
-        # "ngram_12": (ngram_12, retain_sequences_of_length_x_than(test_set_transformed, 10, mode="lower")),
-        # "ngram_15": (ngram_15, retain_sequences_of_length_x_than(test_set_transformed, 10, mode="lower")),
-        # "ngram_18": (ngram_18, retain_sequences_of_length_x_than(test_set_transformed, 10, mode="lower")),
-        "fallback fpt->ngram": (fallback, test_set_transformed),
-        # "fallback ngram_8->ngram_2": (fallback_ngram8to2, test_set_transformed),
-        # "fallback ngram_8->ngram_3": (fallback_ngram8to3, test_set_transformed),
-        # "fallback ngram_8->ngram_4": (fallback_ngram8to4, test_set_transformed),
-        # "fallback ngram_10->ngram_2": (fallback_ngram10to2, test_set_transformed),
-        # "fallback ngram_13->ngram_2": (fallback_ngram13to2, test_set_transformed),
-        # "fallback ngram_8->...->1": (fallback_ngram8to_ooo, test_set_transformed),
-        # "complex fallback": (complex_fallback, test_set_transformed),
-        "hard voting": (hard_voting, test_set_transformed),
-        # **adaptive_voting_strategies,
-        **soft_voting_strategies,
-        **bayesian_strategies,
-    }
-
+    # Initialize training times for strategy keys; Bayesian keys will be added during their training loop
     training_times = dict.fromkeys(strategies, 0.0)
-
-    # ============= Train Alergia
-    if ALERGIA_TRAINING:
-        alergia_start_time = time.time()
-
-        algorithm = run_Alergia(alergia_train_set_transformed, automaton_type="smm", eps=0.5, print_info=True)
-        smm = Alergia(algorithm=algorithm)
-        strategies["alergia"] = (smm, test_set_transformed)
-
-        alergia_end_time = time.time()
-        alergia_elapsed_time = alergia_end_time - alergia_start_time
-        msg = f"Training time for Alergia: {alergia_elapsed_time:.4f} seconds"
-        logger.info(msg)
-        training_times = dict.fromkeys(strategies, 0.0)
-        training_times["alergia"] = alergia_elapsed_time
-
 
     # ================= Train Process Miners
     miners_start_time = time.time()
@@ -1077,83 +707,27 @@ for iteration in range(N_ITERATIONS):
         stats = strategy.stats
 
         total = stats["total_predictions"]
-        correct_percentage = (stats["correct_predictions"] / total * 100) if total > 0 else 0
-        wrong_percentage = (stats["wrong_predictions"] / total * 100) if total > 0 else 0
-        empty_percentage = (stats["empty_predictions"] / total * 100) if total > 0 else 0
-
-        top_k_accuracies = (
-            [(top_k_correct / total * 100) for top_k_correct in stats["top_k_correct_preds"]]
-            if total > 0
-            else [0] * len(stats["top_k_correct_preds"])
-        )
 
         per_state_stats = stats.get("per_state_stats", {})
         # Convert each value in the dictionary (PerStateStats) to a dict
         for key, value in per_state_stats.items():
             per_state_stats[key] = value.to_dict()
 
-        stats_to_log.append(
-            {
-                "strategy": strategy_name,
-                "strategy_accuracy": correct_percentage,
-                "strategy_perplexity": stats["pp_harmonic_mean"],
-                "strategy_eval_time": evaluation_time,
-                "per_state_stats": per_state_stats,
-            }
-        )
+        # logging moved into record_model_results to avoid duplication
 
         num_states = strategy.get_num_states() if isinstance(strategy, BasicMiner) else None
 
         if "pp_arithmetic_mean" not in stats:
-            stats["pp_arithmetic_mean"] = None
-            stats["pp_harmonic_mean"] = None
-            stats["pp_median"] = None
-            stats["pp_q1"] = None
-            stats["pp_q3"] = None
+            # Preserve runtime behavior placeholders; explicitly ignore strict type mismatch
+            stats["pp_arithmetic_mean"] = None  # type: ignore[assignment]
+            stats["pp_harmonic_mean"] = None    # type: ignore[assignment]
+            stats["pp_median"] = None           # type: ignore[assignment]
+            stats["pp_q1"] = None               # type: ignore[assignment]
+            stats["pp_q3"] = None               # type: ignore[assignment]
 
-        # Append data to the iteration data dictionary
-        iteration_data["Model"].append(strategy_name)
+        # Unified recording for miners (moved after delay/accuracy computations below)
 
-        iteration_data["PP Harmo"].append(stats["pp_harmonic_mean"])
-        iteration_data["PP Arithm"].append(stats["pp_arithmetic_mean"])
-        iteration_data["PP Median"].append(stats["pp_median"])
-        iteration_data["PP Q1"].append(stats["pp_q1"])
-        iteration_data["PP Q3"].append(stats["pp_q3"])
-
-        iteration_data["Correct (%)"].append(correct_percentage)
-        iteration_data["Wrong (%)"].append(wrong_percentage)
-        iteration_data["Empty (%)"].append(empty_percentage)
-        for k in range(1, config["top_k"]):
-            iteration_data[f"Top-{k + 1}"].append(top_k_accuracies[k])
-
-        iteration_data["Pred Time"].append(evaluation_time)
-        iteration_data["Train Time"].append(training_times[strategy_name])
-
-        iteration_data["Good Preds"].append(stats["correct_predictions"])
-        iteration_data["Tot Preds"].append(total)
-        iteration_data["Nb States"].append(num_states)
-
-        # Get the mean of a dictionary
-        def weighted_mean_of_dict(stat_dict: dict) -> float:
-            """Calculate the mean of a dictionary where keys are the values and values are the weights."""
-            weighted_sum = sum(key * val for key, val in stat_dict.items())
-            total_val = sum(stat_dict.values())
-            return weighted_sum / total_val if total_val != 0 else 0
-
-        def mean_of_dict(my_dict: dict) -> float:
-            """Calculate the mean of a dictionary."""
-            return sum(my_dict.values()) / len(my_dict) if my_dict else 0
-
-        def div_dict(stat_dict: dict, total_dict: dict) -> dict:
-            """Divide each value in stat_dict by the corresponding value in total_dict."""
-            output = {}
-            for key, value in stat_dict.items():
-                total = total_dict[key]
-                if total == 0:
-                    msg = f"Total for key {key} is zero, cannot calculate mean."
-                    raise ValueError(msg)
-                output[key] = value / total
-            return output
+        # (helper functions removed as they were unused)
 
         # Timing information
         delay_count = stats["num_delay_predictions"]
@@ -1171,25 +745,40 @@ for iteration in range(N_ITERATIONS):
         # iteration_data["Mean Normalized Error"].append(mean_normalized_error)
         # iteration_data["Delay Predictions"].append(delay_count)
 
-        # Calculate and append accuracy to all_metrics for final statistics
+        # Calculate accuracy for helper
         accuracy = stats["correct_predictions"] / total if total > 0 else 0
 
-        all_metrics[strategy_name]["accuracies"].append(accuracy)
-        all_metrics[strategy_name]["pp_arithmetic_mean"].append(stats["pp_arithmetic_mean"])
-        all_metrics[strategy_name]["pp_harmonic_mean"].append(stats["pp_harmonic_mean"])
-        all_metrics[strategy_name]["pp_median"].append(stats["pp_median"])
-        all_metrics[strategy_name]["pp_q1"].append(stats["pp_q1"])
-        all_metrics[strategy_name]["pp_q3"].append(stats["pp_q3"])
-        for k in range(1, config["top_k"]):
-            all_metrics[strategy_name][f"top-{k + 1}"].append(top_k_accuracies[k])
-        all_metrics[strategy_name]["num_states"].append(num_states)
-        all_metrics[strategy_name]["pred_time"].append(evaluation_time)
-        all_metrics[strategy_name]["train_time"].append(training_times[strategy_name])
-
-        all_metrics[strategy_name]["mean_delay_error"].append(mean_delay_error)
-        all_metrics[strategy_name]["mean_actual_delay"].append(mean_actual_delay)
-        all_metrics[strategy_name]["mean_normalized_error"].append(mean_normalized_error)
-        all_metrics[strategy_name]["num_delay_predictions"].append(delay_count)
+        # Unified recording for miners
+        record_model_results(
+            display_name=strategy_name,
+            stats={
+                "accuracy": accuracy,
+                "total_predictions": total,
+                "correct_predictions": stats["correct_predictions"],
+                "wrong_predictions": stats["wrong_predictions"],
+                "empty_predictions": stats["empty_predictions"],
+                "top_k_correct_preds": stats["top_k_correct_preds"],
+            },
+            perplexity_stats={
+                "pp_harmonic_mean": stats.get("pp_harmonic_mean"),
+                "pp_arithmetic_mean": stats.get("pp_arithmetic_mean"),
+                "pp_median": stats.get("pp_median"),
+                "pp_q1": stats.get("pp_q1"),
+                "pp_q3": stats.get("pp_q3"),
+            },
+            eval_time_micro=evaluation_time,
+            train_time_micro=training_times[strategy_name],
+            num_states=num_states,
+            top_k=config["top_k"],
+            iteration_data=iteration_data,
+            all_metrics=all_metrics,
+            stats_to_log=stats_to_log,
+            mean_delay_error=mean_delay_error,
+            mean_actual_delay=mean_actual_delay,
+            mean_normalized_error=mean_normalized_error,
+            num_delay_predictions=delay_count,
+            per_state_stats=per_state_stats,
+        )
 
     # LSTM + Transformer + RL Evaluation
     if ML_TRAINING:
@@ -1307,56 +896,23 @@ for iteration in range(N_ITERATIONS):
                     msg = f"{rl_name} stats are not in the expected format."
                     raise TypeError(msg)
 
-                iteration_data["Model"].append(rl_name)
-
-                iteration_data["PP Harmo"].append(perplexity_stats["pp_harmonic_mean"])
-                iteration_data["PP Arithm"].append(perplexity_stats["pp_arithmetic_mean"])
-                iteration_data["PP Median"].append(perplexity_stats["pp_median"])
-                iteration_data["PP Q1"].append(perplexity_stats["pp_q1"])
-                iteration_data["PP Q3"].append(perplexity_stats["pp_q3"])
-
-                iteration_data["Correct (%)"].append(metrics["accuracy"] * 100)
-                iteration_data["Wrong (%)"].append(100 - metrics["accuracy"] * 100)
-                iteration_data["Empty (%)"].append(0.0)
-
-                for k in range(1, config["top_k"]):
-                    iteration_data[f"Top-{k + 1}"].append(
-                        metrics["top_k_correct_preds"][k] / metrics["total_predictions"] * 100
-                    )
-
-                iteration_data["Pred Time"].append(eval_time)
-                iteration_data["Train Time"].append(training_time)
-
-                iteration_data["Good Preds"].append(metrics["correct_predictions"])
-                iteration_data["Tot Preds"].append(metrics["total_predictions"])
-                iteration_data["Nb States"].append(None)
-
-                stats_to_log.append(
-                    {
-                        "strategy": rl_name,
-                        "strategy_accuracy": metrics["accuracy"] * 100,
-                        "strategy_perplexity": perplexity_stats["pp_harmonic_mean"],
-                        "strategy_eval_time": eval_time,
-                    }
+                record_model_results(
+                    display_name=rl_name,
+                    stats={
+                        "accuracy": metrics["accuracy"],
+                        "total_predictions": metrics["total_predictions"],
+                        "correct_predictions": metrics["correct_predictions"],
+                        "top_k_correct_preds": metrics["top_k_correct_preds"],
+                    },
+                    perplexity_stats=perplexity_stats,
+                    eval_time_micro=eval_time,
+                    train_time_micro=training_time,
+                    num_states=None,
+                    top_k=config["top_k"],
+                    iteration_data=iteration_data,
+                    all_metrics=all_metrics,
+                    stats_to_log=stats_to_log,
                 )
-
-                all_metrics[rl_name]["accuracies"].append(metrics["accuracy"])
-                all_metrics[rl_name]["pp_arithmetic_mean"].append(perplexity_stats["pp_arithmetic_mean"])
-                all_metrics[rl_name]["pp_harmonic_mean"].append(perplexity_stats["pp_harmonic_mean"])
-                all_metrics[rl_name]["pp_median"].append(perplexity_stats["pp_median"])
-                all_metrics[rl_name]["pp_q1"].append(perplexity_stats["pp_q1"])
-                all_metrics[rl_name]["pp_q3"].append(perplexity_stats["pp_q3"])
-                for k in range(1, config["top_k"]):
-                    all_metrics[rl_name][f"top-{k + 1}"].append(iteration_data[f"Top-{k + 1}"][-1])
-
-                all_metrics[rl_name]["pred_time"].append(eval_time)
-                all_metrics[rl_name]["train_time"].append(training_time)
-
-                all_metrics[rl_name]["num_states"].append(0)
-                all_metrics[rl_name]["mean_delay_error"].append(None)
-                all_metrics[rl_name]["mean_actual_delay"].append(None)
-                all_metrics[rl_name]["mean_normalized_error"].append(None)
-                all_metrics[rl_name]["num_delay_predictions"].append(None)
 
     # Create a DataFrame for the iteration and log it
     iteration_df = pd.DataFrame(iteration_data).round(2)
@@ -1380,57 +936,12 @@ with stats_file_path.open("w") as f:
     json.dump(stats_to_log, f, indent=4)
 
 # Write prediction vectors (one CSV per strategy and per-iteration) into the run-specific predictions dir
-try:
-    for model_name, iterations in prediction_vectors_memory.items():
-        # Combined dataframe for all iterations for this model
-        combined_rows = []
-        for it_idx, pred_vec in enumerate(iterations, start=1):
-            # pred_vec is expected to be an iterable of predictions (one per event)
-            # Try to fetch the matching actual vector for this iteration (if available)
-            actual_iters = prediction_vectors_memory.get("actual", [])
-            actual_vec = None
-            if model_name != "actual" and len(actual_iters) >= it_idx:
-                actual_vec = actual_iters[it_idx - 1]
-
-            try:
-                preds = list(pred_vec)
-
-                if actual_vec is not None:
-                    # Align lengths: truncate to the shortest to avoid misalignment
-                    actuals = list(actual_vec)
-                    min_len = min(len(preds), len(actuals))
-                    preds = preds[:min_len]
-                    actuals = actuals[:min_len]
-                    df_iter = pd.DataFrame({"index": list(range(len(preds))), "prediction": preds, "actual": actuals})
-                else:
-                    df_iter = pd.DataFrame({"index": list(range(len(preds))), "prediction": preds})
-            except (ValueError, TypeError, OSError):
-                # Fallback: coerce into a single-column representation; include actual as string if available
-                if actual_vec is not None:
-                    try:
-                        actuals = list(actual_vec)
-                        df_iter = pd.DataFrame({"prediction": [str(pred_vec)], "actual": [str(actuals)]})
-                    except (ValueError, TypeError, OSError):
-                        df_iter = pd.DataFrame({"prediction": [str(pred_vec)]})
-                else:
-                    df_iter = pd.DataFrame({"prediction": [str(pred_vec)]})
-
-            iter_csv_path = predictions_dir / f"{RUN_ID}_{model_name}_iter{it_idx}.csv"
-            df_iter.to_csv(iter_csv_path, index=False)
-
-            # Append rows for the combined CSV
-            df_iter_insert = df_iter.copy()
-            df_iter_insert.insert(0, "iteration", it_idx)
-            combined_rows.append(df_iter_insert)
-
-        # Save combined CSV for the model (all iterations stacked)
-        if combined_rows:
-            combined_df = pd.concat(combined_rows, ignore_index=True)
-            combined_csv_path = predictions_dir / f"{RUN_ID}_{model_name}.csv"
-            combined_df.to_csv(combined_csv_path, index=False)
-    logger.info("Saved prediction vectors for %d strategies to %s", len(prediction_vectors_memory), predictions_dir)
-except (OSError, RuntimeError, ValueError, TypeError) as e:
-    logger.debug("Could not write prediction vectors to CSV: %s", e, exc_info=True)
+write_prediction_vectors(
+    prediction_vectors_memory=prediction_vectors_memory,
+    run_id=RUN_ID,
+    predictions_dir=predictions_dir,
+    logger=logger,
+)
 
 results: dict = {
     "Model": [],
@@ -1537,176 +1048,9 @@ msg = "\n" + str(data)
 logger.info(msg)
 
 # === Cross-reference table of comparison ratios between all models ===
-try:
-    model_keys = list(prediction_vectors_memory.keys())
-    # Build empty DataFrame for overall ratios
-
-    correlation_df = pd.DataFrame(index=model_keys, columns=model_keys, dtype=float)
-    anticorrelation_df = pd.DataFrame(index=model_keys, columns=model_keys, dtype=float)
-    similarity_df = pd.DataFrame(index=model_keys, columns=model_keys, dtype=float)
-    iterations_df = pd.DataFrame(index=model_keys, columns=model_keys, dtype=float)
-
-    for tested in model_keys:
-        for reference in model_keys:
-            try:
-                res = compare_models_comparison(
-                    prediction_vectors_memory,
-                    tested_model=tested,
-                    reference_model=reference,
-                    baseline_model="actual",
-                    include_empty=False
-                )
-                correlation = res.get("correlation", None)
-                anticorrelation = res.get("anticorrelation", None)
-                similarity = res.get("similarity", None)
-                iterations_used = res.get("counts", {}).get("iterations_used", None)
-            except (ValueError, KeyError, TypeError, ZeroDivisionError, IndexError) as e:
-                logger.debug("Compare failed for tested=%s ref=%s: %s", tested, reference, e)
-                correlation = None
-                anticorrelation = None
-                similarity = None
-                iterations_used = None
-
-            correlation_df.loc[tested, reference] = (correlation * 100.0) if correlation is not None else np.nan
-            anticorrelation_df.loc[tested, reference] = (
-                (anticorrelation * 100.0)
-                if anticorrelation is not None
-                else np.nan
-            )
-            similarity_df.loc[tested, reference] = (similarity * 100.0) if similarity is not None else np.nan
-
-            iterations_df.loc[tested, reference] = iterations_used if iterations_used is not None else np.nan
-
-    # Log the ratio table similar to all_metrics
-    logger.info("\n[COMPARISON] Cross-reference (percent) - rows=tested, cols=reference:\n%s", correlation_df.round(2))
-    logger.debug("\n[COMPARISON DEBUG] Iterations used per cell:\n%s", iterations_df)
-
-    # Save cross-reference CSV for later analysis (use the same results dir as stats_file_path)
-    correlation_csv_path = stats_file_path.parent / f"{RUN_ID}_correlation_matrix.csv"
-    anticorrelation_csv_path = stats_file_path.parent / f"{RUN_ID}_anticorrelation_matrix.csv"
-    similarity_csv_path = stats_file_path.parent / f"{RUN_ID}_similarity_matrix.csv"
-    correlation_csv_path.parent.mkdir(parents=True, exist_ok=True)
-    correlation_df.to_csv(correlation_csv_path)
-    anticorrelation_df.to_csv(anticorrelation_csv_path)
-    similarity_df.to_csv(similarity_csv_path)
-    logger.info(
-        "[COMPARISON] Saved cross-reference CSV to: %s, %s, %s",
-        correlation_csv_path.resolve(), anticorrelation_csv_path.resolve(), similarity_csv_path.resolve()
-    )
-
-    # Optional: save a PNG heatmap automatically (use results dir)
-    correlation_heatmap_png = stats_file_path.parent / f"{RUN_ID}_correlation_matrix.png"
-    anticorrelation_heatmap_png = stats_file_path.parent / f"{RUN_ID}_anticorrelation_matrix.png"
-    similarity_heatmap_png = stats_file_path.parent / f"{RUN_ID}_similarity_matrix.png"
-    for heatmap_png, df, title in [
-        (correlation_heatmap_png, correlation_df, "Correlation: tested vs reference"),
-        (anticorrelation_heatmap_png, anticorrelation_df, "Anticorrelation: tested vs reference"),
-        (similarity_heatmap_png, similarity_df, "Similarity: tested vs reference"),
-    ]:
-        try:
-            plt.figure(figsize=(max(8, len(df.columns) * 0.5), max(6, len(df.index) * 0.5)))
-            sns.heatmap(df.astype(float), annot=False, fmt=".1f", cmap=RED_TO_GREEN_CMAP, cbar_kws={"label": "Percent"})
-            plt.title(title)
-            plt.tight_layout()
-            plt.savefig(heatmap_png, dpi=150)
-            plt.close()
-            logger.info("[COMPARISON] Saved summary heatmap to: %s", heatmap_png.resolve())
-        except (OSError, RuntimeError, ValueError) as e:
-            logger.debug("Could not auto-save heatmap image: %s", e, exc_info=True)
-
-            # --- Additional plots: for each ngram (one curve) show values across qlearning windows ---
-    try:
-        from logicsponge.processmining.utils import plot_ngrams_vs_prefix
-
-        # Q-learning windows
-        plot_ngrams_vs_prefix(
-            correlation_df,
-            NGRAM_NAMES,
-            "qlearning_win",
-            xlabel="Q-learning window size",
-            title="Correlation",
-            out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_qlearning_correlation.png",
-            baseline_tested="qlearning",
-        )
-        plot_ngrams_vs_prefix(
-            anticorrelation_df,
-            NGRAM_NAMES,
-            "qlearning_win",
-            xlabel="Q-learning window size",
-            title="Anticorrelation",
-            out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_qlearning_anticorrelation.png",
-            baseline_tested="qlearning",
-        )
-        plot_ngrams_vs_prefix(
-            similarity_df,
-            NGRAM_NAMES,
-            "qlearning_win",
-            xlabel="Q-learning window size",
-            title="Similarity",
-            out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_qlearning_similarity.png",
-            baseline_tested="qlearning",
-        )
-
-        # Transformer windows
-        plot_ngrams_vs_prefix(
-            correlation_df,
-            NGRAM_NAMES,
-            "transformer_win",
-            xlabel="Model window size",
-            title="Correlation",
-            out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_transformer_win_transformer_correlation.png",
-            baseline_tested="transformer",
-        )
-        plot_ngrams_vs_prefix(
-            anticorrelation_df,
-            NGRAM_NAMES,
-            "transformer_win",
-            xlabel="Model window size",
-            title="Anticorrelation",
-            out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_transformer_win_transformer_anticorrelation.png",
-            baseline_tested="transformer",
-        )
-        plot_ngrams_vs_prefix(
-            similarity_df,
-            NGRAM_NAMES,
-            "transformer_win",
-            xlabel="Model window size",
-            title="Similarity",
-            out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_transformer_win_transformer_similarity.png",
-            baseline_tested="transformer",
-        )
-
-        # LSTM windows
-        plot_ngrams_vs_prefix(
-            correlation_df,
-            NGRAM_NAMES,
-            "LSTM_win",
-            xlabel="Model window size",
-            title="Correlation",
-            out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_LSTM_win_lstm_correlation.png",
-            baseline_tested="LSTM",
-        )
-        plot_ngrams_vs_prefix(
-            anticorrelation_df,
-            NGRAM_NAMES,
-            "LSTM_win",
-            xlabel="Model window size",
-            title="Anticorrelation",
-            out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_LSTM_win_lstm_anticorrelation.png",
-            baseline_tested="LSTM",
-        )
-        plot_ngrams_vs_prefix(
-            similarity_df,
-            NGRAM_NAMES,
-            "LSTM_win",
-            xlabel="Model window size",
-            title="Similarity",
-            out_png=stats_file_path.parent / f"{RUN_ID}_ngrams_vs_LSTM_win_lstm_similarity.png",
-            baseline_tested="LSTM",
-        )
-    except Exception:
-        logger.exception("Could not generate ngrams vs qlearning plots")
-except (ValueError, KeyError, TypeError, ZeroDivisionError, IndexError, OSError, RuntimeError):
-    logger.exception("Failed to build cross-reference comparison table")
-
-
+build_and_save_comparison_matrices(
+    prediction_vectors_memory=prediction_vectors_memory,
+    run_id=RUN_ID,
+    out_dir=stats_file_path.parent,
+    logger=logger,
+)

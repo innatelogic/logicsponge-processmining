@@ -152,6 +152,17 @@ data_collection = {
         "delimiter": ",",
         "dtypes": None,
     },
+    "Synthetic111000": {
+        "url": None,
+        "doi": None,
+        "filetype": None,
+        "target_filename": "Synthetic111000.csv",
+        "case_keys": ["case:concept:name"],
+        "activity_keys": ["concept:name"],
+        "timestamp": "time:timestamp",
+        "delimiter": ",",
+        "dtypes": None,
+    },
     "Synthetic_Train": {
         "url": None,
         "doi": None,
@@ -196,7 +207,9 @@ data_collection = {
 if DATA == "file":
     # data_name = "Synthetic_Train"
 
-    data_name = "Sepsis_Cases"
+    data_name = "Synthetic111000"
+
+    # data_name = "Sepsis_Cases"
 
     # data_name = "Helpdesk"
     # data_name = "BPI_Challenge_2013" # ok
