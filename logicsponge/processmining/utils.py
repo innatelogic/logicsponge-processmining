@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.colors import LinearSegmentedColormap, Colormap
 
 from logicsponge.processmining.config import DEFAULT_CONFIG
 from logicsponge.processmining.types import Config, Event, Metrics, Prediction, ProbDistr
@@ -386,7 +386,12 @@ def compare_models_comparison( # noqa: C901, PLR0915, PLR0912
 class HeatmapOptions(NamedTuple):
     """Options for show_comparison_heatmap to group optional visualization parameters."""
 
-    cmap: str = "viridis"
+    # `cmap` may be either a matplotlib colormap name (str) or a Colormap instance
+    # (e.g. returned by LinearSegmentedColormap.from_list). Passing the actual
+    # Colormap object avoids lookup errors when a custom colormap name is not
+    # registered in matplotlib's global colormap registry.
+    # Use matplotlib's 'RdYlGn' divergent colormap as the default (red->yellow->green).
+    cmap: str | Colormap = "RdYlGn"
     annotate: bool = True
     fmt: str = ".1f"
 
@@ -481,9 +486,8 @@ def save_all_comparison_heatmaps(
     anticorrelation_png = results_dir / f"{run_id}_anticorrelation_matrix{suffix}.png"
     similarity_png = results_dir / f"{run_id}_similarity_matrix{suffix}.png"
 
-    # HeatmapOptions takes cmap name as string; use the provided cmap's name when available
-    cmap_name = cmap.name if hasattr(cmap, "name") else (cmap if isinstance(cmap, str) else "viridis")
-    opts = HeatmapOptions(cmap=cmap_name, annotate=annotate, fmt=".1f")
+    # Pass the colormap directly (may be a Colormap instance or a name)
+    opts = HeatmapOptions(cmap=cmap, annotate=annotate, fmt=".1f")
 
     # Render each if CSV exists
     if correlation_csv.exists():
