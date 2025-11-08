@@ -21,14 +21,16 @@ logging.basicConfig(
     format="%(message)s",
 )
 
+
+MAGIC_NUMBER = 8
 # Load run configuration (learning rates, batch sizes, epochs for NN and RL)
 config_file_path = Path(__file__).parent / "predict_config.json"
 default_run_config = {
-    "nn": {"lr": 0.001, "batch_size": 8, "epochs": 20},
+    "nn": {"lr": 0.001, "batch_size": 8, "epochs": 50},
     "rl": {"lr": 0.001, "batch_size": 8, "epochs": 20, "gamma": 0.99},
-    "lstm": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 128, "output_dim": 32},
-    "transformer": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 128, "output_dim": 32},
-    "qlearning": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 512, "output_dim": 32},
+    "lstm": {"vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 128, "output_dim": MAGIC_NUMBER},
+    "transformer": {"vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 512, "output_dim": MAGIC_NUMBER},
+    "qlearning": {"vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 512, "output_dim": MAGIC_NUMBER},
 }
 
 # Write the default run configuration into `predict_config.json` in the repo folder.
@@ -104,11 +106,9 @@ def transformer_model(
     # Keep backward-compatible signature but allow optional positional encoding
     def _build_model(pos_encoding: str | None = None) -> TransformerModel:
         kwargs: dict[str, Any] = {
-            "seq_input_dim": 64,  # instead of max_seq_length + 2
             "vocab_size": run_config.get("transformer", {}).get("vocab_size", 64),
             "embedding_dim": run_config.get("transformer", {}).get("embedding_dim", 64),
             "hidden_dim": run_config.get("transformer", {}).get("hidden_dim", 128),
-            "output_dim": run_config.get("transformer", {}).get("output_dim", 64),
             "attention_heads": attention_heads,
             "use_one_hot": True,
             "device": device,
@@ -849,6 +849,7 @@ for iteration in range(N_ITERATIONS):
                     nn_train_set_transformed=nn_train_set_transformed,
                     nn_val_set_transformed=nn_val_set_transformed,
                     nn_test_set_transformed=nn_test_set_transformed,
+                    epochs=default_run_config.get("nn", {}).get("epochs", 20),
                 )
             # Also train/evaluate windowed variants similar to RL qlearning windows
             for w in WINDOW_RANGE:

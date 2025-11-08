@@ -4,8 +4,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 # Configuration
-MAX_NUM_CASES = 50
-TOTAL_ACTIVITIES = 50000
+MAX_NUM_CASES = 100
+TOTAL_ACTIVITIES = 200_000
 start_time = datetime(2013, 11, 7, 8, 0, 0)
 time_increment = timedelta(minutes=5)
 

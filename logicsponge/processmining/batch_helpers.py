@@ -492,11 +492,11 @@ def build_and_save_comparison_matrices(
         save_all_comparison_heatmaps(results_dir=out_dir, run_id=run_id, cmap=RED_TO_GREEN_CMAP, annotate=False)
 
         # Log summary table
-        logger.info(
-            "\n[COMPARISON] Cross-reference (percent) - rows=tested, cols=reference:\n%s",
-            correlation_df.round(2),
-        )
-        logger.debug("\n[COMPARISON DEBUG] Iterations used per cell:\n%s", iterations_df)
+        # logger.info(
+        #     "\n[COMPARISON] Cross-reference (percent) - rows=tested, cols=reference:\n%s",
+        #     correlation_df.round(2),
+        # )
+        # logger.debug("\n[COMPARISON DEBUG] Iterations used per cell:\n%s", iterations_df)
 
     except (ValueError, KeyError, TypeError, ZeroDivisionError, IndexError, OSError, RuntimeError):
         logger.exception("Failed to build cross-reference comparison table")

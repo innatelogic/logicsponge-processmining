@@ -77,6 +77,7 @@ predictions_dir.mkdir(parents=True, exist_ok=True)
 # --- Run configuration (defaults + writing config file like predict_batch.py)
 config_file_path = Path(__file__).parent / "predict_config.json"
 MAGIC_VALUE = 8
+HIDDEN_DIM_DEFAULT = 128
 default_run_config = {
     "nn": {"lr": 0.001, "batch_size": 8, "epochs": 20},
     "transf": {"lr": 0.0001, "batch_size": 8, "epochs": 20},
@@ -84,27 +85,23 @@ default_run_config = {
     "lstm": {
         "vocab_size": MAGIC_VALUE,
         "embedding_dim": MAGIC_VALUE,
-        "hidden_dim": 128,
-        "output_dim": MAGIC_VALUE,
+        "hidden_dim": HIDDEN_DIM_DEFAULT,
     },
     "gru": {
         "vocab_size": MAGIC_VALUE,
         "embedding_dim": MAGIC_VALUE,
-        "hidden_dim": 128,
-        "output_dim": MAGIC_VALUE,
+        "hidden_dim": HIDDEN_DIM_DEFAULT,
     },
     "transformer": {
         "seq_input_dim": 32,
         "vocab_size": MAGIC_VALUE,
         "embedding_dim": MAGIC_VALUE,
-        "hidden_dim": 128,
-        "output_dim": MAGIC_VALUE,
+        "hidden_dim": HIDDEN_DIM_DEFAULT,
     },
     "qlearning": {
         "vocab_size": MAGIC_VALUE,
         "embedding_dim": MAGIC_VALUE,
-        "hidden_dim": 128,
-        "output_dim": MAGIC_VALUE,
+        "hidden_dim": HIDDEN_DIM_DEFAULT,
     },
 }
 try:
@@ -429,8 +426,8 @@ gru_cfg = run_config.get("gru", {})
 vocab_size = lstm_cfg.get("vocab_size", 50)  # An upper bound on the number of activities
 embedding_dim = lstm_cfg.get("embedding_dim", 50)
 hidden_dim = lstm_cfg.get("hidden_dim", 128)
-output_dim = lstm_cfg.get("output_dim", vocab_size)
-model_lstm = LSTMModel(vocab_size, embedding_dim=embedding_dim, hidden_dim=hidden_dim, device=device, use_one_hot=True)
+num_layers = lstm_cfg.get("num_layers", 2)
+model_lstm = LSTMModel(vocab_size, embedding_dim=embedding_dim, hidden_dim=hidden_dim, num_layers=num_layers, device=device, use_one_hot=True)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model_lstm.parameters(), lr=nn_cfg.get("lr", 0.001))
 
@@ -472,13 +469,11 @@ gru = StreamingActivityPredictor(
 # Initialize transformer model (base model without window constraint) using run_config
 transformer_cfg = run_config.get("transformer", {})
 hidden_dim_tr = transformer_cfg.get("hidden_dim", hidden_dim)
-output_dim_tr = transformer_cfg.get("output_dim", output_dim)
 model_transformer = TransformerModel(
     seq_input_dim=transformer_cfg.get("seq_input_dim", 512),
     vocab_size=transformer_cfg.get("vocab_size", vocab_size),
     embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
     hidden_dim=hidden_dim_tr,
-    output_dim=output_dim_tr,
     attention_heads=1,
     use_one_hot=True,
 )
@@ -571,7 +566,6 @@ for w in NN_WINDOW_RANGE:
             vocab_size=transformer_cfg.get("vocab_size", vocab_size),
             embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
             hidden_dim=hidden_dim_tr,
-            output_dim=output_dim_tr,
             attention_heads=1,
             use_one_hot=True,
             pos_encoding_type=name_enc,
@@ -600,7 +594,6 @@ for w in NN_WINDOW_RANGE:
         vocab_size=vocab_size,
         embedding_dim=embedding_dim,
         hidden_dim=hidden_dim,
-        output_dim=output_dim,
         attention_heads=1,
         use_one_hot=True,
         pos_encoding_type="learnable_relative",
@@ -633,7 +626,6 @@ for heads in ATTENTION_HEADS:
         vocab_size=transformer_cfg.get("vocab_size", vocab_size),
         embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
         hidden_dim=hidden_dim_tr,
-        output_dim=output_dim_tr,
         attention_heads=heads,
         use_one_hot=True,
     )
@@ -662,7 +654,6 @@ for name_enc, _ in POS_ENCODINGS:
         vocab_size=transformer_cfg.get("vocab_size", vocab_size),
         embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
         hidden_dim=hidden_dim_tr,
-        output_dim=output_dim_tr,
         attention_heads=1,
         use_one_hot=True,
         pos_encoding_type=name_enc,
