@@ -24,8 +24,8 @@ logging.basicConfig(
 # Load run configuration (learning rates, batch sizes, epochs for NN and RL)
 config_file_path = Path(__file__).parent / "predict_config.json"
 default_run_config = {
-    "nn": {"lr": 0.001, "batch_size": 8, "epochs": 20},
-    "rl": {"lr": 0.001, "batch_size": 8, "epochs": 20, "gamma": 0.99},
+    "nn": {"lr": 0.001, "batch_size": 32, "epochs": 20},
+    "rl": {"lr": 0.001, "batch_size": 32, "epochs": 20, "gamma": 0.99},
     "lstm": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 128, "output_dim": 32},
     "transformer": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 128, "output_dim": 32},
     "qlearning": {"vocab_size": 32, "embedding_dim": 32, "hidden_dim": 512, "output_dim": 32},
@@ -336,7 +336,7 @@ def process_rl_model(
         val_sequences=nn_val_set_transformed,
         criterion=criterion,
         optimizer=optimizer,
-        batch_size=run_config.get("rl", {}).get("batch_size", 4),
+        batch_size=run_config.get("rl", {}).get("batch_size", 8),
         epochs=epochs,
         window_size=window_size,
         gamma=run_config.get("rl", {}).get("gamma", 0.99),  # Standard RL discount factor

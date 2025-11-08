@@ -1010,8 +1010,31 @@ def evaluate_rl(  # noqa: C901, PLR0912
                 outputs = model(prefix)
                 if isinstance(outputs, tuple):
                     outputs = outputs[0]
-                q_vals = outputs.squeeze(1).squeeze(0)  # [vocab]
-                topk = torch.topk(q_vals, k=max_k)
+
+                # outputs may have shape [1, seq_len, vocab] or [1, 1, vocab]
+                # or (in some forward implementations) [seq_len, vocab].
+                # We need the logits for the last timestep of the prefix.
+                if outputs.dim() == 3:
+                    # [batch=1, seq_len, vocab] -> take last timestep
+                    q_vals = outputs[0, -1, :]
+                elif outputs.dim() == 2:
+                    # Could be [1, vocab] or [seq_len, vocab]; in both cases take last row
+                    q_vals = outputs[-1, :]
+                elif outputs.dim() == 1:
+                    # Already [vocab]
+                    q_vals = outputs
+                else:
+                    # Fallback: flatten and take last vocab-sized chunk if possible
+                    q_flat = outputs.view(-1)
+                    if q_flat.numel() >= 1:
+                        q_vals = q_flat[-1:]
+                    else:
+                        raise RuntimeError("Unexpected logits shape in evaluate_rl")
+
+                # Ensure k does not exceed vocabulary size
+                k_eff = min(max_k, q_vals.numel())
+                topk = torch.topk(q_vals, k=k_eff)
+                # topk.indices is 1-D (length k_eff); extract the top-1 prediction safely
                 pred_idx = int(topk.indices[0].item())
 
                 # map to activity name if provided
