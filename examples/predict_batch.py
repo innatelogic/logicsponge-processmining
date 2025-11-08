@@ -97,18 +97,26 @@ def lstm_model() -> tuple[LSTMModel, optim.Optimizer, nn.Module]:
     return model, optimizer, criterion
 
 
-def transformer_model(attention_heads: int) -> tuple[TransformerModel, optim.Optimizer, nn.Module]:
+def transformer_model(attention_heads: int, pos_encoding: str | None = None) -> tuple[TransformerModel, optim.Optimizer, nn.Module]:
     """Initialize and return a Transformer model, optimizer, and loss function."""
-    model = TransformerModel(
-        seq_input_dim=64, # instead of max_seq_length + 2
-        vocab_size=run_config.get("transformer", {}).get("vocab_size", 64),
-        embedding_dim=run_config.get("transformer", {}).get("embedding_dim", 64),
-        hidden_dim=run_config.get("transformer", {}).get("hidden_dim", 128),
-        output_dim=run_config.get("transformer", {}).get("output_dim", 64),
-        attention_heads=attention_heads,
-        use_one_hot=True,
-        device=device,
-    )  # +2 for start and stop symbols
+    # Keep backward-compatible signature but allow optional positional encoding
+    def _build_model(pos_encoding: str | None = None) -> TransformerModel:
+        kwargs: dict[str, object] = dict(
+            seq_input_dim=64,  # instead of max_seq_length + 2
+            vocab_size=run_config.get("transformer", {}).get("vocab_size", 64),
+            embedding_dim=run_config.get("transformer", {}).get("embedding_dim", 64),
+            hidden_dim=run_config.get("transformer", {}).get("hidden_dim", 128),
+            output_dim=run_config.get("transformer", {}).get("output_dim", 64),
+            attention_heads=attention_heads,
+            use_one_hot=True,
+            device=device,
+        )
+        if pos_encoding is not None:
+            # TransformerModel in this repo expects `pos_encoding_type` kwarg
+            kwargs["pos_encoding_type"] = pos_encoding
+        return TransformerModel(**kwargs)
+
+    model = _build_model(pos_encoding)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=run_config.get("nn", {}).get("lr", 0.001))
     return model, optimizer, criterion
@@ -134,16 +142,28 @@ def process_neural_model(  # noqa: PLR0913
     """
     display_name = f"{name}_win{window_size}" if window_size is not None else name
 
-    match name:
-        case "LSTM":
-            model, optimizer, criterion = lstm_model()
-        case "transformer":
-            model, optimizer, criterion = transformer_model(attention_heads=1)
-        case "transformer_2heads":
-            model, optimizer, criterion = transformer_model(attention_heads=2)
-        case _:
-            msg = "Unknown NN model."
-            raise ValueError(msg)
+    # Support transformer positional-encoding variants named like
+    # "transformer_pos_<encoding>" and optionally windowed variants
+    # (windowing is controlled by the `window_size` argument passed
+    # by the caller; the name may include a trailing "_winX" but we
+    # prefer the explicit `window_size` parameter).
+    if name.startswith("transformer_pos_"):
+        enc = name[len("transformer_pos_") :]
+        # strip trailing window suffix if present in the name
+        if "_win" in enc:
+            enc = enc.split("_win")[0]
+        model, optimizer, criterion = transformer_model(attention_heads=1, pos_encoding=enc)
+    else:
+        match name:
+            case "LSTM":
+                model, optimizer, criterion = lstm_model()
+            case "transformer":
+                model, optimizer, criterion = transformer_model(attention_heads=1)
+            case "transformer_2heads":
+                model, optimizer, criterion = transformer_model(attention_heads=2)
+            case _:
+                msg = "Unknown NN model."
+                raise ValueError(msg)
 
     # Train the model on (optionally) windowed prefixes
     start_time = time.time()
@@ -250,6 +270,13 @@ NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 # ]
 
 # ============================================================
+
+# Positional encodings for transformer variants (parity with predict_streaming)
+# Add any encodings used in predict_streaming here so batch experiments include them.
+POS_ENCODINGS = [
+    ("learnable_relative", None),
+]
+
 
 
 def qnetwork_model() -> tuple[QNetwork, optim.Optimizer, nn.Module]:
@@ -470,13 +497,17 @@ all_metrics: dict = {
         *[f"soft voting {grams}" for grams in VOTING_NGRAMS],
         *[f"soft voting {grams}*" for grams in VOTING_NGRAMS],
         "alergia",
-        "LSTM",
-        "transformer",
-        "transformer_2heads",
-        "qlearning",
-        *[f"LSTM_win{w}" for w in WINDOW_RANGE],
-        *[f"transformer_win{w}" for w in WINDOW_RANGE],
-        *[f"qlearning_win{w}" for w in WINDOW_RANGE],
+    "LSTM",
+    "transformer",
+    "transformer_2heads",
+    # Add transformer positional-encoding base variants
+    *[f"transformer_pos_{pe}" for pe, _ in POS_ENCODINGS],
+    "qlearning",
+    *[f"LSTM_win{w}" for w in WINDOW_RANGE],
+    *[f"transformer_win{w}" for w in WINDOW_RANGE],
+    # Add windowed transformer positional-encoding variants
+    *[f"transformer_pos_{pe}_win{w}" for pe, _ in POS_ENCODINGS for w in WINDOW_RANGE],
+    *[f"qlearning_win{w}" for w in WINDOW_RANGE],
         "bayesian train",
         "bayesian test",
         "bayesian t+t",
