@@ -16,7 +16,9 @@ next_case_num = 1
 current_time = start_time
 
 # Generate CSV (always save into the repository's data/ folder, regardless of CWD)
-data_dir = Path(__file__).resolve().parent
+# The examples/ file lives in <repo>/examples, so go up one level and into data/
+data_dir = Path(__file__).resolve().parents[1] / "data"
+data_dir.mkdir(parents=True, exist_ok=True)
 save_path = data_dir / "Synthetic111000.csv"
 
 with open(save_path, "w", newline="") as f:
