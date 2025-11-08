@@ -470,7 +470,6 @@ gru = StreamingActivityPredictor(
 transformer_cfg = run_config.get("transformer", {})
 hidden_dim_tr = transformer_cfg.get("hidden_dim", hidden_dim)
 model_transformer = TransformerModel(
-    seq_input_dim=transformer_cfg.get("seq_input_dim", 512),
     vocab_size=transformer_cfg.get("vocab_size", vocab_size),
     embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
     hidden_dim=hidden_dim_tr,
@@ -562,7 +561,6 @@ for w in NN_WINDOW_RANGE:
     for name_enc, _ in POS_ENCODINGS:
         model_name = f"transformer_pos_{name_enc}_win{w}"
         model_tr_pe_w = TransformerModel(
-            seq_input_dim=transformer_cfg.get("seq_input_dim", 512),
             vocab_size=transformer_cfg.get("vocab_size", vocab_size),
             embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
             hidden_dim=hidden_dim_tr,
@@ -590,7 +588,6 @@ for w in NN_WINDOW_RANGE:
 
     # Transformer windowed variant (default positional encoding)
     model_tr_w = TransformerModel(
-        seq_input_dim=transformer_cfg.get("seq_input_dim", 512),
         vocab_size=vocab_size,
         embedding_dim=embedding_dim,
         hidden_dim=hidden_dim,
@@ -622,7 +619,6 @@ for heads in ATTENTION_HEADS:
         continue
 
     model_tr_h = TransformerModel(
-        seq_input_dim=transformer_cfg.get("seq_input_dim", 512),
         vocab_size=transformer_cfg.get("vocab_size", vocab_size),
         embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
         hidden_dim=hidden_dim_tr,
@@ -650,7 +646,6 @@ for name_enc, _ in POS_ENCODINGS:
         continue
     model_name = f"transformer_pos_{name_enc}"
     model_tr_pe = TransformerModel(
-        seq_input_dim=transformer_cfg.get("seq_input_dim", 512),
         vocab_size=transformer_cfg.get("vocab_size", vocab_size),
         embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
         hidden_dim=hidden_dim_tr,

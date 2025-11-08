@@ -514,7 +514,6 @@ class TransformerModel(nn.Module):
 
     def __init__( # noqa: PLR0913
         self,
-        seq_input_dim: int,  # Interpreted as max_seq_len for positional encodings
         vocab_size: int,
         *,
         embedding_dim: int = 64,
@@ -530,7 +529,6 @@ class TransformerModel(nn.Module):
         Initialize the Transformer model.
 
         Args:
-            seq_input_dim (int): Input dimension for sequences.
             vocab_size (int): Size of the vocabulary.
             embedding_dim (int): Dimension of the embeddings.
             hidden_dim (int): Dimension of the hidden layers in the transformer.
@@ -560,11 +558,7 @@ class TransformerModel(nn.Module):
         d_model = embedding_dim if not use_one_hot else vocab_size
         self.d_model = d_model
 
-        # Use a simple, reliable learned positional embedding up to `seq_input_dim`.
-        # This is robust and easy to reason about. If an input sequence is longer
-        # than `seq_input_dim`, we'll fall back to a sinusoidal encoding at runtime.
-        self.max_seq_len = int(seq_input_dim)
-        self.pos_embedding = nn.Embedding(self.max_seq_len, d_model, device=device)
+        self.pos_embedding = SinusoidalPositionalEncoding(d_model)
         # Conditional embedding layer
         if not use_one_hot:
             self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=padding_idx, device=device)
@@ -668,10 +662,25 @@ class TransformerModel(nn.Module):
                 except Exception:
                     pos_emb = torch.zeros((batch_size, seq_len, self.d_model), device=x_device, dtype=x.dtype)
             else:
-                if seq_len <= self.max_seq_len:
+                # Use the configured positional embedding if possible. Some
+                # positional-encoding implementations accept position ids and
+                # return a tensor; others may only generate encodings for a
+                # requested length. Avoid referencing a non-existent
+                # `self.max_seq_len` attribute by trying the common path and
+                # falling back to generating sinusoidal encodings or zeros.
+                try:
                     pos_ids = torch.arange(seq_len, device=x_device).unsqueeze(0).expand(batch_size, seq_len)
                     pos_emb = self.pos_embedding(pos_ids)
-                else:
+                    # Normalize shape: allow returned shapes like [seq_len, d]
+                    # or [1, seq_len, d] or [batch, seq_len, d]. Expand when
+                    # necessary to shape [batch, seq_len, d_model].
+                    if pos_emb.dim() == 2:
+                        pos_emb = pos_emb.unsqueeze(0).expand(batch_size, seq_len, -1)
+                    elif pos_emb.dim() == 3 and pos_emb.size(0) == 1:
+                        pos_emb = pos_emb.expand(batch_size, -1, -1)
+                    else:
+                        pos_emb = pos_emb.to(x_device)
+                except Exception:
                     try:
                         pos_emb = SinusoidalPositionalEncoding(self.d_model)(seq_len, x_device, x.dtype)
                         if pos_emb.dim() == 3 and pos_emb.size(0) == 1:
