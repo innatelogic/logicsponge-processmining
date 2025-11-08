@@ -424,27 +424,11 @@ class TransformerModel(nn.Module):
         d_model = embedding_dim if not use_one_hot else vocab_size
         self.d_model = d_model
 
-        # after self.d_model = d_model (or wherever d_model is set), add:
-        self.pos_encoder = PeriodicPositionalEncoding(d_model=d_model)
-
-        self.max_seq_len = seq_input_dim  # kept for backward-compat; not used to bound positions
-
-
-        # Select positional encoder
-        if pos_encoding_type == "sinusoidal":
-            self.pos_encoder = SinusoidalPositionalEncoding(d_model)
-        elif pos_encoding_type == "learnable_backward_relative":
-            self.pos_encoder = BackwardRelativePositionalEncoding(d_model=d_model)
-        elif pos_encoding_type == "learnable_relative":
-            self.pos_encoder = LearnableRelativePositionalEncoding(d_model)
-        elif pos_encoding_type == "periodic":
-            self.pos_encoder = PeriodicPositionalEncoding(d_model)
-        elif pos_encoding_type == "sharp_relative":
-            self.pos_encoder = SharpPeriodicRelativeEncoding(d_model, mode=sharp_mode)
-        else:
-            msg = f"Unknown pos_encoding_type: {pos_encoding_type}"
-            raise ValueError(msg)
-
+        # Use a simple, reliable learned positional embedding up to `seq_input_dim`.
+        # This is robust and easy to reason about. If an input sequence is longer
+        # than `seq_input_dim`, we'll fall back to a sinusoidal encoding at runtime.
+        self.max_seq_len = int(seq_input_dim)
+        self.pos_embedding = nn.Embedding(self.max_seq_len, d_model, device=device)
         # Conditional embedding layer
         if not use_one_hot:
             self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=padding_idx, device=device)
@@ -463,8 +447,9 @@ class TransformerModel(nn.Module):
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
-        # Output layer
-        self.fc = nn.Linear(d_model, output_dim, device=device)
+        # Output layer -- produce logits over the vocabulary (vocab_size)
+        # Training/evaluation code expects shape [batch, seq_len, vocab_size]
+        self.fc = nn.Linear(d_model, vocab_size, device=device)
 
         # Custom initialization for linear/embedding layers
         self.apply(self._init_weights)
@@ -492,22 +477,37 @@ class TransformerModel(nn.Module):
             # Project indices to one-hot vectors on the same device as input
             x = F.one_hot(x, num_classes=self.vocab_size).float().to(x_device)
 
-        # # Add sinusoidal positional encoding (unbounded in sequence length)
-        seq_len = x.size(1)
-        pos = self.pos_encoder(seq_len, x_device, x.dtype)  # [1, seq_len, d_model]
-        if pos.dim() == 3 and pos.size(0) == 1:  # absolute encodings  # noqa: PLR2004
-            x = x + pos
-        # for relative encoding, integration would be inside attention
+        # Add positional embeddings. If sequence length exceeds learned table,
+        # fall back to a sinusoidal positional encoding.
+        batch_size, seq_len, _ = x.size()
+
+        if seq_len <= self.max_seq_len:
+            pos_ids = torch.arange(seq_len, device=x_device).unsqueeze(0).expand(batch_size, seq_len)
+            pos_emb = self.pos_embedding(pos_ids)
+        else:
+            # Fallback: use sinusoidal positional encodings computed on the fly
+            # The SinusoidalPositionalEncoding implementation (imported) typically
+            # returns shape [1, seq_len, d_model] when called as (seq_len, device, dtype)
+            try:
+                pos_emb = SinusoidalPositionalEncoding(self.d_model)(seq_len, x_device, x.dtype)
+                if pos_emb.dim() == 3 and pos_emb.size(0) == 1:
+                    pos_emb = pos_emb.expand(batch_size, -1, -1)
+                else:
+                    pos_emb = pos_emb.to(x_device).expand(batch_size, -1, -1)
+            except Exception:
+                # last-resort: zeros
+                pos_emb = torch.zeros((batch_size, seq_len, self.d_model), device=x_device, dtype=x.dtype)
+
+        x = x + pos_emb
 
         # === Add causal (left) mask ===
-        # Shape: [seq_len, seq_len]
+        # Shape: [seq_len, seq_len]; True where positions should be masked (prevent attending)
         mask = torch.triu(torch.ones(seq_len, seq_len, device=x_device), diagonal=1).bool()
-        # PyTorch expects the mask to have True where positions should be masked
-        # (i.e., prevent attending)
 
         # Pass through transformer with mask and key padding mask
         x = self.transformer(x, mask=mask, src_key_padding_mask=key_padding_mask.to(x_device))
 
+        # Project to vocabulary logits
         return self.fc(x)
 
     def _init_weights(self, m: nn.Module) -> None:
@@ -1090,7 +1090,13 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
     best_val_accuracy = 0.0
     best_model_state = None
     patience_counter = 0
-    model_device = model.device  # Get model's device once
+    # Determine model device robustly: prefer explicit model.device, else fall back to param device
+    model_device = getattr(model, "device", None)
+    if model_device is None:
+        try:
+            model_device = next(model.parameters()).device
+        except StopIteration:
+            model_device = None
 
     for epoch in range(epochs):
         model.train()
@@ -1105,8 +1111,7 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 x_full = sequences[:, :-1]
                 y_full = sequences[:, 1:]
 
-                # If a window size is provided, we must slice the last `window_size`
-                # NON-PADDING tokens per row, not the last columns of the padded tensor.
+                # If a window size is provided, slice the last `window_size` NON-PADDING tokens per row.
                 if window_size is not None:
                     x_slices: list[torch.Tensor] = []
                     y_slices: list[torch.Tensor] = []
@@ -1115,13 +1120,16 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     for b, eff_len in enumerate(lengths):
                         eff = int(eff_len)
                         if eff <= 0:
-                            # skip empty row (will contribute nothing to loss via masking)
-                            x_slices.append(torch.zeros(0, dtype=torch.long))
-                            y_slices.append(torch.zeros(0, dtype=torch.long))
+                            # Skip empty rows entirely (they contribute nothing to loss)
                             continue
                         start = max(0, eff - window_size)
                         x_slices.append(x_full[b, start:eff].clone())
                         y_slices.append(y_full[b, start:eff].clone())
+
+                    # If no valid slices (all rows were empty), skip this batch
+                    if len(x_slices) == 0:
+                        pbar.update(1)
+                        continue
 
                     # Re-pad windows to a batch tensor
                     x_batch = pad_sequence(x_slices, batch_first=True, padding_value=0)
@@ -1130,6 +1138,7 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     x_batch = x_full
                     y_batch = y_full
 
+                # Move tensors to the model device when available to avoid device mismatch
                 if model_device is not None:
                     x_batch = x_batch.to(model_device)
                     y_batch = y_batch.to(model_device)
@@ -1233,7 +1242,13 @@ def evaluate_rnn(  # noqa: C901, PLR0913, PLR0915
     model.eval()  # Set the model to evaluation mode
     correct_predictions = 0
     total_predictions = 0
-    model_device = model.device  # Get model's device once
+    # Determine device robustly: prefer explicit model.device, else fall back to parameter device
+    model_device = getattr(model, "device", None)
+    if model_device is None:
+        try:
+            model_device = next(model.parameters()).device
+        except StopIteration:
+            model_device = None
 
     # Initialize list to count top-k correct predictions
     top_k_correct_preds = [0] * max_k

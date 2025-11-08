@@ -434,7 +434,7 @@ ML_TRAINING = True
 NN_TRAINING = True
 ALERGIA_TRAINING = False
 SHOW_DELAYS = False
-RL_TRAINING = True
+RL_TRAINING = False
 
 # ============================================================
 # Determine start and stop symbols
