@@ -196,10 +196,11 @@ class LSTMModel(nn.Module):
             # Use embedding layer
             x = self.embedding(x)
         else:
-            # Use one-hot encoding
-            # print(f"x shape: {x.shape}, dtype: {x.dtype}, unique values: {torch.unique(x)}")
-            # Keep device consistent with input tensor to avoid device mismatch
-            x = torch.nn.functional.one_hot(x, num_classes=self.vocab_size).float().to(x.device)
+            # Use one-hot encoding; ensure padding index 0 becomes an all-zero vector
+            indices = x
+            x = torch.nn.functional.one_hot(indices, num_classes=self.vocab_size).float().to(indices.device)
+            pad_mask = (indices == 0).unsqueeze(-1)
+            x = x.masked_fill(pad_mask, 0.0)
 
         # Pass through LSTM layers
         lstm_out, new_hidden = self.lstm(x, hidden)
@@ -433,7 +434,10 @@ class GRUModel(nn.Module):
         if not self.use_one_hot and self.embedding is not None:
             x = self.embedding(x)
         else:
-            x = F.one_hot(x, num_classes=self.vocab_size).float().to(x.device)
+            indices = x
+            x = F.one_hot(indices, num_classes=self.vocab_size).float().to(indices.device)
+            pad_mask = (indices == 0).unsqueeze(-1)
+            x = x.masked_fill(pad_mask, 0.0)
 
         gru_out, new_hidden = self.gru(x, hidden)
         logits = self.fc(gru_out)
@@ -631,7 +635,10 @@ class TransformerModel(nn.Module):
             x = self.embedding(x)
         else:
             # Project indices to one-hot vectors on the same device as input
-            x = F.one_hot(x, num_classes=self.vocab_size).float().to(x_device)
+            indices = x
+            x = F.one_hot(indices, num_classes=self.vocab_size).float().to(x_device)
+            pad_mask = (indices == 0).unsqueeze(-1).to(x_device)
+            x = x.masked_fill(pad_mask, 0.0)
 
         # Add positional embeddings. Support multiple modes:
         # - learned table (default for short sequences)
@@ -817,8 +824,11 @@ class QNetwork(nn.Module):
         if not self.use_one_hot and self.embedding is not None:
             emb = self.embedding(x)  # [batch, seq_len, embedding_dim]
         else:
-            # Convert indices to one-hot; padding index 0 -> all-zeros vector
-            emb = F.one_hot(x, num_classes=self.vocab_size).float().to(x.device)
+            # Convert indices to one-hot; ensure padding index 0 -> all-zeros vector
+            indices = x
+            emb = F.one_hot(indices, num_classes=self.vocab_size).float().to(indices.device)
+            pad_mask = (indices == 0).unsqueeze(-1)
+            emb = emb.masked_fill(pad_mask, 0.0)
 
         if self.model_architecture == "gru":
             if self.gru is None:
@@ -855,8 +865,11 @@ class QNetwork(nn.Module):
         if not self.use_one_hot and self.embedding is not None:
             emb = self.embedding(input_token)  # [batch, 1, embedding_dim]
         else:
-            # Convert indices to one-hot; padding index 0 -> all-zeros vector
-            emb = F.one_hot(input_token, num_classes=self.vocab_size).float().to(input_token.device)
+            # Convert indices to one-hot; ensure padding index 0 -> all-zeros vector
+            indices = input_token
+            emb = F.one_hot(indices, num_classes=self.vocab_size).float().to(indices.device)
+            pad_mask = (indices == 0).unsqueeze(-1)
+            emb = emb.masked_fill(pad_mask, 0.0)
 
         if self.model_architecture == "gru":
             if self.gru is None:
@@ -1304,34 +1317,48 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 x_full = sequences[:, :-1]
                 y_full = sequences[:, 1:]
 
-                # If a window size is provided, slice the last `window_size` NON-PADDING tokens per row.
+                # Windowed training: align with prefix_evaluate_rnn semantics.
+                # Previous implementation only kept the final window of each sequence,
+                # causing the model to overfit to predicting the STOP token and yield
+                # near-zero accuracy on prefix evaluation (all predictions became STOP).
+                #
+                # Fix: when window_size is provided, build a list of ALL prefixes for
+                # every sequence row, cropping each prefix to its last `window_size`
+                # tokens. We then compute loss ONLY on the last token of each cropped
+                # prefix (next-token prediction), mirroring prefix evaluation logic.
                 if window_size is not None:
-                    x_slices: list[torch.Tensor] = []
-                    y_slices: list[torch.Tensor] = []
-                    # Compute per-row effective lengths based on targets (exclude padding=0).
-                    # We must count non-padding positions in y_full because a position in
-                    # x_full is only a valid training example if its corresponding target
-                    # in y_full is non-zero. Using x_full here can select input tokens
-                    # whose targets are padding (0), producing windows with no valid
-                    # targets and preventing training.
+                    pref_x: list[torch.Tensor] = []
+                    pref_y: list[torch.Tensor] = []
+                    # Effective non-padding target lengths per row
                     lengths = (y_full != 0).sum(dim=1).tolist()
                     for b, eff_len in enumerate(lengths):
                         eff = int(eff_len)
-                        if eff <= 0:
-                            # Skip empty rows entirely (they contribute nothing to loss)
+                        if eff < 1:
                             continue
-                        start = max(0, eff - window_size)
-                        x_slices.append(x_full[b, start:eff].clone())
-                        y_slices.append(y_full[b, start:eff].clone())
+                        # Iterate over prefix lengths k = 1..eff. Each prefix predicts token k.
+                        for k in range(1, eff + 1):
+                            # Raw prefix (may contain padding near the end of the original max length; slice to eff first)
+                            x_pref_raw = x_full[b, :k]
+                            y_pref_raw = y_full[b, :k]
+                            # Remove any trailing padding inside the selected prefix (defensive; normally none)
+                            valid_len_pref = int((y_pref_raw != 0).sum().item())
+                            if valid_len_pref == 0:
+                                continue
+                            x_pref = x_pref_raw[:valid_len_pref].clone()
+                            y_pref = y_pref_raw[:valid_len_pref].clone()
+                            # Crop to last window_size NON-PADDING tokens
+                            if x_pref.numel() > window_size:
+                                x_pref = x_pref[-window_size:]
+                                y_pref = y_pref[-window_size:]
+                            pref_x.append(x_pref)
+                            pref_y.append(y_pref)
 
-                    # If no valid slices (all rows were empty), skip this batch
-                    if len(x_slices) == 0:
+                    if len(pref_x) == 0:
                         pbar.update(1)
                         continue
 
-                    # Re-pad windows to a batch tensor
-                    x_batch = pad_sequence(x_slices, batch_first=True, padding_value=0)
-                    y_batch = pad_sequence(y_slices, batch_first=True, padding_value=0)
+                    x_batch = pad_sequence(pref_x, batch_first=True, padding_value=0)
+                    y_batch = pad_sequence(pref_y, batch_first=True, padding_value=0)
                 else:
                     x_batch = x_full
                     y_batch = y_full
@@ -1350,22 +1377,35 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 if isinstance(outputs, tuple):  # (logits, hidden)
                     outputs = outputs[0]
 
-                # Loss computation:
-                # Token-level loss on all non-padding positions
-                logits = outputs.view(-1, outputs.shape[-1])  # [batch * seq_len, vocab]
-                targets = y_batch.reshape(-1)  # [batch * seq_len]
-
-                mask = targets != 0
-                logits_masked = logits[mask]
-                targets_masked = targets[mask]
-
-                if logits_masked.size(0) > 0:
-                    loss = criterion(logits_masked, targets_masked)
-
-                    loss.backward()
-                    optimizer.step()
-
-                    epoch_loss += loss.item()
+                if window_size is not None:
+                    # Compute loss on LAST token of each prefix window (next-token prediction)
+                    # Determine effective lengths per row (exclude padding)
+                    lengths_eff = (y_batch != 0).sum(dim=1)  # [batch]
+                    batch_indices = torch.arange(y_batch.size(0), device=y_batch.device)
+                    last_positions = lengths_eff - 1  # index of last non-padding target
+                    # Filter rows that have at least one valid target
+                    valid_mask = lengths_eff > 0
+                    if valid_mask.any():
+                        # Gather logits at last positions
+                        # outputs shape: [B, seq_len, vocab]
+                        last_logits = outputs[batch_indices[valid_mask], last_positions[valid_mask], :]
+                        last_targets = y_batch[batch_indices[valid_mask], last_positions[valid_mask]]
+                        loss = criterion(last_logits, last_targets)
+                        loss.backward()
+                        optimizer.step()
+                        epoch_loss += loss.item()
+                else:
+                    # Original (non-windowed) token-level loss over all non-padding positions
+                    logits = outputs.view(-1, outputs.shape[-1])
+                    targets = y_batch.reshape(-1)
+                    mask = targets != 0
+                    logits_masked = logits[mask]
+                    targets_masked = targets[mask]
+                    if logits_masked.size(0) > 0:
+                        loss = criterion(logits_masked, targets_masked)
+                        loss.backward()
+                        optimizer.step()
+                        epoch_loss += loss.item()
                 pbar.update(1)
 
         msg = f"Epoch {epoch + 1}/{epochs}, Average Loss: {epoch_loss / len(dataloader):.4f}"

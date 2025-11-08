@@ -2,7 +2,7 @@
   "nn": {
     "lr": 0.001,
     "batch_size": 8,
-    "epochs": 50
+    "epochs": 100
   },
   "rl": {
     "lr": 0.001,

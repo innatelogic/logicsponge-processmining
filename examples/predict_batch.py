@@ -26,7 +26,7 @@ MAGIC_NUMBER = 8
 # Load run configuration (learning rates, batch sizes, epochs for NN and RL)
 config_file_path = Path(__file__).parent / "predict_config.json"
 default_run_config = {
-    "nn": {"lr": 0.001, "batch_size": 8, "epochs": 50},
+    "nn": {"lr": 0.001, "batch_size": 8, "epochs": 100},
     "rl": {"lr": 0.001, "batch_size": 8, "epochs": 20, "gamma": 0.99},
     "lstm": {"vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 128, "output_dim": MAGIC_NUMBER},
     "transformer": {"vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 512, "output_dim": MAGIC_NUMBER},
