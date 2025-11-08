@@ -7,10 +7,8 @@ without changing outputs or behavior.
 
 from __future__ import annotations
 
-import logging
 import time
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
@@ -24,12 +22,16 @@ from logicsponge.processmining.utils import (
     save_all_comparison_heatmaps,
 )
 
+if TYPE_CHECKING:
+    import logging
+    from pathlib import Path
+
 
 def _pick_perplexity_value(
     key: str,
     perplexity_stats: dict[str, Any] | None,
     fallback_stats: dict[str, Any],
-) -> Any:
+) -> float | None:
     """
     Return the perplexity value to record for a given key.
 
@@ -43,7 +45,7 @@ def _pick_perplexity_value(
     return fallback_stats.get(key)
 
 
-def record_model_results(
+def record_model_results(  # noqa: PLR0913, PLR0915
     *,
     display_name: str,
     stats: dict[str, Any],
@@ -245,7 +247,7 @@ def write_prediction_vectors(
         logger.debug("Could not write prediction vectors to CSV: %s", e, exc_info=True)
 
 
-def prefix_evaluate_rnn(  # noqa: C901
+def prefix_evaluate_rnn(  # noqa: C901, PLR0912
     *,
     model: torch.nn.Module,
     sequences: torch.Tensor,
@@ -295,7 +297,7 @@ def prefix_evaluate_rnn(  # noqa: C901
                 if isinstance(outputs, tuple):
                     outputs = outputs[0]
                 # outputs shape: [batch=1, seq_len(<=window_size), vocab] or [1, vocab]
-                last_logits = outputs[:, -1, :].squeeze(0) if outputs.dim() == 3 else outputs.squeeze(0)
+                last_logits = outputs[:, -1, :].squeeze(0) if outputs.dim() == 3 else outputs.squeeze(0)  # noqa: PLR2004
 
                 topk = torch.topk(last_logits, k=max_k)
                 pred_idx = int(topk.indices[0].item())

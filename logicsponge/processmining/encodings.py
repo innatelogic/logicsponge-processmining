@@ -137,3 +137,51 @@ class LearnableRelativePositionalEncoding(nn.Module):
         if self.proj is not None:
             feat = self.proj(feat)
         return feat  # [L, L, d_model]
+
+class BackwardRelativePositionalEncoding(nn.Module):
+    """
+    Learnable periodic positional encoding measured *backward* from the current end of the sequence.
+
+    For token i in sequence length L:
+        relative_pos_i = L - 1 - i
+    Encoded periodically with learnable frequencies and phases.
+    """
+
+    def __init__(self, d_model: int, n_freqs: int | None = None, min_exp: float = -6.0, max_exp: float = 0.0) -> None:
+        """Initialize the BackwardRelativePositionalEncoding module."""
+        super().__init__()
+        if n_freqs is None:
+            n_freqs = d_model // 2
+        self.n_freqs = n_freqs
+        self.d_model = d_model
+
+        # Initialize frequencies (log-space for wide coverage)
+        init_exps = torch.linspace(min_exp, max_exp, steps=n_freqs)
+        freqs_init = (2.0 * math.pi) * torch.pow(10.0, init_exps)
+        self.log_freqs = nn.Parameter(torch.log(freqs_init))
+        self.phases = nn.Parameter(torch.zeros(n_freqs))
+
+        # Optional projection if d_model != 2*n_freqs
+        self.proj = nn.Linear(2 * n_freqs, d_model, bias=True) if 2 * n_freqs != d_model else None
+
+    def forward(self, seq_len: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+        """
+        Compute backward-relative positional encodings.
+
+        Returns tensor of shape [1, seq_len, d_model],
+        where position 0 corresponds to the oldest token,
+        and position L-1 (the last) has encoding for distance 0.
+        """
+        positions = torch.arange(seq_len - 1, -1, -1, device=device, dtype=dtype).unsqueeze(1)  # [L, 1]
+        freqs = torch.exp(self.log_freqs).to(device=device, dtype=dtype)
+        phases = self.phases.to(device=device, dtype=dtype)
+
+        theta = positions * freqs.unsqueeze(0) + phases.unsqueeze(0)
+        sinp = torch.sin(theta)
+        cosp = torch.cos(theta)
+        feat = torch.cat([sinp, cosp], dim=-1)
+
+        if self.proj is not None:
+            feat = self.proj(feat)
+
+        return feat.unsqueeze(0)  # [1, L, d_model]

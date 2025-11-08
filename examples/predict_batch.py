@@ -97,20 +97,22 @@ def lstm_model() -> tuple[LSTMModel, optim.Optimizer, nn.Module]:
     return model, optimizer, criterion
 
 
-def transformer_model(attention_heads: int, pos_encoding: str | None = None) -> tuple[TransformerModel, optim.Optimizer, nn.Module]:
+def transformer_model(
+        attention_heads: int, pos_encoding: str | None = None
+    ) -> tuple[TransformerModel, optim.Optimizer, nn.Module]:
     """Initialize and return a Transformer model, optimizer, and loss function."""
     # Keep backward-compatible signature but allow optional positional encoding
     def _build_model(pos_encoding: str | None = None) -> TransformerModel:
-        kwargs: dict[str, object] = dict(
-            seq_input_dim=64,  # instead of max_seq_length + 2
-            vocab_size=run_config.get("transformer", {}).get("vocab_size", 64),
-            embedding_dim=run_config.get("transformer", {}).get("embedding_dim", 64),
-            hidden_dim=run_config.get("transformer", {}).get("hidden_dim", 128),
-            output_dim=run_config.get("transformer", {}).get("output_dim", 64),
-            attention_heads=attention_heads,
-            use_one_hot=True,
-            device=device,
-        )
+        kwargs: dict[str, Any] = {
+            "seq_input_dim": 64,  # instead of max_seq_length + 2
+            "vocab_size": run_config.get("transformer", {}).get("vocab_size", 64),
+            "embedding_dim": run_config.get("transformer", {}).get("embedding_dim", 64),
+            "hidden_dim": run_config.get("transformer", {}).get("hidden_dim", 128),
+            "output_dim": run_config.get("transformer", {}).get("output_dim", 64),
+            "attention_heads": attention_heads,
+            "use_one_hot": True,
+            "device": device,
+        }
         if pos_encoding is not None:
             # TransformerModel in this repo expects `pos_encoding_type` kwarg
             kwargs["pos_encoding_type"] = pos_encoding

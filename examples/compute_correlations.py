@@ -167,6 +167,7 @@ def compute_pair_cumsums(
     ref_incorrect_cs = np.cumsum(ref_incorrect_mask.astype(np.int64))
     t_when_r_incorrect_cs = np.cumsum(tested_correct_when_ref_incorrect_mask.astype(np.int64))
     similarity_cs = np.cumsum(eq_test_ref.astype(np.int64))
+    tested_correct_cs = np.cumsum(eq_test_base.astype(np.int64))
 
     return {
         "ref_correct": ref_correct_cs,
@@ -174,13 +175,18 @@ def compute_pair_cumsums(
         "ref_incorrect": ref_incorrect_cs,
         "tested_correct_when_ref_incorrect": t_when_r_incorrect_cs,
         "similarity_matches": similarity_cs,
+        "tested_correct": tested_correct_cs,
     }
 
 
 def sample_metrics_from_cumsums(
     cums: dict[str, np.ndarray], stride: int
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Given cumulative counts and a stride, return (t_points, corr, anticorr, sim) arrays."""
+    """
+    Given cumulative counts and a stride, return (t_points, corr, anticorr, sim) arrays.
+
+    Deprecated in favor of sample_metrics_with_horizon but kept for backward compatibility.
+    """
     n = len(cums["ref_correct"]) if cums else 0
     if n == 0:
         return np.array([]), np.array([]), np.array([]), np.array([])
@@ -203,6 +209,84 @@ def sample_metrics_from_cumsums(
         sim = similarity_matches / t_points
 
     return t_points, corr, anticorr, sim
+
+
+def sample_metrics_with_horizon(
+    cums: dict[str, np.ndarray], stride: int, horizon: str | int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Sample metrics at a given stride with optional sliding window horizon.
+
+    Returns (t_points, corr, anticorr, sim, acc).
+
+    - horizon == "INF" (or any case-insensitive variant) uses cumulative-from-start metrics.
+    - horizon as an int (e.g., 100, 500, 1000) computes metrics over the last N predictions.
+    """
+    n = len(cums.get("ref_correct", [])) if cums else 0
+    if n == 0:
+        return np.array([]), np.array([]), np.array([]), np.array([]), np.array([])
+
+    if stride <= 0:
+        stride = 100
+    t_points = np.arange(stride, n + 1, stride)
+    idxs = t_points - 1  # convert to 0-based inclusive index
+
+    # Prepare cumulative arrays and a zero-prepended variant for window diffs
+    def prep(cs: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        cs = cs.astype(np.int64)
+        return cs, np.concatenate(([0], cs))
+
+    ref_correct, ref_correct0 = prep(cums["ref_correct"])  # type: ignore[index]
+    both_correct, both_correct0 = prep(cums["both_correct"])  # type: ignore[index]
+    ref_incorrect, ref_incorrect0 = prep(cums["ref_incorrect"])  # type: ignore[index]
+    t_when_r_inc, t_when_r_inc0 = prep(cums["tested_correct_when_ref_incorrect"])  # type: ignore[index]
+    similarity_matches, similarity_matches0 = prep(cums["similarity_matches"])  # type: ignore[index]
+    tested_correct, tested_correct0 = prep(cums["tested_correct"])  # type: ignore[index]
+
+    if isinstance(horizon, str) and horizon.upper() == "INF":
+        # cumulative-from-start behavior
+        ref_correct_vals = ref_correct[idxs]
+        both_correct_vals = both_correct[idxs]
+        ref_incorrect_vals = ref_incorrect[idxs]
+        t_when_r_inc_vals = t_when_r_inc[idxs]
+        similarity_vals = similarity_matches[idxs]
+        tested_correct_vals = tested_correct[idxs]
+
+        denom_steps = t_points.astype(float)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            corr = np.where(ref_correct_vals > 0, both_correct_vals / ref_correct_vals, np.nan)
+            anticorr = np.where(ref_incorrect_vals > 0, t_when_r_inc_vals / ref_incorrect_vals, np.nan)
+            sim = similarity_vals / denom_steps
+            acc = tested_correct_vals / denom_steps
+        return t_points, corr, anticorr, sim, acc
+
+    # sliding window with integer horizon
+    try:
+        win = int(horizon)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        win = 100
+
+    # Convert idxs to 1-based for use with zero-prepended arrays
+    idxs1 = idxs + 1
+    prev_idxs1 = np.clip(idxs1 - win, 0, None)
+
+    # Window sums by subtracting cumulative at (t-win)
+    ref_correct_w = ref_correct0[idxs1] - ref_correct0[prev_idxs1]
+    both_correct_w = both_correct0[idxs1] - both_correct0[prev_idxs1]
+    ref_incorrect_w = ref_incorrect0[idxs1] - ref_incorrect0[prev_idxs1]
+    t_when_r_inc_w = t_when_r_inc0[idxs1] - t_when_r_inc0[prev_idxs1]
+    similarity_w = similarity_matches0[idxs1] - similarity_matches0[prev_idxs1]
+    tested_correct_w = tested_correct0[idxs1] - tested_correct0[prev_idxs1]
+
+    # Effective window length near the start grows from 1..win
+    eff_win = np.minimum(t_points, win).astype(float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        corr = np.where(ref_correct_w > 0, both_correct_w / ref_correct_w, np.nan)
+        anticorr = np.where(ref_incorrect_w > 0, t_when_r_inc_w / ref_incorrect_w, np.nan)
+        sim = similarity_w / eff_win
+        acc = tested_correct_w / eff_win
+
+    return t_points, corr, anticorr, sim, acc
 
 
 def build_app(results_root: Path, run_dir: Path) -> Dash:  # noqa: C901, PLR0915
@@ -278,6 +362,20 @@ def build_app(results_root: Path, run_dir: Path) -> Dash:  # noqa: C901, PLR0915
                             value=100,
                         ),
                     ], style={"minWidth": "360px", "maxWidth": "520px"}),
+                    html.Div([
+                        html.Label("Metric horizon"),
+                        dcc.Dropdown(
+                            id="horizon",
+                            options=[
+                                {"label": "INF (cumulative)", "value": "INF"},
+                                {"label": "100 (last 100)", "value": 100},
+                                {"label": "500 (last 500)", "value": 500},
+                                {"label": "1000 (last 1000)", "value": 1000},
+                            ],
+                            value="INF",
+                            clearable=False,
+                        ),
+                    ], style={"minWidth": "240px"}),
                 ],
             ),
             html.Hr(),
@@ -292,6 +390,10 @@ def build_app(results_root: Path, run_dir: Path) -> Dash:  # noqa: C901, PLR0915
             html.Div([
                 html.H3("Similarity (tested vs reference)"),
                 dcc.Graph(id="graph-sim"),
+            ]),
+            html.Div([
+                html.H3("Accuracy (tested vs actual)"),
+                dcc.Graph(id="graph-acc"),
             ]),
             # Hidden stores for sequences to use in callbacks
             dcc.Store(id="store-actual", data=list(actual_tuple)),
@@ -337,23 +439,27 @@ def build_app(results_root: Path, run_dir: Path) -> Dash:  # noqa: C901, PLR0915
             print(f"Warning: failed to switch experiment to {experiment_path}: {exc}")
             return no_update, no_update, no_update, no_update, no_update, no_update, no_update
 
+    # Horizon selector added: INF for cumulative, or a numeric window (e.g., 100, 500, 1000)
     @app.callback(
         Output("graph-corr", "figure"),
         Output("graph-anticorr", "figure"),
         Output("graph-sim", "figure"),
+        Output("graph-acc", "figure"),
         Input("tested-model", "value"),
         Input("reference-models", "value"),
         Input("stride", "value"),
         Input("store-actual", "data"),
         Input("store-models", "data"),
+        Input("horizon", "value"),
     )
-    def update_graphs(
+    def update_graphs(  # noqa: PLR0913
         tested: str,
         references: list[str],
         stride: int,
         actual_data: list[str],
         models_data: dict[str, list[str]],
-    ) -> tuple[go.Figure, go.Figure, go.Figure]:
+        horizon_value: str | int,
+    ) -> tuple[go.Figure, go.Figure, go.Figure, go.Figure]:
         # Repack for cache lookup
         actual_t = tuple(actual_data)
         models_t = tuple((k, tuple(v)) for k, v in models_data.items())
@@ -367,13 +473,14 @@ def build_app(results_root: Path, run_dir: Path) -> Dash:  # noqa: C901, PLR0915
         corr_traces = []
         anticorr_traces = []
         sim_traces = []
+        acc_traces = []
 
         for ref in references:
             if ref == tested:
                 continue
             try:
                 cums = compute_pair_cumsums(tested, ref, actual=actual_t, models=models_t)
-                t_points, corr, anticorr, sim = sample_metrics_from_cumsums(cums, int(stride))
+                t_points, corr, anticorr, sim, _ = sample_metrics_with_horizon(cums, int(stride), horizon_value)
             except (KeyError, ValueError) as exc:
                 # Skip problematic pairs but log to console
                 print(f"Warning: failed to compute series for tested={tested} ref={ref}: {exc}")
@@ -382,6 +489,15 @@ def build_app(results_root: Path, run_dir: Path) -> Dash:  # noqa: C901, PLR0915
             corr_traces.append(go.Scatter(x=t_points, y=corr, mode="lines", name=ref))
             anticorr_traces.append(go.Scatter(x=t_points, y=anticorr, mode="lines", name=ref))
             sim_traces.append(go.Scatter(x=t_points, y=sim, mode="lines", name=ref))
+
+        # Accuracy is independent of reference; compute once against any cums based on tested vs actual
+        # Use tested-vs-actual by calling with reference="actual" sentinel inside helper
+        try:
+            cums_acc = compute_pair_cumsums(tested, "actual", actual=actual_t, models=models_t)
+            t_points_acc, _, _, _, acc_vals = sample_metrics_with_horizon(cums_acc, int(stride), horizon_value)
+            acc_traces.append(go.Scatter(x=t_points_acc, y=acc_vals, mode="lines", name="accuracy"))
+        except Exception as exc:  # noqa: BLE001 - keep UI responsive
+            print(f"Warning: failed to compute accuracy for tested={tested}: {exc}")
 
         layout_common = {
             "xaxis": {"title": "Iteration"},
@@ -397,7 +513,10 @@ def build_app(results_root: Path, run_dir: Path) -> Dash:  # noqa: C901, PLR0915
         fig_sim = go.Figure(data=sim_traces, layout=go.Layout(**layout_common))
         fig_sim.update_layout(title=f"Similarity vs references (tested: {tested})")
 
-        return fig_corr, fig_anticorr, fig_sim
+        fig_acc = go.Figure(data=acc_traces, layout=go.Layout(**layout_common))
+        fig_acc.update_layout(title=f"Accuracy (tested vs actual): {tested}")
+
+        return fig_corr, fig_anticorr, fig_sim, fig_acc
 
     # Store tuples for cache key usage inside callbacks via closure variables
     return app

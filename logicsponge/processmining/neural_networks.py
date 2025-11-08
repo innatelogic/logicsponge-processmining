@@ -12,6 +12,7 @@ from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
 
 from logicsponge.processmining.encodings import (
+    BackwardRelativePositionalEncoding,
     LearnableRelativePositionalEncoding,
     PeriodicPositionalEncoding,
     SharpPeriodicRelativeEncoding,
@@ -389,7 +390,7 @@ class TransformerModel(nn.Module):
         attention_heads: int = 4,
         use_one_hot: bool = False,
         device: torch.device | None = None,
-        pos_encoding_type: str = "periodic",  # 'sinusoidal', 'periodic', or 'sharp_relative'
+        pos_encoding_type: str = "learnable_backward_relative",
         sharp_mode: str = "square",
     ) -> None:
         """
@@ -407,8 +408,8 @@ class TransformerModel(nn.Module):
             use_one_hot (bool): Whether to use one-hot encoding instead of embeddings.
             device (torch.device | None): Device to run the model on (CPU or GPU).
             pos_encoding_type (str): Type of positional encoding to use.
-                Options: 'sinusoidal', 'periodic', 'sharp_relative'.
-            sharp_mode (str): Mode for sharp periodic relative encoding. Options: 'square', 'sawtooth', 'quantized'.
+                Options: "sinusoidal", "learnable_backward_relative", "periodic", "sharp_relative", "learnable_relative"
+            sharp_mode (str): Mode for sharp periodic relative encoding. Options: "square", "sawtooth", "quantized".
 
         """
         super().__init__()
@@ -432,12 +433,14 @@ class TransformerModel(nn.Module):
         # Select positional encoder
         if pos_encoding_type == "sinusoidal":
             self.pos_encoder = SinusoidalPositionalEncoding(d_model)
+        elif pos_encoding_type == "learnable_backward_relative":
+            self.pos_encoder = BackwardRelativePositionalEncoding(d_model=d_model)
+        elif pos_encoding_type == "learnable_relative":
+            self.pos_encoder = LearnableRelativePositionalEncoding(d_model)
         elif pos_encoding_type == "periodic":
             self.pos_encoder = PeriodicPositionalEncoding(d_model)
         elif pos_encoding_type == "sharp_relative":
             self.pos_encoder = SharpPeriodicRelativeEncoding(d_model, mode=sharp_mode)
-        elif pos_encoding_type == "learnable_relative":
-            self.pos_encoder = LearnableRelativePositionalEncoding(d_model)
         else:
             msg = f"Unknown pos_encoding_type: {pos_encoding_type}"
             raise ValueError(msg)
@@ -1180,7 +1183,7 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
     return model
 
 
-def evaluate_rnn(  # noqa: PLR0913, PLR0915
+def evaluate_rnn(  # noqa: C901, PLR0913, PLR0915
     model: LSTMModel | TransformerModel,
     sequences: torch.Tensor,
     *,

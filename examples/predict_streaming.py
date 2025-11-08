@@ -504,6 +504,21 @@ transformer = StreamingActivityPredictor(
 LSTM_MODELS: dict[str, StreamingActivityPredictor] = {}
 GRU_MODELS: dict[str, StreamingActivityPredictor] = {}
 TRANSFORMER_MODELS: dict[str, StreamingActivityPredictor] = {}
+
+# Positional encodings available for transformer variants. We build both
+# windowed (inside the NN_WINDOW_RANGE loop) and base (non-windowed)
+# variants using this list.
+POS_ENCODINGS = [
+    # ("sinusoidal", None),
+    # ("periodic", None),
+    # ("sharp_relative", "square"),
+    ("learnable_backward_relative", None),
+    # ("learnable_relative", None),
+]
+
+TRANSFORMER_POSENC_MODELS: dict[str, StreamingActivityPredictor] = {}
+TRANSFORMER_POSENC_NAMES: list[str] = []
+
 LSTM_WIN_NAMES = [f"lstm_win{w}" for w in NN_WINDOW_RANGE]
 GRU_WIN_NAMES = [f"gru_win{w}" for w in NN_WINDOW_RANGE]
 TRANSFORMER_WIN_NAMES = [f"transformer_win{w}" for w in NN_WINDOW_RANGE]
@@ -547,7 +562,39 @@ for w in NN_WINDOW_RANGE:
         )
     )
 
-    # Transformer windowed variant
+
+    # Create windowed transformer variants for every positional encoding
+    for name_enc, _ in POS_ENCODINGS:
+        model_name = f"transformer_pos_{name_enc}_win{w}"
+        model_tr_pe_w = TransformerModel(
+            seq_input_dim=transformer_cfg.get("seq_input_dim", 512),
+            vocab_size=transformer_cfg.get("vocab_size", vocab_size),
+            embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
+            hidden_dim=hidden_dim_tr,
+            output_dim=output_dim_tr,
+            attention_heads=1,
+            use_one_hot=True,
+            pos_encoding_type=name_enc,
+        )
+        criterion_pe_w = nn.CrossEntropyLoss()
+        optimizer_pe_w = optim.Adam(model_tr_pe_w.parameters(), lr=transf_cfg.get("lr", 0.0001))
+        TRANSFORMER_POSENC_MODELS[model_name] = StreamingActivityPredictor(
+            strategy=WindowedNeuralNetworkMiner(
+                model=model_tr_pe_w,
+                criterion=criterion_pe_w,
+                optimizer=optimizer_pe_w,
+                batch_size=transf_cfg.get("batch_size", 8),
+                sequence_buffer_length=w,
+                config=config,
+            )
+        )
+        TRANSFORMER_POSENC_NAMES.append(model_name)
+
+    # (windowed default transformer handled below once per window)
+
+
+
+    # Transformer windowed variant (default positional encoding)
     model_tr_w = TransformerModel(
         seq_input_dim=transformer_cfg.get("seq_input_dim", 512),
         vocab_size=vocab_size,
@@ -556,6 +603,7 @@ for w in NN_WINDOW_RANGE:
         output_dim=output_dim,
         attention_heads=1,
         use_one_hot=True,
+        pos_encoding_type="learnable_relative",
     )
     criterion_t = nn.CrossEntropyLoss()
     optimizer_t = optim.Adam(model_tr_w.parameters(), lr=transf_cfg.get("lr", 0.0001))
@@ -569,7 +617,6 @@ for w in NN_WINDOW_RANGE:
             config=config,
         )
     )
-
 
 
 ATTENTION_HEADS = [1, 2, 4]
@@ -604,25 +651,9 @@ for heads in ATTENTION_HEADS:
         )
     )
     TRANSFORMER_HEAD_NAMES.append(name)
-# ------------------------------------------------------------------
-# Create transformer variants using different positional encodings
-# ------------------------------------------------------------------
-POS_ENCODINGS = [
-    # ("sinusoidal", None),
-    # ("periodic", None),
-    # ("sharp_relative", "square"),
-    ("learnable_relative", None),
-]
-
-# Also include additional sharp modes for sharper comparisons
-SHARP_MODES = [] #["square", "sawtooth", "quantized"]
-
-TRANSFORMER_POSENC_MODELS: dict[str, StreamingActivityPredictor] = {}
-TRANSFORMER_POSENC_NAMES: list[str] = []
-
-# Build base variants: sinusoidal and periodic
+# POS_ENCODINGS and TRANSFORMER_POSENC_MODELS / NAMES are defined above.
+# Build base (non-windowed) variants below using the shared POS_ENCODINGS list.
 for name_enc, _ in POS_ENCODINGS:
-    # for sharp_relative we'll build specialized ones below
     if name_enc == "sharp_relative":
         continue
     model_name = f"transformer_pos_{name_enc}"
@@ -648,92 +679,6 @@ for name_enc, _ in POS_ENCODINGS:
         )
     )
     TRANSFORMER_POSENC_NAMES.append(model_name)
-
-# Build sharp_relative variants for the different sharp modes
-for s_mode in SHARP_MODES:
-    model_name = f"transformer_pos_sharp_{s_mode}"
-    model_tr_sharp = TransformerModel(
-        seq_input_dim=transformer_cfg.get("seq_input_dim", 512),
-        vocab_size=transformer_cfg.get("vocab_size", vocab_size),
-        embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
-        hidden_dim=hidden_dim_tr,
-        output_dim=output_dim_tr,
-        attention_heads=1,
-        use_one_hot=True,
-        pos_encoding_type="sharp_relative",
-        sharp_mode=s_mode,
-    )
-    criterion_sh = nn.CrossEntropyLoss()
-    optimizer_sh = optim.Adam(model_tr_sharp.parameters(), lr=transf_cfg.get("lr", 0.0001))
-    TRANSFORMER_POSENC_MODELS[model_name] = StreamingActivityPredictor(
-        strategy=NeuralNetworkMiner(
-            model=model_tr_sharp,
-            criterion=criterion_sh,
-            optimizer=optimizer_sh,
-            batch_size=transf_cfg.get("batch_size", 8),
-            config=config,
-        )
-    )
-    TRANSFORMER_POSENC_NAMES.append(model_name)
-
-# Build windowed variants for each positional encoding and each window size
-for w in NN_WINDOW_RANGE:
-    # sinusoidal and periodic windowed variants
-    for name_enc, _ in POS_ENCODINGS:
-        if name_enc == "sharp_relative":
-            continue
-        model_name = f"transformer_pos_{name_enc}_win{w}"
-        model_tr_pe_w = TransformerModel(
-            seq_input_dim=transformer_cfg.get("seq_input_dim", 512),
-            vocab_size=transformer_cfg.get("vocab_size", vocab_size),
-            embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
-            hidden_dim=hidden_dim_tr,
-            output_dim=output_dim_tr,
-            attention_heads=1,
-            use_one_hot=True,
-            pos_encoding_type=name_enc,
-        )
-        criterion_pe_w = nn.CrossEntropyLoss()
-        optimizer_pe_w = optim.Adam(model_tr_pe_w.parameters(), lr=transf_cfg.get("lr", 0.0001))
-        TRANSFORMER_POSENC_MODELS[model_name] = StreamingActivityPredictor(
-            strategy=WindowedNeuralNetworkMiner(
-                model=model_tr_pe_w,
-                criterion=criterion_pe_w,
-                optimizer=optimizer_pe_w,
-                batch_size=transf_cfg.get("batch_size", 8),
-                sequence_buffer_length=w,
-                config=config,
-            )
-        )
-        TRANSFORMER_POSENC_NAMES.append(model_name)
-
-    # sharp_relative windowed variants for each sharp mode
-    for s_mode in SHARP_MODES:
-        model_name = f"transformer_pos_sharp_{s_mode}_win{w}"
-        model_tr_sharp_w = TransformerModel(
-            seq_input_dim=transformer_cfg.get("seq_input_dim", 512),
-            vocab_size=transformer_cfg.get("vocab_size", vocab_size),
-            embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
-            hidden_dim=hidden_dim_tr,
-            output_dim=output_dim_tr,
-            attention_heads=1,
-            use_one_hot=True,
-            pos_encoding_type="sharp_relative",
-            sharp_mode=s_mode,
-        )
-        criterion_sh_w = nn.CrossEntropyLoss()
-        optimizer_sh_w = optim.Adam(model_tr_sharp_w.parameters(), lr=transf_cfg.get("lr", 0.0001))
-        TRANSFORMER_POSENC_MODELS[model_name] = StreamingActivityPredictor(
-            strategy=WindowedNeuralNetworkMiner(
-                model=model_tr_sharp_w,
-                criterion=criterion_sh_w,
-                optimizer=optimizer_sh_w,
-                batch_size=transf_cfg.get("batch_size", 8),
-                sequence_buffer_length=w,
-                config=config,
-            )
-        )
-        TRANSFORMER_POSENC_NAMES.append(model_name)
 
 # RL (QNetwork) models built in a loop
 RL_MODELS: dict[str, StreamingActivityPredictor] = {}
