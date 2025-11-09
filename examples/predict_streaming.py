@@ -430,7 +430,7 @@ num_layers = lstm_cfg.get("num_layers", 2)
 model_lstm = LSTMModel(
     vocab_size,
     embedding_dim=embedding_dim, hidden_dim=hidden_dim, num_layers=num_layers, device=device, use_one_hot=True
-)
+).to(device)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model_lstm.parameters(), lr=nn_cfg.get("lr", 0.001))
 
@@ -454,7 +454,7 @@ model_gru = GRUModel(
     hidden_dim=gru_hidden_dim,
     device=device,
     use_one_hot=True,
-)
+).to(device)
 criterion_gru = nn.CrossEntropyLoss()
 optimizer_gru = optim.Adam(model_gru.parameters(), lr=nn_cfg.get("lr", 0.001))
 
@@ -478,7 +478,8 @@ model_transformer = TransformerModel(
     hidden_dim=hidden_dim_tr,
     attention_heads=1,
     use_one_hot=True,
-)
+    device=device,
+).to(device)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model_transformer.parameters(), lr=transf_cfg.get("lr", 0.0001))
 
@@ -524,7 +525,7 @@ for w in NN_WINDOW_RANGE:
     # LSTM windowed variant
     model_lstm_w = LSTMModel(
         vocab_size, embedding_dim=embedding_dim, hidden_dim=hidden_dim, device=device, use_one_hot=True
-    )
+    ).to(device)
     criterion_l = nn.CrossEntropyLoss()
     optimizer_l = optim.Adam(model_lstm_w.parameters(), lr=nn_cfg.get("lr", 0.01))
     LSTM_MODELS[f"lstm_win{w}"] = StreamingActivityPredictor(
@@ -545,7 +546,7 @@ for w in NN_WINDOW_RANGE:
         hidden_dim=hidden_dim,
         device=device,
         use_one_hot=True,
-    )
+    ).to(device)
     criterion_g = nn.CrossEntropyLoss()
     optimizer_g = optim.Adam(model_gru_w.parameters(), lr=nn_cfg.get("lr", 0.001))
     GRU_MODELS[f"gru_win{w}"] = StreamingActivityPredictor(
@@ -570,7 +571,8 @@ for w in NN_WINDOW_RANGE:
             attention_heads=1,
             use_one_hot=True,
             pos_encoding_type=name_enc,
-        )
+            device=device,
+        ).to(device)
         criterion_pe_w = nn.CrossEntropyLoss()
         optimizer_pe_w = optim.Adam(model_tr_pe_w.parameters(), lr=transf_cfg.get("lr", 0.0001))
         TRANSFORMER_POSENC_MODELS[model_name] = StreamingActivityPredictor(
@@ -597,7 +599,8 @@ for w in NN_WINDOW_RANGE:
         attention_heads=1,
         use_one_hot=True,
         pos_encoding_type="learnable_backward_relative",
-    )
+        device=device,
+    ).to(device)
 
     criterion_t = nn.CrossEntropyLoss()
     optimizer_t = optim.Adam(model_tr_w.parameters(), lr=transf_cfg.get("lr", 0.001))
@@ -628,7 +631,8 @@ for heads in ATTENTION_HEADS:
         hidden_dim=hidden_dim_tr,
         attention_heads=heads,
         use_one_hot=True,
-    )
+        device=device,
+    ).to(device)
     criterion_h = nn.CrossEntropyLoss()
     optimizer_h = optim.Adam(model_tr_h.parameters(), lr=transf_cfg.get("lr", 0.0001))
 
@@ -656,7 +660,8 @@ for name_enc, _ in POS_ENCODINGS:
         attention_heads=1,
         use_one_hot=True,
         pos_encoding_type=name_enc,
-    )
+        device=device,
+    ).to(device)
     criterion_pe = nn.CrossEntropyLoss()
     optimizer_pe = optim.Adam(model_tr_pe.parameters(), lr=transf_cfg.get("lr", 0.0001))
     TRANSFORMER_POSENC_MODELS[model_name] = StreamingActivityPredictor(
