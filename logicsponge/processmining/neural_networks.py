@@ -23,6 +23,25 @@ from logicsponge.processmining.types import ActivityName, Event
 
 logger = logging.getLogger(__name__)
 
+# Global default: use left-padding for variable-length sequences
+LEFT_PAD_DEFAULT = True
+
+def _left_pad_stack(seqs: list[torch.Tensor], *, pad_value: int = 0, target_len: int | None = None) -> torch.Tensor:
+    """Left-pad 1D LongTensors to a common length and stack as [B, L].
+
+    If target_len is None, pad to the maximum length found in seqs. Assumes all seqs have dtype Long.
+    """
+    if not seqs:
+        return torch.zeros((0, 1), dtype=torch.long)
+    max_len = target_len if target_len is not None else max(int(s.numel()) for s in seqs)
+    out = torch.full((len(seqs), max_len), pad_value, dtype=seqs[0].dtype)
+    for i, s in enumerate(seqs):
+        l = int(s.numel())
+        if l == 0:
+            continue
+        out[i, max_len - l : max_len] = s[-max_len:]
+    return out
+
 
 # ============================================================
 # Models (RNN and LSTM)
@@ -931,7 +950,7 @@ class PreprocessData:
             self.current_idx += 1
         return self.activity_to_idx[activity]
 
-    def preprocess_data(self, dataset: list[list[Event]]) -> torch.Tensor:
+    def preprocess_data(self, dataset: list[list[Event]], *, left_pad: bool = LEFT_PAD_DEFAULT) -> torch.Tensor:
         """
         Preprocess the dataset of sequences of events.
 
@@ -946,13 +965,19 @@ class PreprocessData:
             padded to the maximum sequence length in the dataset. Padding is done with 0.
 
         """
-        processed_sequences = []
+        processed_sequences: list[torch.Tensor] = []
 
         for sequence in dataset:
             index_sequence = [self.get_activity_index(event["activity"]) for event in sequence]  # Convert to indices
             processed_sequences.append(torch.tensor(index_sequence, dtype=torch.long))
 
-        # Pad sequences, using 0 as the padding value
+        if not processed_sequences:
+            return torch.zeros((0, 1), dtype=torch.long)
+
+        if left_pad:
+            max_len = max(int(t.numel()) for t in processed_sequences)
+            return _left_pad_stack(processed_sequences, target_len=max_len)
+        # Right-padding fallback for completeness
         return pad_sequence(processed_sequences, batch_first=True, padding_value=0)
 
 
@@ -997,7 +1022,8 @@ def _sample_prefix_batch(batch_sequences: torch.Tensor) -> tuple[torch.Tensor, t
             torch.zeros(0, dtype=torch.long, device=device),
         )
 
-    x_inputs = pad_sequence(inputs, batch_first=True, padding_value=0).to(device)
+    # Left-pad sampled prefixes to align ends (next-token position alignment)
+    x_inputs = _left_pad_stack(inputs).to(device)
     y_targets = torch.tensor(targets, dtype=torch.long, device=device)
     return x_inputs, y_targets
 
@@ -1070,7 +1096,7 @@ def train_rl(  # noqa: PLR0913, PLR0915, C901
     def collate(batch: list[tuple[torch.Tensor, int]]) -> tuple[torch.Tensor, torch.Tensor]:
         xs = [b[0] for b in batch]
         ys = torch.tensor([b[1] for b in batch], dtype=torch.long)
-        x_pad = pad_sequence(xs, batch_first=True, padding_value=0)
+        x_pad = _left_pad_stack(xs)
         return x_pad, ys
 
     dataset = PrefixDataset(prefixes, targets)
@@ -1207,8 +1233,14 @@ def evaluate_rl(  # noqa: C901, PLR0912
             # iterate over prefixes
             for k in range(1, valid_len):
                 prefix = seq[:k].unsqueeze(0)  # [1, k]
-                if window_size is not None and prefix.shape[1] > window_size:
-                    prefix = prefix[:, -window_size:]
+                if window_size is not None:
+                    if prefix.shape[1] > window_size:
+                        prefix = prefix[:, -window_size:]
+                    elif prefix.shape[1] < window_size:
+                        # Left-pad to align the last token positions
+                        pad_len = window_size - prefix.shape[1]
+                        pad = torch.zeros((1, pad_len), dtype=prefix.dtype, device=prefix.device)
+                        prefix = torch.cat([pad, prefix], dim=1)
                 # Ensure prefix is on the same device as the model to avoid
                 # "Expected all tensors to be on the same device" runtime error.
                 if model_device is not None:
@@ -1281,9 +1313,10 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
     optimizer: torch.optim.Optimizer,
     batch_size: int,
     epochs: int = 10,
-    patience: int = 24,
+    patience: int = 6,
     *,
     window_size: int | None = None,
+    left_pad: bool = LEFT_PAD_DEFAULT,
 ) -> LSTMModel | TransformerModel:
     """
     Train the RNN model on the training set and evaluate on the validation set.
@@ -1357,8 +1390,13 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
                         pbar.update(1)
                         continue
 
-                    x_batch = pad_sequence(pref_x, batch_first=True, padding_value=0)
-                    y_batch = pad_sequence(pref_y, batch_first=True, padding_value=0)
+                    # Crop-first done above; now left-pad to fixed window size for batch alignment
+                    if left_pad:
+                        x_batch = _left_pad_stack(pref_x, target_len=window_size)
+                        y_batch = _left_pad_stack(pref_y, target_len=window_size)
+                    else:
+                        x_batch = pad_sequence(pref_x, batch_first=True, padding_value=0)
+                        y_batch = pad_sequence(pref_y, batch_first=True, padding_value=0)
                 else:
                     x_batch = x_full
                     y_batch = y_full
@@ -1418,9 +1456,9 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
         # (one prediction per prefix). For non-windowed runs, keep token-level validation.
         # updated unpacking to accept extra returned predicted-vector (ignored here)
         if window_size is not None:
-            stats, _, _, _ = evaluate_rnn(model, val_sequences, window_size=window_size, prefix_mode=True)
+            stats, _, _, _ = evaluate_rnn(model, val_sequences, window_size=window_size, prefix_mode=True, left_pad=left_pad)
         else:
-            stats, _, _, _ = evaluate_rnn(model, val_sequences, window_size=window_size)
+            stats, _, _, _ = evaluate_rnn(model, val_sequences, window_size=window_size, left_pad=left_pad)
         val_accuracy = stats["accuracy"]
 
         if not isinstance(val_accuracy, float):
@@ -1467,6 +1505,9 @@ def evaluate_rnn(  # noqa: C901, PLR0913, PLR0915
     idx_to_activity: dict[int, ActivityName] | None = None,
     window_size: int | None = None,
     prefix_mode: bool = False,
+    left_pad: bool = LEFT_PAD_DEFAULT,
+    start_idx: int | None = None,
+    exclude_start_token: bool = True,
 ) -> tuple[dict[str, float | list[int]], list[float], float, list[str]]:
     """
     Evaluate the LSTM/Transformer model on a dataset (train, test, or validation).
@@ -1515,8 +1556,13 @@ def evaluate_rnn(  # noqa: C901, PLR0913, PLR0915
                 # iterate prefixes
                 for k in range(1, valid_len):
                     prefix = seq[:k].unsqueeze(0)
-                    if window_size is not None and prefix.shape[1] > window_size:
-                        prefix = prefix[:, -window_size:]
+                    if window_size is not None:
+                        if prefix.shape[1] > window_size:
+                            prefix = prefix[:, -window_size:]
+                        elif left_pad and prefix.shape[1] < window_size:
+                            pad_len = window_size - prefix.shape[1]
+                            pad = torch.zeros((1, pad_len), dtype=prefix.dtype, device=prefix.device)
+                            prefix = torch.cat([pad, prefix], dim=1)
                     if model_device is not None:
                         prefix = prefix.to(device=model_device)
 
@@ -1558,13 +1604,19 @@ def evaluate_rnn(  # noqa: C901, PLR0913, PLR0915
                 y_target_cpu = single_sequence_trace[1:]
 
                 # If windowing is requested, keep only the last `window_size` NON-PADDING
-                # target positions.
+                # target positions, then left-pad if shorter.
                 if window_size is not None:
                     eff_len = int((y_target_cpu != 0).sum().item())
                     if eff_len > 0:
                         start = max(0, eff_len - window_size)
                         x_input_cpu = x_input_cpu[start:eff_len]
                         y_target_cpu = y_target_cpu[start:eff_len]
+                        if left_pad:
+                            cur_len = int(y_target_cpu.numel())
+                            if cur_len < window_size:
+                                pad_len = window_size - cur_len
+                                x_input_cpu = torch.cat([torch.zeros(pad_len, dtype=x_input_cpu.dtype), x_input_cpu], dim=0)
+                                y_target_cpu = torch.cat([torch.zeros(pad_len, dtype=y_target_cpu.dtype), y_target_cpu], dim=0)
 
                 x_input = x_input_cpu.unsqueeze(0)
                 y_target = y_target_cpu.unsqueeze(0)
@@ -1578,15 +1630,32 @@ def evaluate_rnn(  # noqa: C901, PLR0913, PLR0915
                     outputs = outputs[0]
 
                 # Flatten for comparison
-                predicted_indices = torch.argmax(outputs, dim=-1)
-                predicted_indices = predicted_indices.view(-1)
+                predicted_indices = torch.argmax(outputs, dim=-1).view(-1)
                 y_target = y_target.view(-1)
 
-                # Create a mask to ignore padding
-                mask = y_target != 0  # Mask for non-padding targets
+                # Base mask: non-padding tokens
+                base_mask = y_target != 0
+                # Optionally exclude the START token position to align with `actual_vector`
+                if exclude_start_token and start_idx is not None:
+                    # Identify first non-padding position (potential START)
+                    # We exclude ONLY that single position if it matches start_idx
+                    first_non_pad_pos = None
+                    for pos in range(y_target.numel()):
+                        if int(y_target[pos].item()) != 0:
+                            first_non_pad_pos = pos
+                            break
+                    if first_non_pad_pos is not None and int(y_target[first_non_pad_pos].item()) == start_idx:
+                        # Build refined mask excluding this start position
+                        mask = base_mask.clone()
+                        mask[first_non_pad_pos] = False
+                    else:
+                        mask = base_mask
+                else:
+                    mask = base_mask
+
                 masked_targets = y_target[mask]
 
-                # Save predicted values for non-padding positions, mapped to activity names
+                # Save predicted values for masked positions, mapped to activity names
                 if mask.sum().item() > 0:
                     masked_predicted = predicted_indices[mask].cpu().tolist()
                     if idx_to_activity is not None:
@@ -1597,7 +1666,7 @@ def evaluate_rnn(  # noqa: C901, PLR0913, PLR0915
 
                 # Apply the mask and count correct predictions
                 correct_predictions += (predicted_indices[mask] == masked_targets).sum().item()
-                total_predictions += mask.sum().item()  # Count non-padding tokens
+                total_predictions += int(mask.sum().item())  # Count included tokens (excluding START when requested)
 
                 pause_start_time = time.time()
 
@@ -1612,12 +1681,12 @@ def evaluate_rnn(  # noqa: C901, PLR0913, PLR0915
                 masked_log_probs = log_probs[mask]
                 masked_top_k = top_k_indices[mask]
 
-                # Count correct predictions for each k
+                # Count correct predictions for each k (respect the same mask exclusion)
                 for k in range(max_k):
                     top_k_preds = masked_top_k[:, : (k + 1)]
                     expanded_targets = masked_targets.unsqueeze(1).expand_as(top_k_preds)
-                    top_k_correct = (top_k_preds == expanded_targets).any(dim=1).sum().item()
-                    top_k_correct_preds[k] += int(top_k_correct)
+                    top_k_correct_val = (top_k_preds == expanded_targets).any(dim=1).sum().item()
+                    top_k_correct_preds[k] += int(top_k_correct_val)
 
                 # NLL for perplexity
                 token_log_probs = masked_log_probs[torch.arange(len(masked_targets)), masked_targets]

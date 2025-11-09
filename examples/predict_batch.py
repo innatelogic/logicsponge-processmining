@@ -133,6 +133,7 @@ def process_neural_model(  # noqa: PLR0913
     epochs: int = 20,
     *,
     window_size: int | None = None,
+    left_pad: bool = True,
 ) -> None:
     """
     Train and evaluate a NN model.
@@ -178,6 +179,7 @@ def process_neural_model(  # noqa: PLR0913
         batch_size=run_config.get("nn", {}).get("batch_size", 8),
         epochs=epochs,
         window_size=window_size,
+        left_pad=left_pad,
     )
     end_time = time.time()
     training_time = (end_time - start_time) * SEC_TO_MICRO / (TRAIN_EVENTS + VAL_EVENTS)
@@ -186,12 +188,17 @@ def process_neural_model(  # noqa: PLR0913
     # (one prediction per prefix), so that the resulting flattened prediction vector
     # aligns with the baseline `actual` vector and with how RL/qlearning is evaluated.
     if window_size is None:
+        # Exclude START token prediction to align with baseline actual_vector (which has no START)
+        start_idx = nn_processor.activity_to_idx.get(start_symbol) if start_symbol in nn_processor.activity_to_idx else None
         stats, perplexities, eval_time, prediction_vector = evaluate_rnn(
             model,
             nn_test_set_transformed,
             max_k=config["top_k"],
             idx_to_activity=nn_processor.idx_to_activity,
             window_size=None,
+            left_pad=left_pad,
+            start_idx=start_idx,
+            exclude_start_token=True,
         )
     else:
         # Refactored: use helper preserving original behavior
@@ -201,6 +208,7 @@ def process_neural_model(  # noqa: PLR0913
             idx_to_activity=nn_processor.idx_to_activity,
             max_k=config["top_k"],
             window_size=window_size,
+            left_pad=left_pad,
         )
 
     # Store neural model prediction vector in global memory under display name
@@ -865,6 +873,7 @@ for iteration in range(N_ITERATIONS):
                         nn_test_set_transformed=nn_test_set_transformed,
                         epochs=default_run_config.get("nn", {}).get("epochs", 20),
                         window_size=w,
+                        left_pad=True,
                     )
             # After NN evaluation in this iteration, print a short summary of NN entries
             for nn_name in ("LSTM", "transformer", "transformer_2heads"):

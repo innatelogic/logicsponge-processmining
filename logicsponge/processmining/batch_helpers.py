@@ -14,6 +14,19 @@ import numpy as np
 import pandas as pd
 import torch
 
+# Global default for left-padding behavior (align sequence ends)
+LEFT_PAD_DEFAULT = True
+
+def _left_pad_window(prefix: torch.Tensor, window_size: int) -> torch.Tensor:
+    """Crop prefix to last window_size tokens then left-pad if shorter."""
+    if prefix.shape[1] > window_size:
+        return prefix[:, -window_size:]
+    if prefix.shape[1] < window_size:
+        pad_len = window_size - prefix.shape[1]
+        pad = torch.zeros((prefix.shape[0], pad_len), dtype=prefix.dtype, device=prefix.device)
+        return torch.cat([pad, prefix], dim=1)
+    return prefix
+
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
 from logicsponge.processmining.miners import BasicMiner, Fallback, HardVoting, SoftVoting
 from logicsponge.processmining.utils import (
@@ -254,6 +267,7 @@ def prefix_evaluate_rnn(  # noqa: C901, PLR0912
     idx_to_activity: dict[int, Any] | None,
     max_k: int,
     window_size: int,
+    left_pad: bool = LEFT_PAD_DEFAULT,
 ) -> tuple[dict[str, Any], list[float], float, list[str]]:
     """
     Evaluate an RNN/Transformer in prefix mode (one prediction per prefix).
@@ -286,8 +300,11 @@ def prefix_evaluate_rnn(  # noqa: C901, PLR0912
             # iterate prefixes (k = 1..valid_len-1) to produce one pred per event
             for k in range(1, valid_len):
                 prefix = seq[:k].unsqueeze(0)  # [1, k]
-                if prefix.shape[1] > window_size:
-                    prefix = prefix[:, -window_size:]
+                if left_pad:
+                    prefix = _left_pad_window(prefix, window_size)
+                else:
+                    if prefix.shape[1] > window_size:
+                        prefix = prefix[:, -window_size:]
                 if model_device is not None:
                     prefix = prefix.to(device=model_device)
 
