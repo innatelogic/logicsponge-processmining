@@ -170,16 +170,16 @@ SHOW_DELAYS = False
 MODEL_SELECTOR = {
     # Base NN models
     "lstm": True,
-    "gru": True,
+    "gru": False,
     "transformer": True,
     # Attention-head variants for transformer (transformer_2heads, transformer_4heads, ...)
-    "transformer_heads": True,
+    "transformer_heads": False,
     # transformer variants with different positional encodings
-    "transformer_pos_encodings": True,
+    "transformer_pos_encodings": False,
     # Windowed NN variants
     "window": True,
     # RL models
-    "qlearning": True,
+    "qlearning": False,
 }
 
 # ====================================================
@@ -807,7 +807,7 @@ if MODEL_SELECTOR.get("transformer", False):
 if MODEL_SELECTOR.get("qlearning", False):
     # Add both baselines
     models.append(RL_BASELINE_GRU_NAME)
-    models.append(RL_BASELINE_LINEAR_NAME)
+    # models.append(RL_BASELINE_LINEAR_NAME)
     if MODEL_SELECTOR.get("window", False):
         models.extend(RL_NAMES)
 if MODEL_SELECTOR.get("transformer_heads", False):
@@ -1043,6 +1043,11 @@ if RL_TRAINING and ML_TRAINING:
             * Evaluation(RL_BASELINE_LINEAR_NAME)
         )
 
+# `set_history_bound` is a method on DataStream. The source term `streamer`
+# exposes its output DataStream as `_output` (see SourceTerm in logicsponge).
+# Call the method on that DataStream instance.
+streamer._output.set_history_bound(ls.NumberBound(1))  # noqa: SLF001
+
 # Assemble the full sponge
 sponge = (
     streamer
@@ -1058,6 +1063,7 @@ sponge = (
     * ls.DataItemFilter(data_item_filter=lambda item: item["index"] % 100 == 0 or item["index"] == len_dataset - 1)
     * (PrintEval() | CSVStatsWriter(csv_path=stats_file_path))
 )
+
 
 
 sponge.start()

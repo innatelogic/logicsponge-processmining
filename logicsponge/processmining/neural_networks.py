@@ -176,7 +176,7 @@ class LSTMModel(nn.Module):
         self.use_one_hot = use_one_hot
         self.vocab_size = vocab_size
         self.embedding_dim = embedding_dim
-    
+
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
 

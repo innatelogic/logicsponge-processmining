@@ -207,9 +207,9 @@ data_collection = {
 if DATA == "file":
     # data_name = "Synthetic_Train"
 
-    data_name = "Synthetic111000"
+    # data_name = "Synthetic111000"
 
-    # data_name = "Sepsis_Cases"
+    data_name = "Sepsis_Cases"
 
     # data_name = "Helpdesk"
     # data_name = "BPI_Challenge_2013" # ok
