@@ -1028,7 +1028,11 @@ class StreamingComparisonComputer(ls.FunctionTerm):
             predictions_df = pd.read_csv(path)
             if name == "actual":
                 return predictions_df.get("actual", pd.Series(dtype=object)).tolist()
-            return predictions_df.get("predicted", pd.Series(dtype=object)).tolist()
+            # Prefer unified 'predicted' column; fallback to legacy 'prediction' if needed
+            series = predictions_df.get("predicted")
+            if series is None:
+                series = predictions_df.get("prediction")
+            return (series if series is not None else pd.Series(dtype=object)).tolist()
         except (OSError, ValueError, pd.errors.ParserError, FileNotFoundError):
             return []
 

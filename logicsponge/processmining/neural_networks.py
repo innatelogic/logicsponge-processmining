@@ -717,10 +717,18 @@ class TransformerModel(nn.Module):
         )  # [B]
         # minimal first_real across batch; columns [0:s) are all padding for everyone
         s = int(first_real.min().item()) if batch_size > 0 else 0
-        if s > 0:
+        # Only crop leading columns if there will remain at least one token.
+        # Cropping to an empty sequence (seq_len == 0) would cause downstream
+        # reductions (e.g. argmax over dim=1) to fail with IndexError.
+        if s > 0 and s < seq_len:
             x = x[:, s:, :]
             key_padding_mask = key_padding_mask[:, s:]
             seq_len = x.size(1)
+        else:
+            # If s == 0 (no common left-pad) or s >= seq_len (all-pad case),
+            # avoid cropping. For the all-pad case we'll keep seq_len as-is
+            # (which may be 0) and handle empty-dimension logic later.
+            s = 0
 
         # Positional encoding selection.
         # If RoPE is selected, we compute cos/sin and DO NOT add an additive pos embedding.
@@ -788,13 +796,21 @@ class TransformerModel(nn.Module):
         base_causal = self._get_base_causal(seq_len, x_device)  # [L,L] True above diagonal
         mask = base_causal.unsqueeze(0).expand(batch_size, -1, -1).clone()  # [B,L,L]
         # Determine first real token per row on the (possibly cropped) masks
-        nonpad_small = (~key_padding_mask)
-        has_any_small = nonpad_small.any(dim=1)
-        first_real_small = torch.where(
-            has_any_small,
-            torch.argmax(nonpad_small.to(torch.int64), dim=1),
-            torch.full((batch_size,), seq_len, device=x_device, dtype=torch.long),
-        )  # [B]
+        # If seq_len == 0 then key_padding_mask has shape [B, 0] and
+        # argmax over dim=1 would fail. Handle that case explicitly.
+        if seq_len == 0:
+            # No tokens remain after cropping (all positions were padding).
+            nonpad_small = (~key_padding_mask)
+            has_any_small = nonpad_small.any(dim=1) if nonpad_small.numel() > 0 else torch.zeros((batch_size,), dtype=torch.bool, device=x_device)
+            first_real_small = torch.full((batch_size,), seq_len, device=x_device, dtype=torch.long)
+        else:
+            nonpad_small = (~key_padding_mask)
+            has_any_small = nonpad_small.any(dim=1)
+            first_real_small = torch.where(
+                has_any_small,
+                torch.argmax(nonpad_small.to(torch.int64), dim=1),
+                torch.full((batch_size,), seq_len, device=x_device, dtype=torch.long),
+            )  # [B]
         # Query positions that are still padding: positions j where j < first_real_small[b]
         pos = torch.arange(seq_len, device=x_device).unsqueeze(0)  # [1,L]
         query_is_pad = pos < first_real_small.unsqueeze(1)  # [B,L]

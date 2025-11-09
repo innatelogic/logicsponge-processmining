@@ -226,23 +226,33 @@ def write_prediction_vectors(
                         actuals = actuals[:min_len]
                         df_iter = pd.DataFrame({
                             "index": list(range(len(preds))),
-                            "prediction": preds,
+                            "predicted": preds,
                             "actual": actuals,
                         })
                     else:
-                        df_iter = pd.DataFrame({
-                            "index": list(range(len(preds))),
-                            "prediction": preds,
-                        })
+                        # Baseline 'actual' case has no separate actual_vec; treat preds as ground truth
+                        if model_name == "actual":
+                            df_iter = pd.DataFrame({
+                                "index": list(range(len(preds))),
+                                "actual": preds,
+                            })
+                        else:
+                            df_iter = pd.DataFrame({
+                                "index": list(range(len(preds))),
+                                "predicted": preds,
+                            })
                 except (ValueError, TypeError, OSError):
                     if actual_vec is not None:
                         try:
                             actuals = list(actual_vec)
-                            df_iter = pd.DataFrame({"prediction": [str(pred_vec)], "actual": [str(actuals)]})
+                            df_iter = pd.DataFrame({"predicted": [str(pred_vec)], "actual": [str(actuals)]})
                         except (ValueError, TypeError, OSError):
-                            df_iter = pd.DataFrame({"prediction": [str(pred_vec)]})
+                            df_iter = pd.DataFrame({"predicted": [str(pred_vec)]})
                     else:
-                        df_iter = pd.DataFrame({"prediction": [str(pred_vec)]})
+                        if model_name == "actual":
+                            df_iter = pd.DataFrame({"actual": [str(pred_vec)]})
+                        else:
+                            df_iter = pd.DataFrame({"predicted": [str(pred_vec)]})
 
                 iter_csv_path = predictions_dir / f"{run_id}_{model_name}_iter{it_idx}.csv"
                 df_iter.to_csv(iter_csv_path, index=False)
