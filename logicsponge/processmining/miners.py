@@ -20,7 +20,6 @@ import matplotlib as mpl
 import pandas as pd
 import torch
 from torch import nn
-from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
 
 from logicsponge.processmining.config import DEFAULT_CONFIG, update_config
@@ -31,6 +30,8 @@ from logicsponge.processmining.neural_networks import (
     QNetwork,
     RNNModel,
     TransformerModel,
+    # Use left-padding helper to align streaming NN batches with batch-mode training/eval
+    _left_pad_stack,
 )
 from logicsponge.processmining.types import (
     ActivityDelays,
@@ -1519,9 +1520,10 @@ class NeuralNetworkMiner(StreamingMiner):
         # Set model to training mode
         self.model.train()
 
-        # Convert the batch of sequences into tensors, padding them to the same length
+        # Convert the batch of sequences into tensors, LEFT-padding them to the same length
+        # to mirror batch-mode training/evaluation which uses left padding and source masks.
         batch_sequences = [torch.tensor(seq, dtype=torch.long, device=self.device) for seq in batch]
-        x_batch = pad_sequence(batch_sequences, batch_first=True, padding_value=0)
+        x_batch = _left_pad_stack(batch_sequences, pad_value=0)
 
         # Input is all but the last token in each sequence, target is shifted by one position
         x_input = x_batch[:, :-1]  # Input sequence
@@ -1564,12 +1566,8 @@ class NeuralNetworkMiner(StreamingMiner):
         This method leaves incremental caches untouched; you may want to recompute caches after training.
         """
         sequences = [torch.tensor(self.sequences[cid], dtype=torch.long, device=self.device) for cid in batch_case_ids]
-        # pad
-        lengths = [s.size(0) for s in sequences]
-        max_l = max(lengths)
-        batch = torch.zeros(len(sequences), max_l, dtype=torch.long, device=self.device)
-        for i, s in enumerate(sequences):
-            batch[i, :s.size(0)] = s
+        # LEFT-pad sequences to align with causal/source masks used by NN models
+        batch = _left_pad_stack(sequences, pad_value=0)
         # teacher-forcing next-token prediction
         x = batch[:, :-1]
         y = batch[:, 1:]
@@ -1747,6 +1745,11 @@ class WindowedNeuralNetworkMiner(NeuralNetworkMiner):
         optimizer: torch.optim.Optimizer,
         *,
         criterion: nn.Module | None = None,
+        # `sequence_buffer_length` is interpreted as the desired "window size"
+        # (number of prefix tokens used to predict the next activity). Internally
+        # we keep `window_size + 1` tokens so that training batches can contain
+        # an input prefix of length `window_size` and the corresponding target
+        # next-token. This ensures a user-provided window X yields prefix size X.
         sequence_buffer_length: int = 50,
         mode: str = "incremental",
         config: dict[str, Any] | None = None,
@@ -1764,7 +1767,11 @@ class WindowedNeuralNetworkMiner(NeuralNetworkMiner):
         if sequence_buffer_length < 1:
             msg = "sequence_buffer_length must be >= 1"
             raise ValueError(msg)
-        self.sequence_buffer_length = int(sequence_buffer_length)
+        # Expose the user-requested window size separately
+        self.window_size = int(sequence_buffer_length)
+        # Internally keep window_size + 1 tokens so that x_input = seq[:, :-1]
+        # produces an input prefix of length == window_size during training.
+        self.sequence_buffer_length = self.window_size + 1
 
     def _trim_sequence(self, case_id: CaseId) -> None:
         """Keep only the last ``sequence_buffer_length`` tokens for the case."""
@@ -1806,7 +1813,8 @@ class WindowedNeuralNetworkMiner(NeuralNetworkMiner):
         # Training step (same as parent)
         self.model.train()
         batch_sequences = [torch.tensor(seq, dtype=torch.long, device=self.device) for seq in batch]
-        x_batch = pad_sequence(batch_sequences, batch_first=True, padding_value=0)
+        # Left-pad for windowed miner as well to match batch-mode behavior
+        x_batch = _left_pad_stack(batch_sequences, pad_value=0)
 
         # Input is all but the last token in each sequence, target is shifted by one position
         x_input = x_batch[:, :-1]
@@ -1831,8 +1839,9 @@ class WindowedNeuralNetworkMiner(NeuralNetworkMiner):
         index_sequence = self.get_sequence(case_id)
         if not index_sequence or len(index_sequence) < 1:
             return empty_metrics()
-
-        windowed = index_sequence[-self.sequence_buffer_length :]
+        # Use only the last `window_size` tokens as input context for prediction
+        # (do not include the extra reserved token used for training targets).
+        windowed = index_sequence[-self.window_size :]
         if len(windowed) < 1:
             return empty_metrics()
         probs = self.idx_sequence_probs(windowed)

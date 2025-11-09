@@ -2,8 +2,8 @@
 
 import copy
 import logging
-import time
 import math
+import time
 
 import torch
 import torch.nn.functional as F  # noqa: N812
@@ -27,7 +27,8 @@ logger = logging.getLogger(__name__)
 LEFT_PAD_DEFAULT = True
 
 def _left_pad_stack(seqs: list[torch.Tensor], *, pad_value: int = 0, target_len: int | None = None) -> torch.Tensor:
-    """Left-pad 1D LongTensors to a common length and stack as [B, L].
+    """
+    Left-pad 1D LongTensors to a common length and stack as [B, L].
 
     If target_len is None, pad to the maximum length found in seqs. Assumes all seqs have dtype Long.
     """
@@ -247,14 +248,18 @@ class LSTMModel(nn.Module):
 # --------------------------
 # Rotary positional helpers
 # --------------------------
-def _build_rotary_cos_sin(seq_len: int, dim: int, device: torch.device, dtype: torch.dtype, base: float = 10000.0):
-    """Build rotary cos and sin matrices for RoPE.
+def _build_rotary_cos_sin(
+        seq_len: int, dim: int, device: torch.device, dtype: torch.dtype, base: float = 10000.0
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Build rotary cos and sin matrices for RoPE.
 
     Returns cos, sin of shape [seq_len, dim//2]. The caller will broadcast
     as needed. `dim` should be the head dimension (must be even).
     """
     if dim % 2 != 0:
-        raise ValueError("Head dimension for RoPE must be even")
+        msg = "Head dimension for RoPE must be even"
+        raise ValueError(msg)
     inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2, device=device, dtype=dtype) / dim))
     positions = torch.arange(seq_len, device=device, dtype=dtype)
     freqs = torch.einsum("i,j->ij", positions, inv_freq)  # [seq_len, dim/2]
@@ -264,7 +269,8 @@ def _build_rotary_cos_sin(seq_len: int, dim: int, device: torch.device, dtype: t
 
 
 def _apply_rotary(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
-    """Apply rotary embeddings to tensor x.
+    """
+    Apply rotary embeddings to tensor x.
 
     x: [B, seq_len, nhead, head_dim]
     cos/sin: [seq_len, head_dim//2]
@@ -286,7 +292,8 @@ def _apply_rotary(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torc
 
 
 class RotaryTransformerEncoderLayer(nn.Module):
-    """A simplified Transformer encoder layer that applies RoPE to Q/K inside attention.
+    """
+    A simplified Transformer encoder layer that applies RoPE to Q/K inside attention.
 
     This mirrors the common TransformerEncoderLayer layout but uses explicit
     linear projections for Q/K/V so we can apply RoPE before attention.
@@ -295,7 +302,8 @@ class RotaryTransformerEncoderLayer(nn.Module):
     def __init__(self, d_model: int, nhead: int, dim_feedforward: int = 2048, dropout: float = 0.0, device: torch.device | None = None):
         super().__init__()
         if d_model % nhead != 0:
-            raise ValueError("d_model must be divisible by nhead")
+            msg = "d_model must be divisible by nhead"
+            raise ValueError(msg)
         self.d_model = d_model
         self.nhead = nhead
         self.head_dim = d_model // nhead
@@ -316,8 +324,13 @@ class RotaryTransformerEncoderLayer(nn.Module):
         self.dropout = nn.Dropout(dropout) if dropout is not None and dropout > 0.0 else nn.Identity()
         self.activation = nn.ReLU()
 
-    def forward(self, src: torch.Tensor, src_mask: torch.Tensor | None = None, src_key_padding_mask: torch.Tensor | None = None, cos: torch.Tensor | None = None, sin: torch.Tensor | None = None) -> torch.Tensor:
-        """Forward pass.
+    def forward(
+            self, src: torch.Tensor, src_mask: torch.Tensor | None = None,
+            src_key_padding_mask: torch.Tensor | None = None,
+            cos: torch.Tensor | None = None, sin: torch.Tensor | None = None
+        ) -> torch.Tensor:
+        """
+        Forward pass.
 
                 If cos/sin are provided, apply RoPE to Q/K before attention.
                 cos/sin should have shape [seq_len, head_dim//2].
@@ -358,10 +371,12 @@ class RotaryTransformerEncoderLayer(nn.Module):
                 attn_mask = src_mask.unsqueeze(0).unsqueeze(0)  # [1,1,L,L]
             elif src_mask.dim() == 3:
                 if src_mask.size(0) != B:
-                    raise ValueError(f"Batch mask first dim {src_mask.size(0)} != batch size {B}")
+                    msg = f"Batch mask first dim {src_mask.size(0)} != batch size {B}"
+                    raise ValueError(msg)
                 attn_mask = src_mask.unsqueeze(1)  # [B,1,L,L]
             else:
-                raise ValueError(f"Unsupported src_mask.dim()={src_mask.dim()} (expected 2 or 3)")
+                msg = f"Unsupported src_mask.dim()={src_mask.dim()} (expected 2 or 3)"
+                raise ValueError(msg)
         if src_key_padding_mask is not None:
             key_mask = src_key_padding_mask.unsqueeze(1).unsqueeze(2)  # [B,1,1,L]
             attn_mask = key_mask if attn_mask is None else (attn_mask | key_mask)
@@ -369,8 +384,9 @@ class RotaryTransformerEncoderLayer(nn.Module):
         # Convert bool mask to additive mask for SDPA if present
         additive_mask = None
         if attn_mask is not None:
-            # SDPA expects float additive mask with -inf where disallowed (or a bool in newer versions, but keep compatibility)
-            additive_mask = attn_mask.to(q.dtype).masked_fill(attn_mask, float('-inf'))
+            # SDPA expects float additive mask with -inf where disallowed (or a
+            # bool in newer versions, but keep compatibility)
+            additive_mask = attn_mask.to(q.dtype).masked_fill(attn_mask, float("-inf"))
         attn = F.scaled_dot_product_attention(
             q, k, v,
             attn_mask=additive_mask,
@@ -606,7 +622,9 @@ class TransformerModel(nn.Module):
 
         # Use unbounded sinusoidal positional encoding computed on-the-fly; no learned parameter
 
-        def _backward_sinusoidal_encoding(seq_len: int, d_model: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+        def _backward_sinusoidal_encoding(
+                seq_len: int, d_model: int, device: torch.device, dtype: torch.dtype
+            ) -> torch.Tensor:
             """
             Create a sinusoidal positional encoding measured from the end of the sequence.
 
@@ -653,7 +671,8 @@ class TransformerModel(nn.Module):
         self.apply(self._init_weights)
 
     def _get_base_causal(self, seq_len: int, device: torch.device) -> torch.Tensor:
-        """Return an upper-triangular causal mask [L,L] (True=masked) for given length.
+        """
+        Return an upper-triangular causal mask [L,L] (True=masked) for given length.
 
         Cached on CPU and moved to the requested device on demand.
         """
@@ -663,7 +682,7 @@ class TransformerModel(nn.Module):
             self._causal_cache[seq_len] = cached
         return cached.to(device)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:  # noqa: C901, PLR0912, PLR0915
         """
         Forward pass through the Transformer model.
 
@@ -682,8 +701,8 @@ class TransformerModel(nn.Module):
 
         # Autocast context (disabled by default to avoid behavior change)
         if self.enable_amp:
-            amp_device = 'cuda' if x_device.type == 'cuda' else 'cpu'
-            amp_dtype = torch.float16 if amp_device == 'cuda' else torch.bfloat16
+            amp_device = "cuda" if x_device.type == "cuda" else "cpu"
+            amp_dtype = torch.float16 if amp_device == "cuda" else torch.bfloat16
             with torch.autocast(device_type=amp_device, dtype=amp_dtype):
                 if not self.use_one_hot and self.embedding is not None:
                     x = self.embedding(x)
@@ -692,14 +711,13 @@ class TransformerModel(nn.Module):
                     x = F.one_hot(indices, num_classes=self.vocab_size).float().to(x_device)
                     pad_mask = (indices == 0).unsqueeze(-1).to(x_device)
                     x.masked_fill_(pad_mask, 0.0)
+        elif not self.use_one_hot and self.embedding is not None:
+            x = self.embedding(x)
         else:
-            if not self.use_one_hot and self.embedding is not None:
-                x = self.embedding(x)
-            else:
-                indices = x
-                x = F.one_hot(indices, num_classes=self.vocab_size).float().to(x_device)
-                pad_mask = (indices == 0).unsqueeze(-1).to(x_device)
-                x.masked_fill_(pad_mask, 0.0)
+            indices = x
+            x = F.one_hot(indices, num_classes=self.vocab_size).float().to(x_device)
+            pad_mask = (indices == 0).unsqueeze(-1).to(x_device)
+            x.masked_fill_(pad_mask, 0.0)
 
         # Determine batch and sequence dimensions after embedding/one-hot
         batch_size, seq_len, _ = x.size()
@@ -737,7 +755,9 @@ class TransformerModel(nn.Module):
             # Compute rotary embeddings for head-dim
             head_dim = self.d_model // max(1, getattr(self, "num_heads", 1))
             try:
-                cos, sin = _build_rotary_cos_sin(seq_len, head_dim, x_device, x.dtype, base=getattr(self, "_rotary_base", 10000.0))
+                cos, sin = _build_rotary_cos_sin(
+                    seq_len, head_dim, x_device, x.dtype, base=getattr(self, "_rotary_base", 10000.0)
+                )
             except Exception:
                 cos = sin = None
         else:
@@ -1070,6 +1090,7 @@ class PreprocessData:
         Args:
             dataset (list[list[Event]]): A list of sequences, where each sequence is a list of events.
             Each event is expected to have an "activity" key with the activity name.
+            left_pad (bool): Whether to left-pad the sequences. Defaults to LEFT_PAD_DEFAULT.
 
         Returns:
             torch.Tensor: A tensor of shape (batch_size, max_seq_len) containing the indices of activities,
@@ -1301,7 +1322,7 @@ def train_rl(  # noqa: PLR0913, PLR0915, C901
     return model
 
 
-def evaluate_rl(  # noqa: C901, PLR0912
+def evaluate_rl(  # noqa: C901, PLR0912, PLR0915
     model: QNetwork,
     sequences: torch.Tensor,
     *,
@@ -1378,7 +1399,8 @@ def evaluate_rl(  # noqa: C901, PLR0912
                     if q_flat.numel() >= 1:
                         q_vals = q_flat[-1:]
                     else:
-                        raise RuntimeError("Unexpected logits shape in evaluate_rl")
+                        msg = "Unexpected logits shape in evaluate_rl"
+                        raise RuntimeError(msg)
 
                 # Ensure k does not exceed vocabulary size
                 k_eff = min(max_k, q_vals.numel())
@@ -1567,9 +1589,13 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
         # (one prediction per prefix). For non-windowed runs, keep token-level validation.
         # updated unpacking to accept extra returned predicted-vector (ignored here)
         if window_size is not None:
-            stats, _, _, _ = evaluate_rnn(model, val_sequences, window_size=window_size, prefix_mode=True, left_pad=left_pad)
+            stats, _, _, _ = evaluate_rnn(
+                model, val_sequences, window_size=window_size, prefix_mode=True, left_pad=left_pad
+            )
         else:
-            stats, _, _, _ = evaluate_rnn(model, val_sequences, window_size=window_size, left_pad=left_pad)
+            stats, _, _, _ = evaluate_rnn(
+                model, val_sequences, window_size=window_size, left_pad=left_pad
+            )
         val_accuracy = stats["accuracy"]
 
         if not isinstance(val_accuracy, float):
@@ -1607,7 +1633,7 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
     return model
 
 
-def evaluate_rnn(  # noqa: C901, PLR0913, PLR0915
+def evaluate_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
     model: LSTMModel | TransformerModel,
     sequences: torch.Tensor,
     *,
@@ -1726,8 +1752,12 @@ def evaluate_rnn(  # noqa: C901, PLR0913, PLR0915
                             cur_len = int(y_target_cpu.numel())
                             if cur_len < window_size:
                                 pad_len = window_size - cur_len
-                                x_input_cpu = torch.cat([torch.zeros(pad_len, dtype=x_input_cpu.dtype), x_input_cpu], dim=0)
-                                y_target_cpu = torch.cat([torch.zeros(pad_len, dtype=y_target_cpu.dtype), y_target_cpu], dim=0)
+                                x_input_cpu = torch.cat(
+                                    [torch.zeros(pad_len, dtype=x_input_cpu.dtype), x_input_cpu], dim=0
+                                )
+                                y_target_cpu = torch.cat(
+                                    [torch.zeros(pad_len, dtype=y_target_cpu.dtype), y_target_cpu], dim=0
+                                )
 
                 x_input = x_input_cpu.unsqueeze(0)
                 y_target = y_target_cpu.unsqueeze(0)

@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap, Colormap
+from matplotlib.colors import Colormap, LinearSegmentedColormap
 
 from logicsponge.processmining.config import DEFAULT_CONFIG
 from logicsponge.processmining.types import Config, Event, Metrics, Prediction, ProbDistr

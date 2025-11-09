@@ -29,8 +29,12 @@ default_run_config = {
     "nn": {"lr": 0.001, "batch_size": 8, "epochs": 100},
     "rl": {"lr": 0.001, "batch_size": 8, "epochs": 20, "gamma": 0.99},
     "lstm": {"vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 128, "output_dim": MAGIC_NUMBER},
-    "transformer": {"vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 512, "output_dim": MAGIC_NUMBER},
-    "qlearning": {"vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 512, "output_dim": MAGIC_NUMBER},
+    "transformer": {
+        "vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 512, "output_dim": MAGIC_NUMBER
+    },
+    "qlearning": {
+        "vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 512, "output_dim": MAGIC_NUMBER
+    },
 }
 
 # Write the default run configuration into `predict_config.json` in the repo folder.
@@ -189,7 +193,10 @@ def process_neural_model(  # noqa: PLR0913
     # aligns with the baseline `actual` vector and with how RL/qlearning is evaluated.
     if window_size is None:
         # Exclude START token prediction to align with baseline actual_vector (which has no START)
-        start_idx = nn_processor.activity_to_idx.get(start_symbol) if start_symbol in nn_processor.activity_to_idx else None
+        start_idx = (
+            nn_processor.activity_to_idx.get(start_symbol)
+            if start_symbol in nn_processor.activity_to_idx else None
+        )
         stats, perplexities, eval_time, prediction_vector = evaluate_rnn(
             model,
             nn_test_set_transformed,

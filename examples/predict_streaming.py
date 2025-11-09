@@ -80,7 +80,7 @@ MAGIC_VALUE = 8
 HIDDEN_DIM_DEFAULT = 128
 default_run_config = {
     "nn": {"lr": 0.001, "batch_size": 8, "epochs": 20},
-    "transf": {"lr": 0.0001, "batch_size": 8, "epochs": 20},
+    "transf": {"lr": 0.0006, "batch_size": 8, "epochs": 20},
     "rl": {"lr": 0.001, "batch_size": 8, "epochs": 20, "gamma": 0.99},
     "lstm": {
         "vocab_size": MAGIC_VALUE,
@@ -169,8 +169,8 @@ SHOW_DELAYS = False
 # Model selector: enable/disable specific models and their variants
 MODEL_SELECTOR = {
     # Base NN models
-    "lstm": False,
-    "gru": False,
+    "lstm": True,
+    "gru": True,
     "transformer": True,
     # Attention-head variants for transformer (transformer_2heads, transformer_4heads, ...)
     "transformer_heads": True,
@@ -179,7 +179,7 @@ MODEL_SELECTOR = {
     # Windowed NN variants
     "window": True,
     # RL models
-    "qlearning": False,
+    "qlearning": True,
 }
 
 # ====================================================
@@ -427,7 +427,10 @@ vocab_size = lstm_cfg.get("vocab_size", 50)  # An upper bound on the number of a
 embedding_dim = lstm_cfg.get("embedding_dim", 50)
 hidden_dim = lstm_cfg.get("hidden_dim", 128)
 num_layers = lstm_cfg.get("num_layers", 2)
-model_lstm = LSTMModel(vocab_size, embedding_dim=embedding_dim, hidden_dim=hidden_dim, num_layers=num_layers, device=device, use_one_hot=True)
+model_lstm = LSTMModel(
+    vocab_size,
+    embedding_dim=embedding_dim, hidden_dim=hidden_dim, num_layers=num_layers, device=device, use_one_hot=True
+)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model_lstm.parameters(), lr=nn_cfg.get("lr", 0.001))
 
@@ -506,7 +509,7 @@ POS_ENCODINGS = [
     # ("sinusoidal", None),
     # ("periodic", None),
     # ("sharp_relative", "square"),
-    ("learnable_backward_relative", None),
+    # ("learnable_backward_relative", None),
     # ("learnable_relative", None),
 ]
 
@@ -523,7 +526,7 @@ for w in NN_WINDOW_RANGE:
         vocab_size, embedding_dim=embedding_dim, hidden_dim=hidden_dim, device=device, use_one_hot=True
     )
     criterion_l = nn.CrossEntropyLoss()
-    optimizer_l = optim.Adam(model_lstm_w.parameters(), lr=nn_cfg.get("lr", 0.001))
+    optimizer_l = optim.Adam(model_lstm_w.parameters(), lr=nn_cfg.get("lr", 0.01))
     LSTM_MODELS[f"lstm_win{w}"] = StreamingActivityPredictor(
         strategy=WindowedNeuralNetworkMiner(
             model=model_lstm_w,
@@ -588,15 +591,16 @@ for w in NN_WINDOW_RANGE:
 
     # Transformer windowed variant (default positional encoding)
     model_tr_w = TransformerModel(
-        vocab_size=vocab_size,
-        embedding_dim=embedding_dim,
-        hidden_dim=hidden_dim,
+        vocab_size=transformer_cfg.get("vocab_size", vocab_size),
+        embedding_dim=transformer_cfg.get("embedding_dim", embedding_dim),
+        hidden_dim=hidden_dim_tr,
         attention_heads=1,
         use_one_hot=True,
-        pos_encoding_type="learnable_relative",
+        pos_encoding_type="learnable_backward_relative",
     )
+
     criterion_t = nn.CrossEntropyLoss()
-    optimizer_t = optim.Adam(model_tr_w.parameters(), lr=transf_cfg.get("lr", 0.0001))
+    optimizer_t = optim.Adam(model_tr_w.parameters(), lr=transf_cfg.get("lr", 0.001))
     TRANSFORMER_MODELS[f"transformer_win{w}"] = StreamingActivityPredictor(
         strategy=WindowedNeuralNetworkMiner(
             model=model_tr_w,
