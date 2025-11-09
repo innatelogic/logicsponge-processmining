@@ -319,8 +319,13 @@ class RotaryTransformerEncoderLayer(nn.Module):
     def forward(self, src: torch.Tensor, src_mask: torch.Tensor | None = None, src_key_padding_mask: torch.Tensor | None = None, cos: torch.Tensor | None = None, sin: torch.Tensor | None = None) -> torch.Tensor:
         """Forward pass.
 
-        If cos/sin are provided, apply RoPE to Q/K before attention.
-        cos/sin should have shape [seq_len, head_dim//2].
+                If cos/sin are provided, apply RoPE to Q/K before attention.
+                cos/sin should have shape [seq_len, head_dim//2].
+
+                src_mask semantics (causal/attention blocking mask):
+                    - Accepts either shape [L, L] (applied to all batches) or [B, L, L] (per-batch).
+                    - Values should be True where attention is DISALLOWED (will be filled with -inf).
+                src_key_padding_mask: [B, L] with True at PAD positions (blocks keys/columns).
         """
         # src: [B, seq_len, d_model]
         B, seq_len, _ = src.shape
@@ -350,10 +355,24 @@ class RotaryTransformerEncoderLayer(nn.Module):
         scale = 1.0 / math.sqrt(self.head_dim)
         attn_scores = torch.matmul(q, k.transpose(-2, -1)) * scale  # [B, nhead, seq_len, seq_len]
 
-        # Apply causal mask if provided as bool mask (seq_len, seq_len)
+        # Apply causal/attention mask if provided.
         if src_mask is not None:
-            # src_mask expected True where positions should be masked
-            attn_scores = attn_scores.masked_fill(src_mask.unsqueeze(0).unsqueeze(0).to(attn_scores.device), float("-inf"))
+            # Support [L,L] or [B,L,L].
+            if src_mask.dim() == 2:
+                # [L,L] -> broadcast over batch & heads -> [1,1,L,L]
+                mask_expand = src_mask.unsqueeze(0).unsqueeze(0)  # [1,1,L,L]
+            elif src_mask.dim() == 3:
+                if src_mask.size(0) != B:
+                    raise ValueError(
+                        f"Batch mask first dim {src_mask.size(0)} != batch size {B}"
+                    )
+                # [B,L,L] -> add head dim -> [B,1,L,L]
+                mask_expand = src_mask.unsqueeze(1)
+            else:
+                raise ValueError(
+                    f"Unsupported src_mask.dim()={src_mask.dim()} (expected 2 or 3)"
+                )
+            attn_scores = attn_scores.masked_fill(mask_expand.to(attn_scores.device), float("-inf"))
 
         # src_key_padding_mask: [B, seq_len] True for padding
         if src_key_padding_mask is not None:
@@ -361,7 +380,16 @@ class RotaryTransformerEncoderLayer(nn.Module):
             key_mask = src_key_padding_mask.unsqueeze(1).unsqueeze(2).to(attn_scores.device)  # [B,1,1,seq_len]
             attn_scores = attn_scores.masked_fill(key_mask, float("-inf"))
 
+        # If an entire query row is masked (all -inf), softmax would yield NaNs.
+        # Detect such rows and set them to zeros before softmax to avoid NaNs.
+        full_row_mask = torch.isinf(attn_scores).all(dim=-1, keepdim=True)
+        if full_row_mask.any():
+            attn_scores = torch.where(full_row_mask, torch.zeros_like(attn_scores), attn_scores)
+
         attn_weights = torch.softmax(attn_scores, dim=-1)
+        # Replace any residual NaNs (e.g., numerical edge cases) with zeros
+        if torch.isnan(attn_weights).any():
+            attn_weights = torch.nan_to_num(attn_weights, nan=0.0)
         attn = torch.matmul(attn_weights, v)  # [B, nhead, seq_len, head_dim]
 
         # combine heads
@@ -717,14 +745,47 @@ class TransformerModel(nn.Module):
                         pos_emb = torch.zeros((batch_size, seq_len, self.d_model), device=x_device, dtype=x.dtype)
             x = x + pos_emb
 
-        # === Add causal (left) mask ===
-        # Shape: [seq_len, seq_len]; True where positions should be masked (prevent attending)
-        mask = torch.triu(torch.ones(seq_len, seq_len, device=x_device), diagonal=1).bool()
+        # === Adapted causal mask for LEFT-PADDING ===
+        # Classic causal mask assumes tokens start at index 0. With left-padding, the
+        # earliest positions may be all padding; masking them as if they were real
+        # time steps produces fully-masked attention rows (all -inf).
+        #
+        # Strategy:
+        # 1. Build standard upper-triangular causal mask [L,L].
+        # 2. For each sequence row, find the first real (non-padding) position.
+        # 3. Unmask future positions for padded query rows (< first_real) so those
+        #    rows can attend to real tokens (preventing all -inf); their outputs are
+        #    ignored downstream by loss masking, but this avoids NaNs.
+        base_causal = torch.triu(torch.ones(seq_len, seq_len, device=x_device), diagonal=1).bool()  # [L,L]
+        # Clone so per-batch adjustments do not affect shared tensor semantics.
+        mask = base_causal.unsqueeze(0).expand(batch_size, -1, -1).clone()  # [B,L,L]
+        # key_padding_mask: [B,L] True for padding
+        # For each batch row, determine first real token and relax causal mask for padded queries
+        pad_mask_batch = key_padding_mask  # [B,L]
+        for b in range(batch_size):
+            row_pad = pad_mask_batch[b]
+            # first index where not padding (== False)
+            non_pad_indices = (~row_pad).nonzero(as_tuple=False).view(-1)
+            if non_pad_indices.numel() == 0:
+                # Entire sequence is padding; keep causal mask but it will be neutralized later.
+                continue
+            first_real = int(non_pad_indices[0].item())
+            if first_real > 0:
+                # For query positions < first_real (pure padding), drop causal masking
+                # so they can attend to all positions (future tokens included) and avoid full -inf rows.
+                mask[b, :first_real, :] = False
+        # We'll pass this batch mask into layers; layers will also apply key padding masking to columns.
 
         # Pass through transformer stack (custom rotary-aware layers)
         # Each layer accepts optional cos/sin to apply RoPE; if cos is None, layer runs without RoPE.
         for layer in self.transformer_layers:
-            x = layer(x, src_mask=mask, src_key_padding_mask=key_padding_mask.to(x_device), cos=cos, sin=sin)
+            x = layer(
+                x,
+                src_mask=mask,  # [B,L,L] batch-specific causal mask adapted for left-padding
+                src_key_padding_mask=key_padding_mask.to(x_device),
+                cos=cos,
+                sin=sin,
+            )
 
         # Project to vocabulary logits
         return self.fc(x)
