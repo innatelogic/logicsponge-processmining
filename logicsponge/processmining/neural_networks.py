@@ -219,7 +219,7 @@ class LSTMModel(nn.Module):
             indices = x
             x = torch.nn.functional.one_hot(indices, num_classes=self.vocab_size).float().to(indices.device)
             pad_mask = (indices == 0).unsqueeze(-1)
-            x = x.masked_fill(pad_mask, 0.0)
+            x.masked_fill_(pad_mask, 0.0)
 
         # Pass through LSTM layers
         lstm_out, new_hidden = self.lstm(x, hidden)
@@ -351,46 +351,34 @@ class RotaryTransformerEncoderLayer(nn.Module):
         k = k.permute(0, 2, 1, 3)
         v = v.permute(0, 2, 1, 3)
 
-        # Scaled dot-product attention
-        scale = 1.0 / math.sqrt(self.head_dim)
-        attn_scores = torch.matmul(q, k.transpose(-2, -1)) * scale  # [B, nhead, seq_len, seq_len]
-
-        # Apply causal/attention mask if provided.
+        # Scaled dot-product attention via SDPA (FlashAttention when available)
+        attn_mask = None
         if src_mask is not None:
-            # Support [L,L] or [B,L,L].
             if src_mask.dim() == 2:
-                # [L,L] -> broadcast over batch & heads -> [1,1,L,L]
-                mask_expand = src_mask.unsqueeze(0).unsqueeze(0)  # [1,1,L,L]
+                attn_mask = src_mask.unsqueeze(0).unsqueeze(0)  # [1,1,L,L]
             elif src_mask.dim() == 3:
                 if src_mask.size(0) != B:
-                    raise ValueError(
-                        f"Batch mask first dim {src_mask.size(0)} != batch size {B}"
-                    )
-                # [B,L,L] -> add head dim -> [B,1,L,L]
-                mask_expand = src_mask.unsqueeze(1)
+                    raise ValueError(f"Batch mask first dim {src_mask.size(0)} != batch size {B}")
+                attn_mask = src_mask.unsqueeze(1)  # [B,1,L,L]
             else:
-                raise ValueError(
-                    f"Unsupported src_mask.dim()={src_mask.dim()} (expected 2 or 3)"
-                )
-            attn_scores = attn_scores.masked_fill(mask_expand.to(attn_scores.device), float("-inf"))
-
-        # src_key_padding_mask: [B, seq_len] True for padding
+                raise ValueError(f"Unsupported src_mask.dim()={src_mask.dim()} (expected 2 or 3)")
         if src_key_padding_mask is not None:
-            # Mask keys (columns) where padding is True
-            key_mask = src_key_padding_mask.unsqueeze(1).unsqueeze(2).to(attn_scores.device)  # [B,1,1,seq_len]
-            attn_scores = attn_scores.masked_fill(key_mask, float("-inf"))
+            key_mask = src_key_padding_mask.unsqueeze(1).unsqueeze(2)  # [B,1,1,L]
+            attn_mask = key_mask if attn_mask is None else (attn_mask | key_mask)
 
-        # If an entire query row is masked (all -inf), softmax would yield NaNs.
-        # Detect such rows and set them to zeros before softmax to avoid NaNs.
-        full_row_mask = torch.isinf(attn_scores).all(dim=-1, keepdim=True)
-        if full_row_mask.any():
-            attn_scores = torch.where(full_row_mask, torch.zeros_like(attn_scores), attn_scores)
-
-        attn_weights = torch.softmax(attn_scores, dim=-1)
-        # Replace any residual NaNs (e.g., numerical edge cases) with zeros
-        if torch.isnan(attn_weights).any():
-            attn_weights = torch.nan_to_num(attn_weights, nan=0.0)
-        attn = torch.matmul(attn_weights, v)  # [B, nhead, seq_len, head_dim]
+        # Convert bool mask to additive mask for SDPA if present
+        additive_mask = None
+        if attn_mask is not None:
+            # SDPA expects float additive mask with -inf where disallowed (or a bool in newer versions, but keep compatibility)
+            additive_mask = attn_mask.to(q.dtype).masked_fill(attn_mask, float('-inf'))
+        attn = F.scaled_dot_product_attention(
+            q, k, v,
+            attn_mask=additive_mask,
+            dropout_p=0.0,
+            is_causal=False,
+        )
+        if torch.isnan(attn).any():
+            attn = torch.nan_to_num(attn, nan=0.0)
 
         # combine heads
         attn = attn.permute(0, 2, 1, 3).contiguous().view(B, seq_len, self.d_model)
@@ -484,7 +472,7 @@ class GRUModel(nn.Module):
             indices = x
             x = F.one_hot(indices, num_classes=self.vocab_size).float().to(indices.device)
             pad_mask = (indices == 0).unsqueeze(-1)
-            x = x.masked_fill(pad_mask, 0.0)
+            x.masked_fill_(pad_mask, 0.0)
 
         gru_out, new_hidden = self.gru(x, hidden)
         logits = self.fc(gru_out)
@@ -647,6 +635,10 @@ class TransformerModel(nn.Module):
         self.num_heads = attention_heads
         self.num_layers = num_layers
         self._rotary_base = 10000.0
+        # Cache for base causal masks per sequence length to avoid reallocation
+        self._causal_cache: dict[int, torch.Tensor] = {}
+        # AMP control: disabled by default to preserve exact behavior
+        self.enable_amp = False  # type: bool
         # Build stack of rotary encoder layers
         self.transformer_layers = nn.ModuleList([
             RotaryTransformerEncoderLayer(d_model, attention_heads, dim_feedforward=hidden_dim, dropout=0.0, device=device)
@@ -659,6 +651,17 @@ class TransformerModel(nn.Module):
 
         # Custom initialization for linear/embedding layers
         self.apply(self._init_weights)
+
+    def _get_base_causal(self, seq_len: int, device: torch.device) -> torch.Tensor:
+        """Return an upper-triangular causal mask [L,L] (True=masked) for given length.
+
+        Cached on CPU and moved to the requested device on demand.
+        """
+        cached = self._causal_cache.get(seq_len)
+        if cached is None:
+            cached = torch.triu(torch.ones(seq_len, seq_len, dtype=torch.bool), diagonal=1)
+            self._causal_cache[seq_len] = cached
+        return cached.to(device)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -677,22 +680,47 @@ class TransformerModel(nn.Module):
         # Create padding mask (True for padding positions) from token indices
         key_padding_mask = x == 0
 
-        
-        if not self.use_one_hot and self.embedding is not None:
-            x = self.embedding(x)
+        # Autocast context (disabled by default to avoid behavior change)
+        if self.enable_amp:
+            amp_device = 'cuda' if x_device.type == 'cuda' else 'cpu'
+            amp_dtype = torch.float16 if amp_device == 'cuda' else torch.bfloat16
+            with torch.autocast(device_type=amp_device, dtype=amp_dtype):
+                if not self.use_one_hot and self.embedding is not None:
+                    x = self.embedding(x)
+                else:
+                    indices = x
+                    x = F.one_hot(indices, num_classes=self.vocab_size).float().to(x_device)
+                    pad_mask = (indices == 0).unsqueeze(-1).to(x_device)
+                    x.masked_fill_(pad_mask, 0.0)
         else:
-            # Project indices to one-hot vectors on the same device as input
-            indices = x
-            x = F.one_hot(indices, num_classes=self.vocab_size).float().to(x_device)
-            pad_mask = (indices == 0).unsqueeze(-1).to(x_device)
-            x = x.masked_fill(pad_mask, 0.0)
+            if not self.use_one_hot and self.embedding is not None:
+                x = self.embedding(x)
+            else:
+                indices = x
+                x = F.one_hot(indices, num_classes=self.vocab_size).float().to(x_device)
+                pad_mask = (indices == 0).unsqueeze(-1).to(x_device)
+                x.masked_fill_(pad_mask, 0.0)
 
-        # Add positional embeddings. Support multiple modes:
-        # - learned table (default for short sequences)
-        # - sinusoidal fallback for long sequences
-        # - backward relative positional encoding: tokens receive information
-        #   about their distance from the end of the stream (0 = last token)
+        # Determine batch and sequence dimensions after embedding/one-hot
         batch_size, seq_len, _ = x.size()
+
+        # Compute minimal global left padding across the batch and crop it away
+        # to reduce attention compute from O(L^2) to O((L - s)^2) where s is the
+        # number of columns that are padding for all rows.
+        nonpad = (~key_padding_mask)
+        has_any = nonpad.any(dim=1)
+        # first non-pad index per row; set to seq_len if no non-pad exists
+        first_real = torch.where(
+            has_any,
+            torch.argmax(nonpad.to(torch.int64), dim=1),
+            torch.full((batch_size,), seq_len, device=x_device, dtype=torch.long),
+        )  # [B]
+        # minimal first_real across batch; columns [0:s) are all padding for everyone
+        s = int(first_real.min().item()) if batch_size > 0 else 0
+        if s > 0:
+            x = x[:, s:, :]
+            key_padding_mask = key_padding_mask[:, s:]
+            seq_len = x.size(1)
 
         # Positional encoding selection.
         # If RoPE is selected, we compute cos/sin and DO NOT add an additive pos embedding.
@@ -756,24 +784,23 @@ class TransformerModel(nn.Module):
         # 3. Unmask future positions for padded query rows (< first_real) so those
         #    rows can attend to real tokens (preventing all -inf); their outputs are
         #    ignored downstream by loss masking, but this avoids NaNs.
-        base_causal = torch.triu(torch.ones(seq_len, seq_len, device=x_device), diagonal=1).bool()  # [L,L]
-        # Clone so per-batch adjustments do not affect shared tensor semantics.
+        # Build base causal mask (cached) and adapt it for left-padding in a vectorized way
+        base_causal = self._get_base_causal(seq_len, x_device)  # [L,L] True above diagonal
         mask = base_causal.unsqueeze(0).expand(batch_size, -1, -1).clone()  # [B,L,L]
-        # key_padding_mask: [B,L] True for padding
-        # For each batch row, determine first real token and relax causal mask for padded queries
-        pad_mask_batch = key_padding_mask  # [B,L]
-        for b in range(batch_size):
-            row_pad = pad_mask_batch[b]
-            # first index where not padding (== False)
-            non_pad_indices = (~row_pad).nonzero(as_tuple=False).view(-1)
-            if non_pad_indices.numel() == 0:
-                # Entire sequence is padding; keep causal mask but it will be neutralized later.
-                continue
-            first_real = int(non_pad_indices[0].item())
-            if first_real > 0:
-                # For query positions < first_real (pure padding), drop causal masking
-                # so they can attend to all positions (future tokens included) and avoid full -inf rows.
-                mask[b, :first_real, :] = False
+        # Determine first real token per row on the (possibly cropped) masks
+        nonpad_small = (~key_padding_mask)
+        has_any_small = nonpad_small.any(dim=1)
+        first_real_small = torch.where(
+            has_any_small,
+            torch.argmax(nonpad_small.to(torch.int64), dim=1),
+            torch.full((batch_size,), seq_len, device=x_device, dtype=torch.long),
+        )  # [B]
+        # Query positions that are still padding: positions j where j < first_real_small[b]
+        pos = torch.arange(seq_len, device=x_device).unsqueeze(0)  # [1,L]
+        query_is_pad = pos < first_real_small.unsqueeze(1)  # [B,L]
+        if query_is_pad.any():
+            # For query rows that are padding, drop causal masking entirely (allow attending to any key)
+            mask = torch.where(query_is_pad.unsqueeze(-1), torch.zeros_like(mask), mask)
         # We'll pass this batch mask into layers; layers will also apply key padding masking to columns.
 
         # Pass through transformer stack (custom rotary-aware layers)
@@ -788,7 +815,14 @@ class TransformerModel(nn.Module):
             )
 
         # Project to vocabulary logits
-        return self.fc(x)
+        logits_small = self.fc(x)  # [B, L', V]
+        # If we cropped leading all-pad columns, left-pad the logits back to original length
+        if s > 0:
+            V = logits_small.size(-1)
+            logits_full = torch.zeros(batch_size, s + seq_len, V, device=logits_small.device, dtype=logits_small.dtype)
+            logits_full[:, s:, :] = logits_small
+            return logits_full
+        return logits_small
 
     def _init_weights(self, m: nn.Module) -> None:
         if isinstance(m, nn.Linear):
@@ -908,7 +942,7 @@ class QNetwork(nn.Module):
             indices = x
             emb = F.one_hot(indices, num_classes=self.vocab_size).float().to(indices.device)
             pad_mask = (indices == 0).unsqueeze(-1)
-            emb = emb.masked_fill(pad_mask, 0.0)
+            emb.masked_fill_(pad_mask, 0.0)
 
         if self.model_architecture == "gru":
             if self.gru is None:
@@ -949,7 +983,7 @@ class QNetwork(nn.Module):
             indices = input_token
             emb = F.one_hot(indices, num_classes=self.vocab_size).float().to(indices.device)
             pad_mask = (indices == 0).unsqueeze(-1)
-            emb = emb.masked_fill(pad_mask, 0.0)
+            emb.masked_fill_(pad_mask, 0.0)
 
         if self.model_architecture == "gru":
             if self.gru is None:
