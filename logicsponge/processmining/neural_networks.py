@@ -228,6 +228,44 @@ class LSTMModel(nn.Module):
 
         return logits, new_hidden
 
+    def step(
+        self,
+        input_token: torch.Tensor,
+        hidden: tuple[torch.Tensor, torch.Tensor] | None = None,
+    ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        """
+        Single time-step forward for streaming/incremental inference.
+
+        Args:
+            input_token: LongTensor of shape ``[batch]`` or ``[batch, 1]`` containing token indices.
+            hidden: Optional prior LSTM hidden state tuple ``(h, c)`` each of shape
+                ``[num_layers, batch, hidden_dim]``.
+
+        Returns:
+            logits_last: FloatTensor of shape ``[batch, vocab_size]`` with logits for next-token prediction.
+            new_hidden: Updated LSTM hidden state tuple ``(h, c)``.
+
+        """
+        # Ensure shape [B, 1]
+        if input_token.dim() == 1:
+            input_token = input_token.unsqueeze(1)
+        elif input_token.dim() == 2 and input_token.size(1) != 1:
+            # If more than one timestep provided, keep only the last one for incremental semantics.
+            input_token = input_token[:, -1:].contiguous()
+
+        if not self.use_one_hot and self.embedding is not None:
+            x = self.embedding(input_token)  # [B, 1, embedding_dim]
+        else:
+            indices = input_token
+            x = torch.nn.functional.one_hot(indices, num_classes=self.vocab_size).float().to(indices.device)
+            # Zero-out padding index vectors (padding assumed to be 0)
+            pad_mask = (indices == 0).unsqueeze(-1)
+            x.masked_fill_(pad_mask, 0.0)
+
+        lstm_out, new_hidden = self.lstm(x, hidden)  # lstm_out: [B, 1, hidden_dim]
+        logits_last = self.fc(lstm_out[:, -1, :])  # [B, vocab_size]
+        return logits_last, new_hidden
+
     def _init_weights(self, m: nn.Module) -> None:
         if isinstance(m, nn.Linear):
             nn.init.xavier_uniform_(m.weight)

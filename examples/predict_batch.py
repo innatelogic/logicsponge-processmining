@@ -79,10 +79,11 @@ from logicsponge.processmining.neural_networks import (
     train_rl,
     train_rnn,
 )
-from logicsponge.processmining.test_data import data_name, dataset, dataset_test
 from logicsponge.processmining.utils import (
     add_file_log_handler,
     compute_perplexity_stats,
+    parse_cli_args,
+    resolve_dataset_from_args,
     save_run_config,
 )
 
@@ -380,6 +381,11 @@ pd.set_option("display.max_columns", None)  # Show all columns
 pd.set_option("display.expand_frame_repr", False)  # Prevent line-wrapping # noqa: FBT003
 
 logger = logging.getLogger(__name__)
+
+# Resolve dataset from CLI (optional --data); fallback to test_data defaults
+_args = parse_cli_args()
+data_name, dataset, dataset_test_opt = resolve_dataset_from_args(_args)
+dataset_test = dataset_test_opt if dataset_test_opt is not None else dataset
 
 # Log the resolved run configuration
 try:

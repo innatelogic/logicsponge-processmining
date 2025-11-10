@@ -1,9 +1,17 @@
-"""Utility functions for process mining."""
+"""
+Utility functions for process mining.
 
+Provides a small CLI helper to select datasets via ``--data`` for the example
+scripts (predict_batch.py, predict_streaming.py).
+"""
+
+import argparse
 import copy
 import json
 import logging
 import math
+import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import NamedTuple
 
@@ -15,6 +23,9 @@ from matplotlib.colors import Colormap, LinearSegmentedColormap
 
 from logicsponge.processmining.config import DEFAULT_CONFIG
 from logicsponge.processmining.types import Config, Event, Metrics, Prediction, ProbDistr
+
+# Lazy import types from test_data only at function call time to avoid import cycles
+# Note: test_data is imported lazily inside helpers to avoid circular imports.
 
 RED_TO_GREEN_CMAP = LinearSegmentedColormap.from_list("rg",["r", "w", "g"], N=256)
 
@@ -633,4 +644,106 @@ def plot_ngrams_vs_prefix(  # noqa: C901, D417, PLR0913, PLR0915
     plt.close()
     logger.info("Saved ngrams vs %s %s to: %s", prefix, title, out_path.resolve())
     return True
+
+
+# ============================================================
+# CLI helpers (dataset selection)
+# ============================================================
+
+
+def build_cli_parser() -> argparse.ArgumentParser:
+    """
+    Build a CLI parser shared by example scripts.
+
+    Options:
+    -d / --data DATASET_NAME   Choose dataset name from test_data.data_collection
+    """
+    parser = argparse.ArgumentParser(add_help=True)
+    parser.add_argument(
+        "-d",
+        "--data",
+        dest="data",
+        type=str,
+        default=None,
+        help="Dataset name to use (e.g. 'Sepsis_Cases', 'Helpdesk', 'BPI_Challenge_2013').",
+    )
+    return parser
+
+
+def parse_cli_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """
+    Parse CLI args using the shared parser.
+
+    Pass ``argv`` for testing; None uses sys.argv.
+    """
+    parser = build_cli_parser()
+    return parser.parse_args(argv)
+
+
+def resolve_dataset_from_args(args: argparse.Namespace) -> tuple[str, Iterator[Event], Iterator[Event] | None]:
+    """
+    Resolve dataset choice.
+
+    If ``args.data`` is provided, attempt to select that dataset. Otherwise fall
+    back to defaults exposed by ``test_data`` (data_name, dataset, dataset_test).
+
+    Returns (data_name, dataset_train_iter, dataset_test_iter_or_None).
+    """
+    # Defer import to avoid heavy module import for utilities that don't need datasets
+    from logicsponge.processmining import test_data as td  # local import to avoid cycles
+
+    if getattr(args, "data", None):
+        # Prefer explicit choice when provided
+        name = str(args.data)
+        data_map = getattr(td, "data_collection", {})
+        if name in data_map:
+            # Temporarily override DATA-like selection pattern used in test_data
+            # test_data module exposes csv_row_iterator + collection entries
+            entry = data_map[name]
+            file_path = Path("data") / entry["target_filename"]
+            # Reuse iterator factory; if unavailable fall back
+            csv_it_func = getattr(td, "csv_row_iterator", None)
+            if csv_it_func is not None:
+                row_iter = csv_it_func(
+                    file_path=str(file_path), delimiter=entry.get("delimiter", ","), dtypes=entry.get("dtypes")
+                )
+                # Build train iterator; for now treat this as both train & test if a paired test dataset isn't defined
+                dataset_train = td.my_iterator(entry, row_iter) if hasattr(td, "my_iterator") else row_iter  # type: ignore[arg-type]
+                # Attempt paired test by conventional name replacement (Train->Test)
+                paired_name = name.replace("Train", "Test")
+                dataset_test = None
+                if paired_name != name and paired_name in data_map and csv_it_func is not None:
+                    entry_test = data_map[paired_name]
+                    file_path_test = Path("data") / entry_test["target_filename"]
+                    row_iter_test = csv_it_func(
+                        file_path=str(file_path_test), delimiter=entry_test.get("delimiter", ","),
+                        dtypes=entry_test.get("dtypes")
+                    )
+                    dataset_test = (
+                        td.my_iterator(entry_test, row_iter_test)
+                        if hasattr(td, "my_iterator") else row_iter_test
+                    )
+                return name, dataset_train, dataset_test
+        logging.getLogger(__name__).warning("Dataset '%s' not found; falling back to defaults from test_data.", name)
+
+    # Default: use module-level values prepared by test_data
+    dn = getattr(td, "data_name", "Unknown")
+    ds = getattr(td, "dataset", None)
+    ds_test = getattr(td, "dataset_test", None)
+    if ds is None:
+        msg = "test_data did not expose a default dataset iterator."
+        raise RuntimeError(msg)
+    return dn, ds, ds_test
+
+
+def make_run_id(prefix: str | None, data_name: str) -> str:
+    """
+    Build a RUN_ID string with optional prefix and dataset name.
+
+    Prefix can be used for patterns (e.g., streaming custom generator). If not
+    provided, only the dataset suffix is appended.
+    """
+    ts = time.strftime("%Y-%m-%d_%H-%M", time.localtime())
+    suffix = f"_{prefix}" if prefix else f"_{data_name}"
+    return f"{ts}{suffix}"
 

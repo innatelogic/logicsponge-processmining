@@ -42,8 +42,12 @@ from logicsponge.processmining.streaming import (
     StreamingActivityPredictor,
     SynInfiniteStreamer,  # noqa: F401
 )
-from logicsponge.processmining.test_data import data_name, dataset
-from logicsponge.processmining.utils import add_file_log_handler, save_run_config
+from logicsponge.processmining.utils import (
+    add_file_log_handler,
+    parse_cli_args,
+    resolve_dataset_from_args,
+    save_run_config,
+)
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -60,6 +64,9 @@ CUSTOM_GENERATOR_PATTERN = [1, 1, 1, 0, 0, 0]
 str_pattern = s = "".join(map(str, CUSTOM_GENERATOR_PATTERN))
 
 logger = logging.getLogger(__name__)
+# Resolve dataset from CLI (optional --data); fallback to test_data defaults
+_args = parse_cli_args()
+data_name, dataset, _dataset_test_unused = resolve_dataset_from_args(_args)
 RUN_ID = (
     time.strftime("%Y-%m-%d_%H-%M", time.localtime())
     + f"_{str_pattern if CUSTOM_GENERATOR_PATTERN else data_name}"
