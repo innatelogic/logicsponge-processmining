@@ -35,7 +35,13 @@ def _left_pad_stack(seqs: list[torch.Tensor], *, pad_value: int = 0, target_len:
     if not seqs:
         return torch.zeros((0, 1), dtype=torch.long)
     max_len = target_len if target_len is not None else max(int(s.numel()) for s in seqs)
-    out = torch.full((len(seqs), max_len), pad_value, dtype=seqs[0].dtype)
+    # Allocate output on the same device as the inputs to avoid device mismatch
+    out = torch.full(
+        (len(seqs), max_len),
+        pad_value,
+        dtype=seqs[0].dtype,
+        device=seqs[0].device,
+    )
     for i, s in enumerate(seqs):
         l = int(s.numel())
         if l == 0:
@@ -108,6 +114,9 @@ class RNNModel(nn.Module):
             where each element is the predicted activity.
 
         """
+        # Ensure input indices are on the same device as module parameters
+        if self.device is not None and x.device != self.device:
+            x = x.to(self.device)
         # Convert activity indices to embeddings
         x = self.embedding(x)
 
@@ -212,6 +221,14 @@ class LSTMModel(nn.Module):
             where each element is the predicted activity.
 
         """
+        # Ensure input on model device to prevent device mismatch inside embedding/LSTM/Linear
+        if self.device is not None and x.device != self.device:
+            x = x.to(self.device)
+        if hidden is not None and self.device is not None:
+            # hidden is a tuple (h, c) for LSTM
+            h, c = hidden
+            if h.device != self.device or c.device != self.device:
+                hidden = (h.to(self.device), c.to(self.device))
         if not self.use_one_hot and self.embedding is not None:
             # Use embedding layer
             x = self.embedding(x)
@@ -246,6 +263,13 @@ class LSTMModel(nn.Module):
             new_hidden: Updated LSTM hidden state tuple ``(h, c)``.
 
         """
+        # Move to model device if specified
+        if self.device is not None and input_token.device != self.device:
+            input_token = input_token.to(self.device)
+        if hidden is not None and self.device is not None:
+            h, c = hidden
+            if h.device != self.device or c.device != self.device:
+                hidden = (h.to(self.device), c.to(self.device))
         # Ensure shape [B, 1]
         if input_token.dim() == 1:
             input_token = input_token.unsqueeze(1)
@@ -520,6 +544,11 @@ class GRUModel(nn.Module):
             new_hidden: GRU hidden state
 
         """
+        # Ensure input on model device
+        if self.device is not None and x.device != self.device:
+            x = x.to(self.device)
+        if hidden is not None and self.device is not None and hidden.device != self.device:
+            hidden = hidden.to(self.device)
         if not self.use_one_hot and self.embedding is not None:
             x = self.embedding(x)
         else:
@@ -549,6 +578,11 @@ class GRUModel(nn.Module):
             new_hidden: updated hidden
 
         """
+        # Ensure on model device
+        if self.device is not None and input_token.device != self.device:
+            input_token = input_token.to(self.device)
+        if hidden is not None and self.device is not None and hidden.device != self.device:
+            hidden = hidden.to(self.device)
         if input_token.dim() == 1:
             input_token = input_token.unsqueeze(1)
 
@@ -732,6 +766,9 @@ class TransformerModel(nn.Module):
             where each element is the predicted activity.
 
         """
+        # Move input to model device if specified, then derive working device from x
+        if self.device is not None and x.device != self.device:
+            x = x.to(self.device)
         # Ensure we keep computations on the same device as input indices
         x_device = x.device
         # Create padding mask (True for padding positions) from token indices
@@ -1009,6 +1046,15 @@ class QNetwork(nn.Module):
 
         """
         # x: LongTensor [batch, seq_len]
+        if self.device is not None and x.device != self.device:
+            x = x.to(self.device)
+        if hidden is not None and self.device is not None:
+            try:
+                if hidden.device != self.device:
+                    hidden = hidden.to(self.device)
+            except AttributeError:
+                # hidden may be a tuple in future variants
+                pass
         if not self.use_one_hot and self.embedding is not None:
             emb = self.embedding(x)  # [batch, seq_len, embedding_dim]
         else:
@@ -1047,6 +1093,14 @@ class QNetwork(nn.Module):
             where each element is the predicted Q-value for the next activity.
 
         """
+        if self.device is not None and input_token.device != self.device:
+            input_token = input_token.to(self.device)
+        if hidden is not None and self.device is not None:
+            try:
+                if hidden.device != self.device:
+                    hidden = hidden.to(self.device)
+            except AttributeError:
+                pass
         if input_token.dim() == 1:
             input_token = input_token.unsqueeze(1)
 
