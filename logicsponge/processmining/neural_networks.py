@@ -214,7 +214,7 @@ class LSTMModel(nn.Module):
 
         Args:
             x (torch.Tensor): Input tensor of shape (batch_size, seq_len), where each element is an activity index.
-            hidden (tuple[torch.Tensor, torch.Tensor] | None): Optional initial hidden and cell states for the LSTM.
+            hidden (torch.Tensor | None): Optional initial hidden and cell states for the LSTM.
 
         Returns:
             torch.Tensor: Output tensor of shape (batch_size, seq_len, output_dim),
@@ -224,11 +224,6 @@ class LSTMModel(nn.Module):
         # Ensure input on model device to prevent device mismatch inside embedding/LSTM/Linear
         if self.device is not None and x.device != self.device:
             x = x.to(self.device)
-        if hidden is not None and self.device is not None:
-            # hidden is a tuple (h, c) for LSTM
-            h, c = hidden
-            if h.device != self.device or c.device != self.device:
-                hidden = (h.to(self.device), c.to(self.device))
         if not self.use_one_hot and self.embedding is not None:
             # Use embedding layer
             x = self.embedding(x)
