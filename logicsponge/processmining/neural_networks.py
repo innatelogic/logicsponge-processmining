@@ -1533,7 +1533,7 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
     optimizer: torch.optim.Optimizer,
     batch_size: int,
     epochs: int = 10,
-    patience: int = 6,
+    patience: int = 3,
     *,
     window_size: int | None = None,
     left_pad: bool = LEFT_PAD_DEFAULT,

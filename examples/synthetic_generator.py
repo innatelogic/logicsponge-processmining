@@ -186,7 +186,7 @@ def generate_probabilistic_synthetic(  # noqa: PLR0913, PLR0915
 
             match name:
                 case "Lazy_Decrement":
-                    prefix_length = random.randint(1, 5)
+                    prefix_length = random.randint(2, 5)
                     for i in range(prefix_length, 0, -1):
                         activity = f"act_{i}"
                         timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
@@ -194,7 +194,7 @@ def generate_probabilistic_synthetic(  # noqa: PLR0913, PLR0915
 
                         activities_added += 1
                         current_time += time_increment
-                case "Random_Decision":
+                case "Random_Decision_win2":
                     marker01 = random.choice([0, 1])
                     activity = f"act_{marker01}"
                     timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
@@ -216,9 +216,15 @@ def generate_probabilistic_synthetic(  # noqa: PLR0913, PLR0915
                     timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
 
 
-
+                case "Random_Decision_win3":
                     marker012 = random.choice([0, 1, 2])
                     activity = f"act_{marker012}"
+                    timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
+                    writer.writerow([case_id, activity, timestamp])
+                    activities_added += 1
+                    current_time += time_increment
+                    timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
+
                     writer.writerow([case_id, activity, timestamp])
                     activities_added += 1
                     current_time += time_increment
@@ -248,7 +254,7 @@ if __name__ == "__main__":
     # Simple CLI so the script can be invoked directly for quick tests.
     import argparse
 
-    admissible_names = ["Lazy_Decrement", "Random_Decision"]
+    admissible_names = ["Lazy_Decrement", "Random_Decision_win2", "Random_Decision_win3"]
 
     for name in admissible_names:
         p = generate_probabilistic_synthetic(name=name)

@@ -1,4 +1,9 @@
-"""Module to evaluate and compare different process mining models."""
+"""
+Module to evaluate and compare different process mining models.
+
+Usage example:
+    python examples/predict_batch.py --data path/to/log.csv
+"""
 
 import json
 import logging
@@ -475,7 +480,7 @@ ML_TRAINING = True
 NN_TRAINING = True
 ALERGIA_TRAINING = False
 SHOW_DELAYS = False
-RL_TRAINING = False
+RL_TRAINING = True
 
 # ============================================================
 # Determine start and stop symbols

@@ -263,7 +263,7 @@ def write_prediction_vectors(
 
             if combined_rows:
                 combined_df = pd.concat(combined_rows, ignore_index=True)
-                combined_csv_path = predictions_dir / f"{run_id}_{model_name}.csv"
+                combined_csv_path = predictions_dir / f"{model_name}.csv"
                 combined_df.to_csv(combined_csv_path, index=False)
         logger.info("Saved prediction vectors for %d strategies to %s", len(prediction_vectors_memory), predictions_dir)
     except (OSError, RuntimeError, ValueError, TypeError) as e:
