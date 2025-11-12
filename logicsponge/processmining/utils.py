@@ -109,18 +109,28 @@ def probs_prediction(probs: ProbDistr, config: Config) -> Prediction | None: # n
         # Get the indices of the top-k elements, sorted in descending order
         top_k_indices = np.argsort(probabilities_array)[-config["top_k"] :][::-1]
 
-        # Use the indices to get the top-k activities
+        # Use the indices to get the top-k activities (prefer those with prob > 0)
         top_k_activities = [activities[i] for i in top_k_indices if probs_input[activities[i]] > 0]
+
+        # If filtering removed all candidates (e.g. all probabilities are 0),
+        # fall back to using the top-k activities regardless of being > 0.
+        if not top_k_activities:
+            top_k_activities = [activities[i] for i in top_k_indices]
 
         # Determine the predicted activity
         if config["randomized"]:
-            # Randomly choose an activity based on the given probability distribution
-            next_activity_idx = np.random.choice(  # noqa: NPY002
-                len(probabilities_array), p=probabilities_array / probabilities_array.sum()
-            )
+            # Randomly choose an activity based on the given probability distribution.
+            # If the probabilities sum to zero, fall back to a uniform choice.
+            prob_sum = float(probabilities_array.sum())
+            if prob_sum > 0:
+                p = probabilities_array / prob_sum
+                next_activity_idx = np.random.choice(len(probabilities_array), p=p)  # noqa: NPY002
+            else:
+                # uniform choice when distribution is degenerate (all zeros)
+                next_activity_idx = np.random.choice(len(probabilities_array))  # noqa: NPY002
             predicted_activity = activities[next_activity_idx]
         else:
-            # Get the most probable activity deterministically
+            # Get the most probable activity deterministically (first of top_k)
             predicted_activity = top_k_activities[0]
 
         # Get the highest probability corresponding to the predicted activity
@@ -746,4 +756,87 @@ def make_run_id(prefix: str | None, data_name: str) -> str:
     ts = time.strftime("%Y-%m-%d_%H-%M", time.localtime())
     suffix = f"_{prefix}" if prefix else f"_{data_name}"
     return f"{ts}{suffix}"
+
+
+def prepare_synthetic_dataset(  # noqa: C901
+    args: argparse.Namespace,
+    selected_pattern: list[int] | str,
+    total_activities: int = 10000,
+    chunksize: int = 1000,
+    data_dir: Path | None = None,
+) -> tuple[str, Iterator[Event], None] | None:
+    """
+    Prepare a synthetic dataset if requested via CLI args.
+
+    If ``args.data`` requests a synthetic dataset, generate (if missing)
+    a CSV using the examples/synthetic_generator.py and return a tuple
+    (data_name, dataset_iterator, None).
+
+    Returns None when the args do not request a synthetic dataset or when
+    generation/preparation failed (caller should fall back to standard
+    resolution in that case).
+    """
+    logger = logging.getLogger(__name__)
+    if not getattr(args, "data", None) or not str(args.data).lower().startswith("synthetic"):
+        return None
+
+    try:
+        # Import the generator module by path to avoid package import side-effects
+        import importlib.util as _importlib_util
+
+        gen_path = Path(__file__).resolve().parents[2] / "examples" / "synthetic_generator.py"
+        spec = _importlib_util.spec_from_file_location("synthetic_generator", str(gen_path))
+        if not (spec and spec.loader):
+            logger.error("Could not load synthetic generator module from %s", gen_path)
+            return None
+        gen_mod = _importlib_util.module_from_spec(spec)
+        spec.loader.exec_module(gen_mod)  # type: ignore[attr-defined]
+
+        if data_dir is None:
+            data_dir = Path(__file__).resolve().parents[2] / "data"
+
+        pattern_str = "".join(map(str, selected_pattern))
+        filename = f"Synthetic{pattern_str}.csv"
+        save_path = data_dir / filename
+
+        if not save_path.exists():
+            # Delegate generation to the examples generator
+            gen_mod.generate_synthetic(pattern=selected_pattern, save_path=save_path, total_activities=total_activities)  # type: ignore[attr-defined]
+            logger.info("Generated synthetic dataset at %s", save_path)
+        else:
+            logger.info("Synthetic dataset already exists at %s", save_path)
+
+        # Build a lightweight pandas-based row iterator and an Event iterator
+        from logicsponge.processmining.data_utils import parse_timestamp
+
+        def csv_row_iterator(file_path: Path, delimiter: str = ",", chunksize: int = chunksize) -> Iterator[dict]:
+            for chunk in pd.read_csv(
+                file_path, chunksize=chunksize, delimiter=delimiter, dtype=str, keep_default_na=False
+            ):
+                yield from chunk.to_dict("records")
+
+        entry = {"case_keys": ["case:concept:name"], "activity_keys": ["concept:name"], "timestamp": "time:timestamp"}
+
+        def my_iterator_from_csv(iter_data: dict, iter_row_iterator: Iterator[dict]) -> Iterator[Event]:
+            timestamp_key = iter_data.get("timestamp")
+            for row in iter_row_iterator:
+                ev = {
+                    "case_id": row.get("case:concept:name"),
+                    "activity": row.get("concept:name"),
+                    "timestamp": None,
+                }
+                if timestamp_key:
+                    raw_ts = row.get(timestamp_key)
+                    if raw_ts:
+                        ev["timestamp"] = parse_timestamp(raw_ts)
+                yield ev  # type: ignore  # Event-compatible dict  # noqa: PGH003
+
+        dataset = my_iterator_from_csv(entry, csv_row_iterator(save_path))
+        data_name = f"Synthetic_{pattern_str}"
+    except Exception:
+        logger.exception("Failed preparing synthetic dataset")
+        return None
+    else:
+        return data_name, dataset, None
+
 

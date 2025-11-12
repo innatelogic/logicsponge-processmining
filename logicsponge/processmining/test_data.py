@@ -163,6 +163,28 @@ data_collection = {
         "delimiter": ",",
         "dtypes": None,
     },
+    "Lazy_Decrement": {
+        "url": None,
+        "doi": None,
+        "filetype": None,
+        "target_filename": "Lazy_Decrement.csv",
+        "case_keys": ["case:concept:name"],
+        "activity_keys": ["concept:name"],
+        "timestamp": "time:timestamp",
+        "delimiter": ",",
+        "dtypes": None,
+    },
+    "Random_Decision": {
+        "url": None,
+        "doi": None,
+        "filetype": None,
+        "target_filename": "Random_Decision.csv",
+        "case_keys": ["case:concept:name"],
+        "activity_keys": ["concept:name"],
+        "timestamp": "time:timestamp",
+        "delimiter": ",",
+        "dtypes": None,
+    },
     "Synthetic_Train": {
         "url": None,
         "doi": None,
@@ -226,6 +248,25 @@ if DATA == "file":
     file_path = Path(FOLDERNAME) / mydata["target_filename"]
 
     mydata["file_path"] = file_path
+    # If this is a synthetic dataset and the CSV isn't present, try to generate it
+    if str(mydata["target_filename"]).startswith("Synthetic") and not mydata["file_path"].exists():
+        try:
+            # Import generator by path to avoid requiring examples to be a package
+            from importlib import util as importlib_util
+
+            gen_path = Path(__file__).resolve().parents[1] / "examples" / "synthetic_generator.py"
+            spec = importlib_util.spec_from_file_location("synthetic_generator", str(gen_path))
+            if spec and spec.loader:
+                gen_mod = importlib_util.module_from_spec(spec)
+                spec.loader.exec_module(gen_mod)  # type: ignore[attr-defined]
+                # Use default pattern if caller didn't provide one
+                gen_mod.generate_synthetic(save_path=mydata["file_path"])  # type: ignore[attr-defined]
+                logger.info("Generated synthetic dataset at %s", mydata["file_path"])
+        except Exception:
+            logger.exception(
+                "Could not generate synthetic dataset %s; continuing and letting downstream errors surface.",
+                mydata["file_path"]
+            )
     if mydata["url"] is not None:
         file_handler.handle_file(
             file_type=mydata["filetype"], url=mydata["url"], filename=mydata["target_filename"], doi=mydata["doi"]

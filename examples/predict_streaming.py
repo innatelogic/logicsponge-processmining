@@ -2,13 +2,14 @@
 
 
 
-import gc
+import gc  # noqa: F401
 import json
 import logging
 import time
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
-# ruff: noqa: E402
 import torch
 from torch import nn, optim
 
@@ -24,7 +25,7 @@ from logicsponge.processmining.miners import (
     Fallback,
     HardVoting,
     NeuralNetworkMiner,
-    RLMiner,  # added RLMiner
+    RLMiner,
     SoftVoting,
     WindowedNeuralNetworkMiner,
 )
@@ -45,6 +46,7 @@ from logicsponge.processmining.streaming import (
 from logicsponge.processmining.utils import (
     add_file_log_handler,
     parse_cli_args,
+    prepare_synthetic_dataset,
     resolve_dataset_from_args,
     save_run_config,
 )
@@ -58,18 +60,39 @@ logging.getLogger("logicsponge.processmining.models").setLevel(logging.INFO)
 logging.getLogger("logicsponge.processmining.streaming").setLevel(logging.INFO)
 logging.getLogger("logicsponge.processmining").setLevel(logging.INFO)
 
-CUSTOM_GENERATOR_PATTERN = [1, 1, 1, 0, 0, 0]
+PATTERN_111000 = [1, 1, 1, 0, 0, 0]
+PATTERN_111100 = [1, 1, 1, 0, 0]
+PATTERN_1010110010110 = [1, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0]
+
+SELECTED_PATTERN = PATTERN_1010110010110
+
 # [0, 1, 0, 1, 2, 1, 0, 1, 2, 3, 2, 1]
 # [1, 1, 1, 0, 0, 0]
-str_pattern = s = "".join(map(str, CUSTOM_GENERATOR_PATTERN))
-
+str_pattern = s = "".join(map(str, SELECTED_PATTERN))
 logger = logging.getLogger(__name__)
 # Resolve dataset from CLI (optional --data); fallback to test_data defaults
 _args = parse_cli_args()
-data_name, dataset, _dataset_test_unused = resolve_dataset_from_args(_args)
+# Ensure these variables are defined for type-checkers / linters in all code paths
+data_name = None
+dataset: Iterator[Any] = iter(())
+_dataset_test_unused = None
+
+# If user requested a synthetic dataset, try to prepare it via shared helper
+if getattr(_args, "data", None) and str(_args.data).lower().startswith("synthetic"):
+    try:
+        res = prepare_synthetic_dataset(_args, SELECTED_PATTERN, total_activities=10000)
+        if res is not None:
+            data_name, dataset, _dataset_test_unused = res
+        else:
+            data_name, dataset, _dataset_test_unused = resolve_dataset_from_args(_args)
+    except Exception:
+        logger.exception("Failed to prepare synthetic dataset; falling back to standard resolution")
+        data_name, dataset, _dataset_test_unused = resolve_dataset_from_args(_args)
+else:
+    data_name, dataset, _dataset_test_unused = resolve_dataset_from_args(_args)
 RUN_ID = (
     time.strftime("%Y-%m-%d_%H-%M", time.localtime())
-    + f"_{str_pattern if CUSTOM_GENERATOR_PATTERN else data_name}"
+    + f"_{str_pattern if SELECTED_PATTERN else data_name}"
 )
 stats_to_log = []
 # create a run-specific results directory: results/{RUN_ID}
@@ -84,7 +107,7 @@ predictions_dir.mkdir(parents=True, exist_ok=True)
 # --- Run configuration (defaults + writing config file like predict_batch.py)
 config_file_path = Path(__file__).parent / "predict_config.json"
 MAGIC_VALUE = 8
-HIDDEN_DIM_DEFAULT = 128
+HIDDEN_DIM_DEFAULT = 256 #128
 default_run_config = {
     "nn": {"lr": 0.001, "batch_size": 8, "epochs": 20},
     "transf": {"lr": 0.0006, "batch_size": 8, "epochs": 20},
@@ -100,7 +123,6 @@ default_run_config = {
         "hidden_dim": HIDDEN_DIM_DEFAULT,
     },
     "transformer": {
-        "seq_input_dim": 32,
         "vocab_size": MAGIC_VALUE,
         "embedding_dim": MAGIC_VALUE,
         "hidden_dim": HIDDEN_DIM_DEFAULT,
@@ -140,8 +162,8 @@ try:
 except OSError:
     logger.debug("Could not create log file %s; continuing with console logging.", log_file_path)
 
-# disable circular gc here, since a phase 2 may take minutes
-gc.disable()
+# # disable circular gc here, since a phase 2 may take minutes
+# gc.disable()
 
 # def gb_callback_example(phase, info: dict):
 #     print("gc", phase, info)
@@ -177,8 +199,9 @@ SHOW_DELAYS = False
 MODEL_SELECTOR = {
     # Base NN models
     "lstm": True,
-    "gru": False,
+    "gru": True,
     "transformer": True,
+    "default_transformer": False,
     # Attention-head variants for transformer (transformer_2heads, transformer_4heads, ...)
     "transformer_heads": False,
     # transformer variants with different positional encodings
@@ -186,7 +209,8 @@ MODEL_SELECTOR = {
     # Windowed NN variants
     "window": True,
     # RL models
-    "qlearning": False,
+    "qlearning": True,
+    "qlearning_linear": False,
 }
 
 # ====================================================
@@ -227,7 +251,13 @@ NGRAM_RETURN_TO_INITIAL = True
 
 # RL (QNetwork) window configurations (align to batch-style windows)
 RL_WINDOWS = NN_WINDOW_RANGE
-RL_NAMES = [f"qlearning_linear_win{w}" for w in RL_WINDOWS] + [f"qlearning_gru_win{w}" for w in RL_WINDOWS]
+# Build RL model name list conditionally: include linear variants only when
+# MODEL_SELECTOR enables them. This prevents adding linear Q-learning models
+# to the test bench when the selector is False.
+RL_NAMES: list[str] = []
+if MODEL_SELECTOR.get("qlearning_linear", True):
+    RL_NAMES += [f"qlearning_linear_win{w}" for w in RL_WINDOWS]
+RL_NAMES += [f"qlearning_gru_win{w}" for w in RL_WINDOWS]
 # Two non-windowed baselines (user request): one GRU architecture and one linear architecture
 RL_BASELINE_GRU_NAME = "qlearning_gru"
 RL_BASELINE_LINEAR_NAME = "qlearning_linear"
@@ -597,7 +627,6 @@ for w in NN_WINDOW_RANGE:
     # (windowed default transformer handled below once per window)
 
 
-
     # Transformer windowed variant (default positional encoding)
     model_tr_w = TransformerModel(
         vocab_size=transformer_cfg.get("vocab_size", vocab_size),
@@ -708,27 +737,29 @@ for w in RL_WINDOWS:
         )
     )
 
-    model_qlearning = QNetwork(
-        vocab_size=q_cfg.get("vocab_size", vocab_size),
-        embedding_dim=q_cfg.get("embedding_dim", embedding_dim),
-        hidden_dim=q_cfg.get("hidden_dim", hidden_dim),
-        device=device,
-        model_architecture="linear"
-    ).to(device)
-    criterion_q = nn.MSELoss()
-    optimizer_q = optim.Adam(model_qlearning.parameters(), lr=run_config.get("rl", {}).get("lr", 0.001))
+    # Optionally create the linear Q-learning (windowed) model depending on selector
+    if MODEL_SELECTOR.get("qlearning_linear", True):
+        model_qlearning = QNetwork(
+            vocab_size=q_cfg.get("vocab_size", vocab_size),
+            embedding_dim=q_cfg.get("embedding_dim", embedding_dim),
+            hidden_dim=q_cfg.get("hidden_dim", hidden_dim),
+            device=device,
+            model_architecture="linear",
+        ).to(device)
+        criterion_q = nn.MSELoss()
+        optimizer_q = optim.Adam(model_qlearning.parameters(), lr=run_config.get("rl", {}).get("lr", 0.001))
 
-    RL_MODELS[f"qlearning_linear_win{w}"] = StreamingActivityPredictor(
-        strategy=RLMiner(
-            model=model_qlearning,
-            criterion=criterion_q,
-            optimizer=optimizer_q,
-            config=config,
-            sequence_buffer_length=w,  # has to be enough to cover short_term_mem_size
-            long_term_mem_size=8,
-            short_term_mem_size=16,  # ~n in n-gram
+        RL_MODELS[f"qlearning_linear_win{w}"] = StreamingActivityPredictor(
+            strategy=RLMiner(
+                model=model_qlearning,
+                criterion=criterion_q,
+                optimizer=optimizer_q,
+                config=config,
+                sequence_buffer_length=w,  # has to be enough to cover short_term_mem_size
+                long_term_mem_size=8,
+                short_term_mem_size=16,  # ~n in n-gram
+            )
         )
-    )
 
 """Add two non-windowed baselines (large buffer approximates "no window")"""
 # GRU baseline
@@ -754,31 +785,32 @@ RL_MODELS[RL_BASELINE_GRU_NAME] = StreamingActivityPredictor(
     )
 )
 
-# Linear baseline
-model_qlearning_linear_base = QNetwork(
-    vocab_size=run_config.get("qlearning", {}).get("vocab_size", vocab_size),
-    embedding_dim=run_config.get("qlearning", {}).get("embedding_dim", embedding_dim),
-    hidden_dim=run_config.get("qlearning", {}).get("hidden_dim", hidden_dim),
-    device=device,
-    model_architecture="linear",
-).to(device)
-criterion_q_linear_base = nn.MSELoss()
-optimizer_q_linear_base = optim.Adam(
-    model_qlearning_linear_base.parameters(),
-    lr=run_config.get("rl", {}).get("lr", 0.001),
-)
-
-RL_MODELS[RL_BASELINE_LINEAR_NAME] = StreamingActivityPredictor(
-    strategy=RLMiner(
-        model=model_qlearning_linear_base,
-        criterion=criterion_q_linear_base,
-        optimizer=optimizer_q_linear_base,
-        config=config,
-        sequence_buffer_length=10000,
-        long_term_mem_size=8,
-        short_term_mem_size=16,
+# Linear baseline (optional)
+if MODEL_SELECTOR.get("qlearning_linear", True):
+    model_qlearning_linear_base = QNetwork(
+        vocab_size=run_config.get("qlearning", {}).get("vocab_size", vocab_size),
+        embedding_dim=run_config.get("qlearning", {}).get("embedding_dim", embedding_dim),
+        hidden_dim=run_config.get("qlearning", {}).get("hidden_dim", hidden_dim),
+        device=device,
+        model_architecture="linear",
+    ).to(device)
+    criterion_q_linear_base = nn.MSELoss()
+    optimizer_q_linear_base = optim.Adam(
+        model_qlearning_linear_base.parameters(),
+        lr=run_config.get("rl", {}).get("lr", 0.001),
     )
-)
+
+    RL_MODELS[RL_BASELINE_LINEAR_NAME] = StreamingActivityPredictor(
+        strategy=RLMiner(
+            model=model_qlearning_linear_base,
+            criterion=criterion_q_linear_base,
+            optimizer=optimizer_q_linear_base,
+            config=config,
+            sequence_buffer_length=10000,
+            long_term_mem_size=8,
+            short_term_mem_size=16,
+        )
+    )
 
 # ====================================================
 # Sponge
@@ -813,7 +845,8 @@ if MODEL_SELECTOR.get("gru", False):
     if MODEL_SELECTOR.get("window", False):
         models.extend(GRU_WIN_NAMES)
 if MODEL_SELECTOR.get("transformer", False):
-    models.append("transformer")
+    if MODEL_SELECTOR.get("default_transformer", False):
+        models.append("transformer")
     if MODEL_SELECTOR.get("window", False):
         models.extend(TRANSFORMER_WIN_NAMES)
 if MODEL_SELECTOR.get("qlearning", False):
@@ -866,7 +899,7 @@ streamer = IteratorStreamer(data_iterator=dataset)
 
 # streamer = SynInfiniteStreamer(max_prefix_length=10)
 # streamer = InfiniteDiscriminerSource()
-streamer = CustomStreamer(sequence = CUSTOM_GENERATOR_PATTERN)
+streamer = CustomStreamer(sequence = SELECTED_PATTERN)
 
 def start_filter(item: DataItem) -> bool:
     """Filter function to check if the activity is not the start symbol."""
@@ -943,7 +976,7 @@ if NN_TRAINING and ML_TRAINING:
             * Evaluation("gru")
         )
 
-    if MODEL_SELECTOR.get("transformer", False):
+    if MODEL_SELECTOR.get("default_transformer", False):
         prediction_group = prediction_group | (
             AddStartSymbol(start_symbol=start_symbol)
             * transformer
@@ -1045,15 +1078,16 @@ if RL_TRAINING and ML_TRAINING:
             * Evaluation(RL_BASELINE_GRU_NAME)
         )
         # Linear baseline predictions
-        prediction_group = prediction_group | (
-            AddStartSymbol(start_symbol=start_symbol)
-            * RL_MODELS[RL_BASELINE_LINEAR_NAME]
-            * DataItemFilter(data_item_filter=start_filter)
-            * PredictionCSVWriter(
-                csv_path=predictions_dir / f"{RL_BASELINE_LINEAR_NAME}.csv", model_name=RL_BASELINE_LINEAR_NAME
+        if MODEL_SELECTOR.get("qlearning_linear", True):
+            prediction_group = prediction_group | (
+                AddStartSymbol(start_symbol=start_symbol)
+                * RL_MODELS[RL_BASELINE_LINEAR_NAME]
+                * DataItemFilter(data_item_filter=start_filter)
+                * PredictionCSVWriter(
+                    csv_path=predictions_dir / f"{RL_BASELINE_LINEAR_NAME}.csv", model_name=RL_BASELINE_LINEAR_NAME
+                )
+                * Evaluation(RL_BASELINE_LINEAR_NAME)
             )
-            * Evaluation(RL_BASELINE_LINEAR_NAME)
-        )
 
 # `set_history_bound` is a method on DataStream. The source term `streamer`
 # exposes its output DataStream as `_output` (see SourceTerm in logicsponge).

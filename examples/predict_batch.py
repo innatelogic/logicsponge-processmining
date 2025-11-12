@@ -37,6 +37,13 @@ default_run_config = {
     },
 }
 
+# Synthetic pattern constants (parity with predict_streaming)
+PATTERN_1x3_0x3 = [1, 1, 1, 0, 0, 0]
+PATTERN_1x3_0x2 = [1, 1, 1, 0, 0]
+PATTERN_10x3_10x2_10x1 = [1, 0] * 4 + [1] * 2 + [0] * 2 + [1, 0] * 2 + [1] + [0]
+
+SELECTED_PATTERN = PATTERN_1x3_0x2
+
 # Write the default run configuration into `predict_config.json` in the repo folder.
 # We intentionally write the defaults here (instead of loading) so that users get a
 # populated config file they can edit. If writing fails we fall back to in-memory defaults.
@@ -83,6 +90,7 @@ from logicsponge.processmining.utils import (
     add_file_log_handler,
     compute_perplexity_stats,
     parse_cli_args,
+    prepare_synthetic_dataset,
     resolve_dataset_from_args,
     save_run_config,
 )
@@ -384,7 +392,19 @@ logger = logging.getLogger(__name__)
 
 # Resolve dataset from CLI (optional --data); fallback to test_data defaults
 _args = parse_cli_args()
-data_name, dataset, dataset_test_opt = resolve_dataset_from_args(_args)
+# Support on-demand synthetic dataset generation like predict_streaming
+if getattr(_args, "data", None) and str(_args.data).lower().startswith("synthetic"):
+    try:
+        res = prepare_synthetic_dataset(_args, SELECTED_PATTERN, total_activities=10000)
+        if res is not None:
+            data_name, dataset, dataset_test_opt = res
+        else:
+            data_name, dataset, dataset_test_opt = resolve_dataset_from_args(_args)
+    except Exception:
+        logger.exception("Failed to prepare synthetic dataset; falling back to standard resolution")
+        data_name, dataset, dataset_test_opt = resolve_dataset_from_args(_args)
+else:
+    data_name, dataset, dataset_test_opt = resolve_dataset_from_args(_args)
 dataset_test = dataset_test_opt if dataset_test_opt is not None else dataset
 
 # Log the resolved run configuration
