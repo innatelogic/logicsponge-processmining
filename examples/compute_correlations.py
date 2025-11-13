@@ -24,6 +24,8 @@ Requirements: dash, pandas, numpy
 from __future__ import annotations
 
 import argparse
+import logging
+import re
 import webbrowser
 from functools import lru_cache
 from pathlib import Path
@@ -63,15 +65,43 @@ def find_all_runs(results_root: Path) -> list[Path]:
     return subdirs
 
 
-def load_sequences(pred_dir: Path) -> tuple[list[str], dict[str, list[str]]]: # noqa: C901
+def load_sequences(pred_dir: Path) -> tuple[list[str], dict[str, list[str]]]:  # noqa: C901, PLR0912, PLR0915
     """
     Load baseline actual and per-model predicted sequences from CSV files.
 
     Returns (actual_list, model_to_pred_list). Lists are trimmed to a common min length.
     """
-    actual_path = pred_dir / "actual.csv"
-    if not actual_path.exists():
-        msg = f"Missing baseline file: {actual_path}"
+    # Support both `actual.csv` and `<RUN_ID>_actual.csv` naming schemes.
+    csv_files = sorted(pred_dir.glob("*.csv"))
+    if not csv_files:
+        msg = f"No CSV files found in predictions folder: {pred_dir}"
+        logging.getLogger(__name__).warning(msg)
+        return [], {}
+
+    # Determine run_id prefix used in some prediction filenames. Some run directories
+    # end with suffixes like '_batch' or '_streaming' but filenames use the base
+    # run id without that suffix (e.g. '2025-11-12_23-38_Random_Decision_win2').
+    run_name = pred_dir.parent.name if pred_dir.parent is not None else ""
+    if run_name.endswith("_batch"):
+        run_id = run_name[: -len("_batch")]
+    elif run_name.endswith("_streaming"):
+        run_id = run_name[: -len("_streaming")]
+    else:
+        run_id = run_name
+
+    # Prefer exact 'actual.csv' if present, otherwise pick a file whose stem endswith '_actual'
+    actual_path = None
+    for p in csv_files:
+        if p.stem == "actual":
+            actual_path = p
+            break
+    if actual_path is None:
+        for p in csv_files:
+            if p.stem.endswith("_actual"):
+                actual_path = p
+                break
+    if actual_path is None:
+        msg = f"Missing baseline file (expected 'actual.csv' or '*_actual.csv') in: {pred_dir}"
         raise FileNotFoundError(msg)
 
     # Load actuals
@@ -84,12 +114,22 @@ def load_sequences(pred_dir: Path) -> tuple[list[str], dict[str, list[str]]]: # 
         df_actual = df_actual.sort_values("step")
     actual_list = df_actual["actual"].astype(str).tolist()
 
-    # Load model predictions
+    # Load model predictions. Support names like 'model.csv' and '<RUN_ID>_model.csv'.
     model_series: dict[str, list[str]] = {}
-    for csv_file in sorted(pred_dir.glob("*.csv")):
-        name = csv_file.stem
-        if name == "actual":
+    for csv_file in csv_files:
+        # # Skip the chosen actual file
+        # if csv_file == actual_path:
+        #     continue
+        stem = csv_file.stem
+        # If the file is prefixed with the run id (e.g. '<RUN_ID>_ngram_3'), strip it
+        name = stem[len(run_id) + 1 :] if run_id and stem.startswith(f"{run_id}_") else stem
+
+        # Exclude iterative checkpoint models named with a trailing 'iter' number
+        # e.g., 'model_iter1', 'ngram_iter2' or simply 'iter1'
+        if re.search(r"iter\d+$", name):
+            # skip iterative models from the dashboard
             continue
+
         try:
             pred_df = pd.read_csv(csv_file)
             if "predicted" not in pred_df.columns:
@@ -131,8 +171,8 @@ def compute_pair_cumsums(
     # Unpack model sequences from the tuple mapping
     models_dict = {name: list(seq) for name, seq in models}
     act = list(actual)
-    test_seq = list(models_dict[tested])
-    # Support using baseline 'actual' as a reference model
+    # Support using baseline 'actual' as either tested or reference model
+    test_seq = act if tested == "actual" else list(models_dict[tested])
     ref_seq = act if reference == "actual" else list(models_dict[reference])
     n = min(len(act), len(test_seq), len(ref_seq))
 
@@ -299,12 +339,19 @@ def build_app(results_root: Path, run_dir: Path) -> Dash:  # noqa: C901, PLR0915
 
     actual_list, model_series = load_sequences(pred_dir)
     strategies = sorted(model_series.keys())
-    # Allow referencing the baseline as a reference model
-    reference_candidates = [*strategies, "actual"]
-    default_tested = "ngram_3" if "ngram_3" in strategies else (strategies[0] if strategies else None)
+    # Candidates for tested and reference selectors. We include the baseline 'actual'
+    # in both selectors (deduplicated) so the user can choose it for either role.
+    tested_candidates = list(dict.fromkeys([*strategies, "actual"]))
+    reference_candidates = list(dict.fromkeys([*strategies, "actual"]))
+    # Prefer a reasonable default tested strategy that is not the baseline 'actual'
+    if "LSTM" in strategies:
+        default_tested = "LSTM"
+    else:
+        non_actual = [s for s in strategies if s != "actual"]
+        default_tested = non_actual[0] if non_actual else ("actual" if "actual" in strategies else None)
     if default_tested is None:
         msg = "No strategies found to visualize."
-        raise RuntimeError(msg)
+        logging.getLogger(__name__).warning(msg)
 
     # Pack sequences into tuples for cacheable functions
     actual_tuple = tuple(actual_list)
@@ -331,16 +378,17 @@ def build_app(results_root: Path, run_dir: Path) -> Dash:  # noqa: C901, PLR0915
                             options=run_options,  # type: ignore[arg-type]
                             value=default_run_value,
                             clearable=False,
+                            style={"width": "520px"},
                         ),
                     ], style={"minWidth": "320px"}),
                     html.Div([
                         html.Label("Tested strategy"),
                         dcc.Dropdown(
-                            id="tested-model",
-                            options=[{"label": s, "value": s} for s in strategies],
-                            value=default_tested,
-                            clearable=False,
-                        ),
+                                id="tested-model",
+                                options=[{"label": s, "value": s} for s in tested_candidates],
+                                value=default_tested,
+                                clearable=False,
+                            ),
                     ], style={"minWidth": "280px"}),
                     html.Div([
                         html.Label("Reference strategies (mask/unmask)"),
@@ -423,13 +471,21 @@ def build_app(results_root: Path, run_dir: Path) -> Dash:  # noqa: C901, PLR0915
                 # Avoid raising an exception inside the inner callback; return no_update so the UI remains stable
                 print(f"Warning: {msg} in {experiment_path}")
                 return no_update, no_update, no_update, no_update, no_update, no_update, no_update
-            default_test = "ngram_3" if "ngram_3" in strats else strats[0]
-            ref_cands = [*strats, "actual"]
+            # Prefer a tested strategy that is not the baseline 'actual' so the baseline
+            # is available by default in the reference selector.
+            if "LSTM" in strats:
+                default_test = "LSTM"
+            else:
+                non_actual = [s for s in strats if s != "actual"]
+                default_test = non_actual[0] if non_actual else ("actual" if "actual" in strats else None)
+            # Provide tested options including 'actual'
+            tested_opts = list(dict.fromkeys([*strats, "actual"]))
+            ref_cands = list(dict.fromkeys([*strats, "actual"]))
 
             return (
                 list(actual_l),
                 {k: list(v) for k, v in model_s.items()},
-                [{"label": s, "value": s} for s in strats],
+                [{"label": s, "value": s} for s in tested_opts],
                 default_test,
                 [{"label": s, "value": s} for s in ref_cands],
                 [s for s in ref_cands if s != default_test],
@@ -463,6 +519,18 @@ def build_app(results_root: Path, run_dir: Path) -> Dash:  # noqa: C901, PLR0915
         # Repack for cache lookup
         actual_t = tuple(actual_data)
         models_t = tuple((k, tuple(v)) for k, v in models_data.items())
+
+        # Allow 'actual' to be selected as tested (it's stored separately in store-actual)
+        if tested is None or (tested != "actual" and tested not in models_data):
+            layout_common = {
+                "xaxis": {"title": "Iteration"},
+                "yaxis": {"title": "Ratio", "range": [0, 1]},
+                "margin": {"l": 40, "r": 10, "t": 20, "b": 40},
+                "legend": {"orientation": "h", "y": -0.2},
+            }
+            empty_fig = go.Figure(data=[], layout=go.Layout(**layout_common))
+            empty_fig.update_layout(title="No prediction data available for the selected run")
+            return empty_fig, empty_fig, empty_fig, empty_fig
 
         # Ensure references default to all except tested
         if not references:

@@ -2,7 +2,7 @@
 
 
 
-import gc  # noqa: F401
+import gc
 import json
 import logging
 import time
@@ -163,7 +163,7 @@ except OSError:
     logger.debug("Could not create log file %s; continuing with console logging.", log_file_path)
 
 # # disable circular gc here, since a phase 2 may take minutes
-# gc.disable()
+gc.disable()
 
 # def gb_callback_example(phase, info: dict):
 #     print("gc", phase, info)
