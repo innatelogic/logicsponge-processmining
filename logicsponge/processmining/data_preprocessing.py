@@ -148,11 +148,11 @@ class WindowedSequenceDataset:
 class TransformerPrefixDataset:
     """
     Create prefix-based dataset for Transformer training.
-    
+
     Generates ALL possible prefixes from each sequence, with optional windowing
     to limit prefix length. This matches the prefix-based evaluation used for
     Transformers where we predict the next token given all previous tokens.
-    
+
     Example:
         For sequence [A, B, C, D] with window_size=3:
         Creates: [A], [A,B], [A,B,C], [B,C,D]

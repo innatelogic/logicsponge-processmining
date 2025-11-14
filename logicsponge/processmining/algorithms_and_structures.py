@@ -1,3 +1,6 @@
+"""Algorithms and structures for process mining."""
+
+
 import copy
 import logging
 import math
@@ -580,6 +583,53 @@ class BaseStructure(PDFA, ABC):
 
         return metrics  # , state is not None
 
+    def top_visited_states(self, top_n: int = 3) -> list[dict]:
+        """
+        Return the top-N visited states (excluding the initial state) with visit rates.
+
+        The visit rate is computed as visits_of_state / total_visits_over_all_states
+        (excluding the initial state in both numerator and denominator).
+
+        Returns a list of dicts with keys: 'state_id', 'state', 'visits', 'visit_rate'.
+        """
+        # Aggregate total visits (exclude initial state)
+        total_visits = 0
+        for sid, info in self.state_info.items():
+            if sid == getattr(self, "initial_state", None):
+                continue
+            total_visits += info.get("total_visits", 0)
+
+        if total_visits == 0:
+            return []
+
+        # Collect states with their visits and a string representation
+        states_list: list[tuple[StateId, str, int]] = []
+        for sid, info in self.state_info.items():
+            if sid == getattr(self, "initial_state", None):
+                continue
+            visits = int(info.get("total_visits", 0))
+            access = info.get("access_string", None)
+            # Prefer access_string for human-readable representation, fall back to state id
+            state_str = str(access) if access is not None else str(sid)
+            states_list.append((sid, state_str, visits))
+
+        # Sort by visits descending and pick top_n
+        states_list.sort(key=lambda x: x[2], reverse=True)
+        top = states_list[:top_n]
+
+        # Build result list with rates
+        result: list[dict] = []
+        for sid, state_str, visits in top:
+            visit_rate = visits / total_visits if total_visits > 0 else 0.0
+            result.append({
+                "state_id": sid,
+                "state": state_str,
+                "visits": visits,
+                "visit_rate": visit_rate,
+            })
+
+        return result
+
 
 # ============================================================
 # Frequency Prefix Tree
@@ -826,6 +876,58 @@ class NGram(BaseStructure):
     #     # THIS IS VERY WRONG, we need the whole sequence
     #     # sequence = sequence[-self.window_length :] if self.window_length > 0 else []
     #     return super().sequence_metrics(sequence)
+
+    def top_three_visit_rates(self) -> list[dict]:
+        """
+        Return the top-3 visited states (excluding the initial state) and their visit rates.
+
+        The visit rate is visits_of_state / total_visits (sum over all states, excluding the initial state).
+        Each returned dict contains: 'state_id', 'state_str', 'visits', 'visit_rate'.
+        """
+        # Aggregate total visits excluding the initial state
+        total_visits = 0
+        for sid, info in self.state_info.items():
+            if sid == getattr(self, "initial_state", None):
+                continue
+            total_visits += int(info.get("total_visits", 0))
+
+        if total_visits == 0:
+            return []
+
+        # Collect (state_id, string rep, visits)
+        states_list: list[tuple[StateId, str, int]] = []
+        for sid, info in self.state_info.items():
+            if sid == getattr(self, "initial_state", None):
+                continue
+            visits = int(info.get("total_visits", 0))
+            access = info.get("access_string", None)
+            # Prefer a readable access string; fall back to state id
+            if access is None:
+                state_str = str(sid)
+            else:
+                # represent tuple access_string as comma-separated values for readability
+                try:
+                    state_str = ",".join(map(str, access)) if len(access) > 0 else "()"
+                except ValueError:
+                    state_str = str(access)
+
+            states_list.append((sid, state_str, visits))
+
+        # Sort and pick top 3
+        states_list.sort(key=lambda x: x[2], reverse=True)
+        top = states_list[:3]
+
+        result: list[dict] = []
+        for sid, state_str, visits in top:
+            visit_rate = visits / total_visits if total_visits > 0 else 0.0
+            result.append({
+                "state_id": sid,
+                "state_str": state_str,
+                "visits": visits,
+                "visit_rate": visit_rate,
+            })
+
+        return result
 
 
 # ============================================================

@@ -28,6 +28,7 @@ logging.basicConfig(
 
 from logicsponge.processmining.algorithms_and_structures import (
     BayesianClassifier,
+    NGram,
 )
 from logicsponge.processmining.batch_helpers import (
     build_and_save_comparison_matrices,
@@ -67,39 +68,6 @@ from logicsponge.processmining.utils import (
 )
 
 SEC_TO_MICRO = 1_000_000
-
-MAGIC_NUMBER = 8
-# Load run configuration (learning rates, batch sizes, epochs for NN and RL)
-config_file_path = Path(__file__).parent / "predict_config.json"
-default_run_config = {
-    "nn": {"lr": 0.001, "batch_size": 8, "epochs": 100},
-    "rl": {"lr": 0.001, "batch_size": 64, "epochs": 20, "gamma": 0.99},
-    "lstm": {"vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 128, "output_dim": MAGIC_NUMBER},
-    "transformer": {
-        "vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 512, "output_dim": MAGIC_NUMBER
-    },
-    "qlearning": {
-        "vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 512, "output_dim": MAGIC_NUMBER
-    },
-}
-
-# Synthetic pattern constants (parity with predict_streaming)
-PATTERN_1x3_0x3 = [1, 1, 1, 0, 0, 0]
-PATTERN_1x3_0x2 = [1, 1, 1, 0, 0]
-PATTERN_10x3_10x2_10x1 = [1, 0] * 4 + [1] * 2 + [0] * 2 + [1, 0] * 2 + [1] + [0]
-
-SELECTED_PATTERN = PATTERN_1x3_0x3
-
-# Write the default run configuration into `predict_config.json` in the repo folder.
-# We intentionally write the defaults here (instead of loading) so that users get a
-# populated config file they can edit. If writing fails we fall back to in-memory defaults.
-try:
-    with config_file_path.open("w") as _f:
-        json.dump(default_run_config, _f, indent=2)
-    run_config = default_run_config
-except OSError as _e:
-    logging.getLogger(__name__).debug("Could not write default config to %s: %s", config_file_path, _e)
-    run_config = default_run_config
 
 def lstm_model() -> tuple[LSTMModel, optim.Optimizer, nn.Module]:
     """Initialize and return an LSTM model, optimizer, and loss function."""
@@ -404,6 +372,38 @@ def process_rl_model(
     # Return the relevant outputs so the caller can integrate them into iteration records
     return metrics, eval_pp, eval_time, prediction_vector, train_time
 
+
+ML_TRAINING = True
+NN_TRAINING = True
+ALERGIA_TRAINING = False
+SHOW_DELAYS = False
+RL_TRAINING = False
+
+# ============================================================
+# Determine start and stop symbols
+# ============================================================
+
+start_symbol = DEFAULT_CONFIG["start_symbol"]
+stop_symbol = DEFAULT_CONFIG["stop_symbol"]
+
+
+
+# ============================================================
+# Synthetic pattern constants (parity with predict_streaming)
+# ===========================================================
+
+PATTERN_1x3_0x3 = [1, 1, 1, 0, 0, 0]
+PATTERN_1x3_0x2 = [1, 1, 1, 0, 0]
+PATTERN_10x3_10x2_10x1 = [1, 0] * 4 + [1] * 2 + [0] * 2 + [1, 0] * 2 + [1] + [0]
+
+SELECTED_PATTERN = PATTERN_1x3_0x3
+
+
+
+
+
+
+
 mpl.use("Agg")
 
 pd.set_option("display.max_columns", None)  # Show all columns
@@ -428,13 +428,6 @@ else:
     data_name, dataset, dataset_test_opt = resolve_dataset_from_args(_args)
 dataset_test = dataset_test_opt if dataset_test_opt is not None else dataset
 
-# Log the resolved run configuration
-try:
-    logger.info("Run config:\n%s", json.dumps(run_config, indent=2))
-except (TypeError, OSError):
-    # If logging the config fails for any reason (non-serializable value), write a simple fallback message
-    logger.info("Run config: (could not serialize run_config)")
-
 RUN_ID = time.strftime("%Y-%m-%d_%H-%M", time.localtime()) + f"_{data_name}"
 stats_to_log = []
 
@@ -442,15 +435,6 @@ stats_to_log = []
 # Build a run-specific results directory similar to predict_streaming.py
 run_results_dir = Path(f"results/{RUN_ID}_batch")
 run_results_dir.mkdir(parents=True, exist_ok=True)
-
-# Persist the resolved run configuration into the run-specific results folder so
-# the config used for this experiment is stored alongside outputs. This also
-# makes `config_file_path` point into the experiment folder.
-config_copy_path = run_results_dir / "predict_config.json"
-if save_run_config(run_config, config_copy_path):
-    config_file_path = config_copy_path
-else:
-    logger.debug("Could not write run config to %s; continuing without saving.", run_results_dir)
 
 # Stats and predictions live inside the run folder
 stats_file_path = run_results_dir / f"{RUN_ID}_stats_batch.json"
@@ -496,18 +480,6 @@ torch.cuda.manual_seed(123)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
-ML_TRAINING = True
-NN_TRAINING = True
-ALERGIA_TRAINING = False
-SHOW_DELAYS = False
-RL_TRAINING = False
-
-# ============================================================
-# Determine start and stop symbols
-# ============================================================
-
-start_symbol = DEFAULT_CONFIG["start_symbol"]
-stop_symbol = DEFAULT_CONFIG["stop_symbol"]
 
 # ============================================================
 # Data preparation
@@ -518,6 +490,57 @@ data = transform_to_seqs(dataset)
 n_activities, max_seq_length = data_statistics(data)
 
 data_test = transform_to_seqs(dataset_test)
+
+# ============================================================
+# Should at least be n_activities + 2 (for START and STOP)
+# add some margin for dataset growth
+MAGIC_NUMBER = n_activities + 8
+
+# Load run configuration (learning rates, batch sizes, epochs for NN and RL)
+config_file_path = Path(__file__).parent / "predict_config.json"
+default_run_config = {
+    "nn": {"lr": 0.001, "batch_size": 8, "epochs": 100},
+    "rl": {"lr": 0.001, "batch_size": 64, "epochs": 20, "gamma": 0.99},
+    "lstm": {"vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 128, "output_dim": MAGIC_NUMBER},
+    "transformer": {
+        "vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 512, "output_dim": MAGIC_NUMBER
+    },
+    "qlearning": {
+        "vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 512, "output_dim": MAGIC_NUMBER
+    },
+}
+
+# Write the default run configuration into `predict_config.json` in the repo folder.
+# We intentionally write the defaults here (instead of loading) so that users get a
+# populated config file they can edit. If writing fails we fall back to in-memory defaults.
+try:
+    with config_file_path.open("w") as _f:
+        json.dump(default_run_config, _f, indent=2)
+    run_config = default_run_config
+except OSError as _e:
+    logging.getLogger(__name__).debug("Could not write default config to %s: %s", config_file_path, _e)
+    run_config = default_run_config
+
+# ============================================================
+
+
+# Persist the resolved run configuration into the run-specific results folder so
+# the config used for this experiment is stored alongside outputs. This also
+# makes `config_file_path` point into the experiment folder.
+config_copy_path = run_results_dir / "predict_config.json"
+if save_run_config(run_config, config_copy_path):
+    config_file_path = config_copy_path
+else:
+    logger.debug("Could not write run config to %s; continuing without saving.", run_results_dir)
+
+# Log the resolved run configuration
+try:
+    logger.info("Run config:\n%s", json.dumps(run_config, indent=2))
+except (TypeError, OSError):
+    # If logging the config fails for any reason (non-serializable value), write a simple fallback message
+    logger.info("Run config: (could not serialize run_config)")
+
+
 
 # ============================================================
 # Define the number of iterations
@@ -765,6 +788,9 @@ for iteration in range(N_ITERATIONS):
     # for k in range(1, config["top_k"]):
     #     iteration_data[f"Top-{k+1}"] = []
 
+    # collect state-mining info for NGram strategies for this iteration
+    state_mining_iteration: dict = {}
+
     for strategy_name, (strategy, test_data) in strategies.items():
         # if "hard" in strategy_name:
         #     continue
@@ -878,6 +904,42 @@ for iteration in range(N_ITERATIONS):
             num_delay_predictions=delay_count,
             per_state_stats=per_state_stats,
         )
+
+        # If this strategy is an NGram model collect its top-3 visited states and visit rates
+        try:
+            if isinstance(strategy, NGram):
+                try:
+                    top3 = strategy.top_three_visit_rates()
+                except Exception as _e:
+                    logger.exception("Failed to compute top3 visit rates for %s: %s", strategy_name, _e)
+                    top3 = []
+                state_mining_iteration[strategy_name] = top3
+        except Exception:
+            # defensive: if isinstance check or top3 extraction fails, continue
+            logger.debug("Non-critical: could not collect state mining info for strategy %s", strategy_name, exc_info=True)
+
+
+    # LSTM + Transformer + RL Evaluation
+    # Persist per-iteration state-mining info (NGram top-3 visit rates)
+    try:
+        state_mining_path = run_results_dir / "state_mining.json"
+        if state_mining_path.exists():
+            try:
+                with state_mining_path.open("r") as _f:
+                    existing = json.load(_f)
+            except Exception:
+                existing = {}
+        else:
+            existing = {}
+
+        existing[f"iteration_{iteration+1}"] = state_mining_iteration
+
+        with state_mining_path.open("w") as _f:
+            json.dump(existing, _f, indent=2)
+
+        logger.info("Saved state mining info to %s", state_mining_path)
+    except Exception:
+        logger.exception("Failed to write state mining file %s", run_results_dir / "state_mining.json")
 
     # LSTM + Transformer + RL Evaluation
     if ML_TRAINING:
