@@ -19,10 +19,6 @@ from logicsponge.core import DataItem, DataItemFilter  # type: ignore # noqa: PG
 # from logicsponge.core import dashboard
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
 from logicsponge.processmining.config import DEFAULT_CONFIG
-from logicsponge.processmining.data_utils import (
-    data_statistics,
-    transform_to_seqs,
-)
 from logicsponge.processmining.miners import (
     AdaptiveVoting,
     BasicMiner,
@@ -38,11 +34,14 @@ from logicsponge.processmining.streaming import (
     ActualCSVWriter,
     AddStartSymbol,
     CSVStatsWriter,
+    CustomStreamer,
     Evaluation,
+    InfiniteDiscriminerSource,  # noqa: F401
     IteratorStreamer,
     PredictionCSVWriter,
     PrintEval,
     StreamingActivityPredictor,
+    SynInfiniteStreamer,  # noqa: F401
 )
 from logicsponge.processmining.utils import (
     add_file_log_handler,
@@ -108,16 +107,9 @@ predictions_dir.mkdir(parents=True, exist_ok=True)
 models_dir = run_results_dir / "models"
 models_dir.mkdir(parents=True, exist_ok=True)
 
-
-data = transform_to_seqs(dataset)
-n_activities, max_seq_length = data_statistics(data)
 # --- Run configuration (defaults + writing config file like predict_batch.py)
 config_file_path = Path(__file__).parent / "predict_config.json"
-
-# ============================================================
-# Should at least be n_activities + 2 (for START and STOP)
-# add some margin for dataset growth
-MAGIC_VALUE = n_activities + 8
+MAGIC_VALUE = 8
 HIDDEN_DIM_DEFAULT = 256 #128
 default_run_config = {
     "nn": {"lr": 0.001, "batch_size": 8, "epochs": 20},
@@ -210,7 +202,7 @@ SHOW_DELAYS = False
 MODEL_SELECTOR = {
     # Base NN models
     "lstm": True,
-    "gru": True,
+    "gru": False,
     "transformer": True,
     "default_transformer": True,
     # Attention-head variants for transformer (transformer_2heads, transformer_4heads, ...)
@@ -728,7 +720,7 @@ for name_enc, _ in POS_ENCODINGS:
 
 # RL (QNetwork) models built in a loop
 RL_MODELS: dict[str, StreamingActivityPredictor] = {}
-if MODEL_SELECTOR.get("qlearning", True):
+if MODEL_SELECTOR.get("qlearning", False):
     for w in RL_WINDOWS:
         q_cfg = run_config.get("qlearning", {})
         model_qlearning = QNetwork(
@@ -777,6 +769,7 @@ if MODEL_SELECTOR.get("qlearning", True):
                 )
             )
 
+
     """Add two non-windowed baselines (large buffer approximates "no window")"""
     # GRU baseline
     model_qlearning_gru_base = QNetwork(
@@ -787,7 +780,9 @@ if MODEL_SELECTOR.get("qlearning", True):
         model_architecture="gru",
     ).to(device)
     criterion_q_gru_base = nn.MSELoss()
-    optimizer_q_gru_base = optim.Adam(model_qlearning_gru_base.parameters(), lr=run_config.get("rl", {}).get("lr", 0.001))
+    optimizer_q_gru_base = optim.Adam(
+        model_qlearning_gru_base.parameters(), lr=run_config.get("rl", {}).get("lr", 0.001)
+    )
 
     RL_MODELS[RL_BASELINE_GRU_NAME] = StreamingActivityPredictor(
         strategy=RLMiner(
@@ -801,32 +796,32 @@ if MODEL_SELECTOR.get("qlearning", True):
         )
     )
 
-# Linear baseline (optional)
-if MODEL_SELECTOR.get("qlearning_linear", True):
-    model_qlearning_linear_base = QNetwork(
-        vocab_size=run_config.get("qlearning", {}).get("vocab_size", vocab_size),
-        embedding_dim=run_config.get("qlearning", {}).get("embedding_dim", embedding_dim),
-        hidden_dim=run_config.get("qlearning", {}).get("hidden_dim", hidden_dim),
-        device=device,
-        model_architecture="linear",
-    ).to(device)
-    criterion_q_linear_base = nn.MSELoss()
-    optimizer_q_linear_base = optim.Adam(
-        model_qlearning_linear_base.parameters(),
-        lr=run_config.get("rl", {}).get("lr", 0.001),
-    )
-
-    RL_MODELS[RL_BASELINE_LINEAR_NAME] = StreamingActivityPredictor(
-        strategy=RLMiner(
-            model=model_qlearning_linear_base,
-            criterion=criterion_q_linear_base,
-            optimizer=optimizer_q_linear_base,
-            config=config,
-            sequence_buffer_length=10000,
-            long_term_mem_size=8,
-            short_term_mem_size=16,
+    # Linear baseline (optional)
+    if MODEL_SELECTOR.get("qlearning_linear", True):
+        model_qlearning_linear_base = QNetwork(
+            vocab_size=run_config.get("qlearning", {}).get("vocab_size", vocab_size),
+            embedding_dim=run_config.get("qlearning", {}).get("embedding_dim", embedding_dim),
+            hidden_dim=run_config.get("qlearning", {}).get("hidden_dim", hidden_dim),
+            device=device,
+            model_architecture="linear",
+        ).to(device)
+        criterion_q_linear_base = nn.MSELoss()
+        optimizer_q_linear_base = optim.Adam(
+            model_qlearning_linear_base.parameters(),
+            lr=run_config.get("rl", {}).get("lr", 0.001),
         )
-    )
+
+        RL_MODELS[RL_BASELINE_LINEAR_NAME] = StreamingActivityPredictor(
+            strategy=RLMiner(
+                model=model_qlearning_linear_base,
+                criterion=criterion_q_linear_base,
+                optimizer=optimizer_q_linear_base,
+                config=config,
+                sequence_buffer_length=10000,
+                long_term_mem_size=8,
+                short_term_mem_size=16,
+            )
+        )
 
 # ====================================================
 # Sponge
@@ -910,13 +905,12 @@ all_attributes = [
 ]  # , *delay_list]
 
 
-# ====================================================
 
 streamer = IteratorStreamer(data_iterator=dataset)
 
 # streamer = SynInfiniteStreamer(max_prefix_length=10)
 # streamer = InfiniteDiscriminerSource()
-# streamer = CustomStreamer(sequence = SELECTED_PATTERN)
+streamer = CustomStreamer(sequence = SELECTED_PATTERN)
 
 def start_filter(item: DataItem) -> bool:
     """Filter function to check if the activity is not the start symbol."""
@@ -1111,7 +1105,6 @@ if RL_TRAINING and ML_TRAINING:
 # Call the method on that DataStream instance.
 streamer._output.set_history_bound(ls.NumberBound(1))  # noqa: SLF001
 
-
 # Assemble the full sponge
 sponge = (
     streamer
@@ -1129,48 +1122,8 @@ sponge = (
 )
 
 
+
 sponge.start()
 
-# # dashboard.show_stats(sponge)
-# # dashboard.run()
-
-# # After streaming completes, persist trained NN/RL models to the run-specific models directory.
-# # We save base models and any models embedded in predictor dicts (windowed / pos-enc / RL).
-# base_models = []
-# if "model_lstm" in globals():
-#     base_models.append(("lstm", model_lstm))
-# if "model_gru" in globals():
-#     base_models.append(("gru", model_gru))
-# if "model_transformer" in globals():
-#     base_models.append(("transformer", model_transformer))
-
-# for name, m in base_models:
-#     try:
-#         model_file = models_dir / f"{name}.pt"
-#         torch.save(m.state_dict(), model_file)
-#         logger.info("Saved trained model weights: %s", model_file)
-#     except (OSError, RuntimeError) as _e:
-#         logger.debug("Failed to save trained model weights for %s: %s", name, _e, exc_info=True)
-
-# # Save models stored inside predictor mappings (if any)
-# for mapping in (
-#     LSTM_MODELS,
-#     GRU_MODELS,
-#     TRANSFORMER_MODELS,
-#     TRANSFORMER_POSENC_MODELS,
-#     TRANSFORMER_HEAD_MODELS,
-#     RL_MODELS,
-# ):
-#     for name, predictor in mapping.items():
-#         try:
-#             strat = getattr(predictor, "strategy", None)
-#             if strat is None:
-#                 continue
-#             model_obj = getattr(strat, "model", None)
-#             if model_obj is None:
-#                 continue
-#             model_file = models_dir / f"{name}.pt"
-#             torch.save(model_obj.state_dict(), model_file)
-#             logger.info("Saved model weights: %s", model_file)
-#         except (OSError, RuntimeError) as _e:
-#             logger.debug("Failed to save model weights for %s: %s", name, _e, exc_info=True)
+# dashboard.show_stats(sponge)
+# dashboard.run()
