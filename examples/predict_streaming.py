@@ -212,7 +212,7 @@ MODEL_SELECTOR = {
     "lstm": True,
     "gru": True,
     "transformer": True,
-    "default_transformer": False,
+    "default_transformer": True,
     # Attention-head variants for transformer (transformer_2heads, transformer_4heads, ...)
     "transformer_heads": False,
     # transformer variants with different positional encodings
@@ -1130,7 +1130,6 @@ sponge = (
 
 
 sponge.start()
-
 
 # # dashboard.show_stats(sponge)
 # # dashboard.run()
