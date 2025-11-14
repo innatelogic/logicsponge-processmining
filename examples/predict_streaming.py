@@ -103,6 +103,9 @@ run_results_dir.mkdir(parents=True, exist_ok=True)
 stats_file_path = run_results_dir / f"{RUN_ID}_stats_streaming.csv"
 predictions_dir = run_results_dir / "predictions"
 predictions_dir.mkdir(parents=True, exist_ok=True)
+# Directory to store trained model weight files (best checkpoints)
+models_dir = run_results_dir / "models"
+models_dir.mkdir(parents=True, exist_ok=True)
 
 # --- Run configuration (defaults + writing config file like predict_batch.py)
 config_file_path = Path(__file__).parent / "predict_config.json"
@@ -191,7 +194,7 @@ torch.backends.cudnn.benchmark = False
 # Select which ML components to train/evaluate (parity with predict_batch.py)
 ML_TRAINING = True
 NN_TRAINING = True
-RL_TRAINING = True
+RL_TRAINING = False
 ALERGIA_TRAINING = False
 SHOW_DELAYS = False
 
@@ -1116,3 +1119,44 @@ sponge.start()
 
 # dashboard.show_stats(sponge)
 # dashboard.run()
+
+# After streaming completes, persist trained NN/RL models to the run-specific models directory.
+# We save base models and any models embedded in predictor dicts (windowed / pos-enc / RL).
+base_models = []
+if "model_lstm" in globals():
+    base_models.append(("lstm", model_lstm))
+if "model_gru" in globals():
+    base_models.append(("gru", model_gru))
+if "model_transformer" in globals():
+    base_models.append(("transformer", model_transformer))
+
+for name, m in base_models:
+    try:
+        model_file = models_dir / f"{name}.pt"
+        torch.save(m.state_dict(), model_file)
+        logger.info("Saved trained model weights: %s", model_file)
+    except (OSError, RuntimeError) as _e:
+        logger.debug("Failed to save trained model weights for %s: %s", name, _e, exc_info=True)
+
+# Save models stored inside predictor mappings (if any)
+for mapping in (
+    LSTM_MODELS,
+    GRU_MODELS,
+    TRANSFORMER_MODELS,
+    TRANSFORMER_POSENC_MODELS,
+    TRANSFORMER_HEAD_MODELS,
+    RL_MODELS,
+):
+    for name, predictor in mapping.items():
+        try:
+            strat = getattr(predictor, "strategy", None)
+            if strat is None:
+                continue
+            model_obj = getattr(strat, "model", None)
+            if model_obj is None:
+                continue
+            model_file = models_dir / f"{name}.pt"
+            torch.save(model_obj.state_dict(), model_file)
+            logger.info("Saved model weights: %s", model_file)
+        except (OSError, RuntimeError) as _e:
+            logger.debug("Failed to save model weights for %s: %s", name, _e, exc_info=True)

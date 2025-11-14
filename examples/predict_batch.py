@@ -47,7 +47,7 @@ PATTERN_1x3_0x3 = [1, 1, 1, 0, 0, 0]
 PATTERN_1x3_0x2 = [1, 1, 1, 0, 0]
 PATTERN_10x3_10x2_10x1 = [1, 0] * 4 + [1] * 2 + [0] * 2 + [1, 0] * 2 + [1] + [0]
 
-SELECTED_PATTERN = PATTERN_1x3_0x2
+SELECTED_PATTERN = PATTERN_1x3_0x3
 
 # Write the default run configuration into `predict_config.json` in the repo folder.
 # We intentionally write the defaults here (instead of loading) so that users get a
@@ -201,6 +201,15 @@ def process_neural_model(  # noqa: PLR0913
     )
     end_time = time.time()
     training_time = (end_time - start_time) * SEC_TO_MICRO / (TRAIN_EVENTS + VAL_EVENTS)
+
+    # Save best model weights to the run-specific models directory (if available)
+    try:
+        model_file = models_dir / f"{display_name}.pt"
+        torch.save(model.state_dict(), model_file)
+        logger.info("Saved trained model weights: %s", model_file)
+    except (OSError, RuntimeError) as _e:
+        # I/O or torch runtime errors should be handled but not crash the run
+        logger.debug("Failed to save trained model weights for %s: %s", display_name, _e, exc_info=True)
 
     # If a window_size is provided we want to evaluate the model in "prefix" mode
     # (one prediction per prefix), so that the resulting flattened prediction vector
@@ -385,6 +394,15 @@ def process_rl_model(
             window_size=window_size,
         )
 
+    # Persist RL model weights (best state) to models directory
+    try:
+        rl_name = f"qlearning_win{window_size}" if window_size is not None else "qlearning"
+        model_file = models_dir / f"{rl_name}.pt"
+        torch.save(model.state_dict(), model_file)
+        logger.info("Saved RL model weights: %s", model_file)
+    except (OSError, RuntimeError) as _e:
+        logger.debug("Failed to save RL model weights (window=%s): %s", window_size, _e, exc_info=True)
+
     # Return the relevant outputs so the caller can integrate them into iteration records
     return metrics, eval_pp, eval_time, prediction_vector, train_time
 
@@ -441,6 +459,10 @@ stats_file_path = run_results_dir / f"{RUN_ID}_stats_batch.json"
 predictions_dir = run_results_dir / "predictions"
 predictions_dir.mkdir(parents=True, exist_ok=True)
 
+# Directory to store trained model weight files (best checkpoints)
+models_dir = run_results_dir / "models"
+models_dir.mkdir(parents=True, exist_ok=True)
+
 # Log file inside run folder
 log_file_path = run_results_dir / f"{RUN_ID}_log.txt"
 try:
@@ -480,7 +502,7 @@ ML_TRAINING = True
 NN_TRAINING = True
 ALERGIA_TRAINING = False
 SHOW_DELAYS = False
-RL_TRAINING = True
+RL_TRAINING = False
 
 # ============================================================
 # Determine start and stop symbols

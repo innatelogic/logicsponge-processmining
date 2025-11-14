@@ -19,6 +19,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
@@ -172,6 +174,8 @@ def generate_probabilistic_synthetic(  # noqa: PLR0913, PLR0915
         writer = csv.writer(f)
         writer.writerow(["case:concept:name", "concept:name", "time:timestamp"])
 
+        rng = np.random.default_rng(0)
+
         while activities_added < int(total_activities):
             num_cases = len(case_ids)
             # Decide whether to pick existing or create new case
@@ -186,7 +190,7 @@ def generate_probabilistic_synthetic(  # noqa: PLR0913, PLR0915
 
             match name:
                 case "Lazy_Decrement":
-                    prefix_length = random.randint(2, 5)
+                    prefix_length = rng.integers(2, 6)
                     for i in range(prefix_length, 0, -1):
                         activity = f"act_{i}"
                         timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
@@ -195,7 +199,7 @@ def generate_probabilistic_synthetic(  # noqa: PLR0913, PLR0915
                         activities_added += 1
                         current_time += time_increment
                 case "Random_Decision_win2":
-                    marker01 = random.choice([0, 1])
+                    marker01 = rng.integers(0, 2)
                     activity = f"act_{marker01}"
                     timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
 
@@ -217,7 +221,7 @@ def generate_probabilistic_synthetic(  # noqa: PLR0913, PLR0915
 
 
                 case "Random_Decision_win3":
-                    marker012 = random.choice([0, 1, 2])
+                    marker012 = rng.integers(0, 3)
                     activity = f"act_{marker012}"
                     timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
                     writer.writerow([case_id, activity, timestamp])
@@ -231,7 +235,7 @@ def generate_probabilistic_synthetic(  # noqa: PLR0913, PLR0915
                     timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
 
                     remaining012 = [i for i in [0, 1, 2] if i != marker012]
-                    random012 = random.choice(remaining012)
+                    random012 = rng.choice(remaining012)
                     last012 = next(i for i in remaining012 if i != random012)
                     activity = f"act_{random012}"
                     writer.writerow([case_id, activity, timestamp])

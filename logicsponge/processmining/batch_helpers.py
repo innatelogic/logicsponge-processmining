@@ -312,9 +312,8 @@ def prefix_evaluate_rnn(  # noqa: C901, PLR0912
                 prefix = seq[:k].unsqueeze(0)  # [1, k]
                 if left_pad:
                     prefix = _left_pad_window(prefix, window_size)
-                else:
-                    if prefix.shape[1] > window_size:
-                        prefix = prefix[:, -window_size:]
+                elif prefix.shape[1] > window_size:
+                    prefix = prefix[:, -window_size:]
                 if model_device is not None:
                     prefix = prefix.to(device=model_device)
 
