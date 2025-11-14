@@ -26,40 +26,6 @@ logging.basicConfig(
     format="%(message)s",
 )
 
-
-MAGIC_NUMBER = 8
-# Load run configuration (learning rates, batch sizes, epochs for NN and RL)
-config_file_path = Path(__file__).parent / "predict_config.json"
-default_run_config = {
-    "nn": {"lr": 0.001, "batch_size": 8, "epochs": 100},
-    "rl": {"lr": 0.001, "batch_size": 64, "epochs": 20, "gamma": 0.99},
-    "lstm": {"vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 128, "output_dim": MAGIC_NUMBER},
-    "transformer": {
-        "vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 512, "output_dim": MAGIC_NUMBER
-    },
-    "qlearning": {
-        "vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 512, "output_dim": MAGIC_NUMBER
-    },
-}
-
-# Synthetic pattern constants (parity with predict_streaming)
-PATTERN_1x3_0x3 = [1, 1, 1, 0, 0, 0]
-PATTERN_1x3_0x2 = [1, 1, 1, 0, 0]
-PATTERN_10x3_10x2_10x1 = [1, 0] * 4 + [1] * 2 + [0] * 2 + [1, 0] * 2 + [1] + [0]
-
-SELECTED_PATTERN = PATTERN_1x3_0x3
-
-# Write the default run configuration into `predict_config.json` in the repo folder.
-# We intentionally write the defaults here (instead of loading) so that users get a
-# populated config file they can edit. If writing fails we fall back to in-memory defaults.
-try:
-    with config_file_path.open("w") as _f:
-        json.dump(default_run_config, _f, indent=2)
-    run_config = default_run_config
-except OSError as _e:
-    logging.getLogger(__name__).debug("Could not write default config to %s: %s", config_file_path, _e)
-    run_config = default_run_config
-
 from logicsponge.processmining.algorithms_and_structures import (
     BayesianClassifier,
 )
@@ -102,6 +68,38 @@ from logicsponge.processmining.utils import (
 
 SEC_TO_MICRO = 1_000_000
 
+MAGIC_NUMBER = 8
+# Load run configuration (learning rates, batch sizes, epochs for NN and RL)
+config_file_path = Path(__file__).parent / "predict_config.json"
+default_run_config = {
+    "nn": {"lr": 0.001, "batch_size": 8, "epochs": 100},
+    "rl": {"lr": 0.001, "batch_size": 64, "epochs": 20, "gamma": 0.99},
+    "lstm": {"vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 128, "output_dim": MAGIC_NUMBER},
+    "transformer": {
+        "vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 512, "output_dim": MAGIC_NUMBER
+    },
+    "qlearning": {
+        "vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 512, "output_dim": MAGIC_NUMBER
+    },
+}
+
+# Synthetic pattern constants (parity with predict_streaming)
+PATTERN_1x3_0x3 = [1, 1, 1, 0, 0, 0]
+PATTERN_1x3_0x2 = [1, 1, 1, 0, 0]
+PATTERN_10x3_10x2_10x1 = [1, 0] * 4 + [1] * 2 + [0] * 2 + [1, 0] * 2 + [1] + [0]
+
+SELECTED_PATTERN = PATTERN_1x3_0x3
+
+# Write the default run configuration into `predict_config.json` in the repo folder.
+# We intentionally write the defaults here (instead of loading) so that users get a
+# populated config file they can edit. If writing fails we fall back to in-memory defaults.
+try:
+    with config_file_path.open("w") as _f:
+        json.dump(default_run_config, _f, indent=2)
+    run_config = default_run_config
+except OSError as _e:
+    logging.getLogger(__name__).debug("Could not write default config to %s: %s", config_file_path, _e)
+    run_config = default_run_config
 
 def lstm_model() -> tuple[LSTMModel, optim.Optimizer, nn.Module]:
     """Initialize and return an LSTM model, optimizer, and loss function."""
@@ -141,7 +139,7 @@ def transformer_model(
     optimizer = optim.Adam(model.parameters(), lr=run_config.get("nn", {}).get("lr", 0.001))
     return model, optimizer, criterion
 
-def process_neural_model(  # noqa: PLR0913
+def process_neural_model(  # noqa: C901, PLR0912, PLR0913
     name: str,
     iteration_data: dict,
     all_metrics: dict,
@@ -151,7 +149,7 @@ def process_neural_model(  # noqa: PLR0913
     epochs: int = 20,
     *,
     window_size: int | None = None,
-    left_pad: bool = True,
+    left_pad: bool = False,
 ) -> None:
     """
     Train and evaluate a NN model.
@@ -933,7 +931,7 @@ for iteration in range(N_ITERATIONS):
                         nn_test_set_transformed=nn_test_set_transformed,
                         epochs=default_run_config.get("nn", {}).get("epochs", 20),
                         window_size=w,
-                        left_pad=True,
+                        left_pad=False,
                     )
             # After NN evaluation in this iteration, print a short summary of NN entries
             for nn_name in ("LSTM", "transformer", "transformer_2heads"):

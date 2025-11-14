@@ -8,15 +8,17 @@ import time
 import torch
 import torch.nn.functional as F  # noqa: N812
 import torch.utils.data
-from torch import nn
+from torch import nn, optim
 from torch.nn.utils.rnn import pad_sequence
+from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
+from logicsponge.processmining.data_preprocessing import create_windowed_dataset
 from logicsponge.processmining.encodings import (
-    BackwardRelativePositionalEncoding,
-    LearnableRelativePositionalEncoding,
-    PeriodicPositionalEncoding,
-    SharpPeriodicRelativeEncoding,
+    # BackwardRelativePositionalEncoding,
+    # LearnableRelativePositionalEncoding,
+    # PeriodicPositionalEncoding,
+    # SharpPeriodicRelativeEncoding,
     SinusoidalPositionalEncoding,
 )
 from logicsponge.processmining.types import ActivityName, Event
@@ -356,7 +358,10 @@ class RotaryTransformerEncoderLayer(nn.Module):
     linear projections for Q/K/V so we can apply RoPE before attention.
     """
 
-    def __init__(self, d_model: int, nhead: int, dim_feedforward: int = 2048, dropout: float = 0.0, device: torch.device | None = None):
+    def __init__(
+        self, d_model: int, nhead: int, dim_feedforward: int = 2048, dropout: float = 0.0, device: torch.device | None = None
+    ) -> None:
+        """Initialize the RotaryTransformerEncoderLayer."""
         super().__init__()
         if d_model % nhead != 0:
             msg = "d_model must be divisible by nhead"
@@ -462,8 +467,7 @@ class RotaryTransformerEncoderLayer(nn.Module):
 
         # Feedforward
         ff = self.linear2(self.dropout(self.activation(self.linear1(src2))))
-        src_out = self.norm2(src2 + self.dropout(ff))
-        return src_out
+        return self.norm2(src2 + self.dropout(ff))
 
 
 class GRUModel(nn.Module):
@@ -700,7 +704,9 @@ class TransformerModel(nn.Module):
             """
             pe = torch.zeros(1, seq_len, d_model, device=device, dtype=dtype)
             positions = torch.arange(seq_len - 1, -1, -1, device=device, dtype=dtype).unsqueeze(1)  # [seq_len, 1]
-            div_term = torch.exp(torch.arange(0, d_model, 2, device=device, dtype=dtype) * (-(math.log(10000.0) / d_model)))
+            div_term = torch.exp(
+                torch.arange(0, d_model, 2, device=device, dtype=dtype) * (-(math.log(10000.0) / d_model))
+            )
             pe_vals = torch.zeros(seq_len, d_model, device=device, dtype=dtype)
             pe_vals[:, 0::2] = torch.sin(positions * div_term)
             if d_model % 2 == 1:
@@ -726,7 +732,9 @@ class TransformerModel(nn.Module):
         self.enable_amp = False  # type: bool
         # Build stack of rotary encoder layers
         self.transformer_layers = nn.ModuleList([
-            RotaryTransformerEncoderLayer(d_model, attention_heads, dim_feedforward=hidden_dim, dropout=0.0, device=device)
+            RotaryTransformerEncoderLayer(
+                d_model, attention_heads, dim_feedforward=hidden_dim, dropout=0.0, device=device
+            )
             for _ in range(num_layers)
         ])
 
@@ -796,13 +804,20 @@ class TransformerModel(nn.Module):
         # to reduce attention compute from O(L^2) to O((L - s)^2) where s is the
         # number of columns that are padding for all rows.
         nonpad = (~key_padding_mask)
-        has_any = nonpad.any(dim=1)
-        # first non-pad index per row; set to seq_len if no non-pad exists
-        first_real = torch.where(
-            has_any,
-            torch.argmax(nonpad.to(torch.int64), dim=1),
-            torch.full((batch_size,), seq_len, device=x_device, dtype=torch.long),
-        )  # [B]
+        # If there are no columns (seq_len == 0) then calling argmax over
+        # dim=1 would raise IndexError. Guard that case and set the
+        # first_real indices to seq_len (i.e. no real tokens) for every row.
+        if nonpad.numel() == 0 or nonpad.size(1) == 0:
+            first_real = torch.full((batch_size,), seq_len, device=x_device, dtype=torch.long)
+            has_any = torch.zeros((batch_size,), dtype=torch.bool, device=x_device)
+        else:
+            has_any = nonpad.any(dim=1)
+            # first non-pad index per row; set to seq_len if no non-pad exists
+            first_real = torch.where(
+                has_any,
+                torch.argmax(nonpad.to(torch.int64), dim=1),
+                torch.full((batch_size,), seq_len, device=x_device, dtype=torch.long),
+            )  # [B]
         # minimal first_real across batch; columns [0:s) are all padding for everyone
         s = int(first_real.min().item()) if batch_size > 0 else 0
         # Only crop leading columns if there will remain at least one token.
@@ -891,7 +906,10 @@ class TransformerModel(nn.Module):
         if seq_len == 0:
             # No tokens remain after cropping (all positions were padding).
             nonpad_small = (~key_padding_mask)
-            has_any_small = nonpad_small.any(dim=1) if nonpad_small.numel() > 0 else torch.zeros((batch_size,), dtype=torch.bool, device=x_device)
+            has_any_small = (
+                nonpad_small.any(dim=1)
+                if nonpad_small.numel() > 0 else torch.zeros((batch_size,), dtype=torch.bool, device=x_device)
+            )
             first_real_small = torch.full((batch_size,), seq_len, device=x_device, dtype=torch.long)
         else:
             nonpad_small = (~key_padding_mask)
@@ -1525,31 +1543,81 @@ def evaluate_rl(  # noqa: C901, PLR0912, PLR0915
     return stats, perplexities, eval_time, predicted_vector
 
 
+
+
 def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
-    model: LSTMModel | TransformerModel,
+    model:  LSTMModel | TransformerModel | GRUModel,
     train_sequences: torch.Tensor,
     val_sequences: torch.Tensor,
     criterion: nn.Module,
-    optimizer: torch.optim.Optimizer,
+    optimizer: optim.Optimizer,
     batch_size: int,
     epochs: int = 10,
     patience: int = 6,
     *,
     window_size: int | None = None,
-    left_pad: bool = LEFT_PAD_DEFAULT,
-) -> LSTMModel | TransformerModel:
+    left_pad: bool = False,
+) -> torch.nn.Module:
     """
-    Train the RNN model on the training set and evaluate on the validation set.
+    Simplified training function with preprocessing separated out.
 
-    Returns the trained model.
+    Key improvement: Windowing is handled BEFORE training via preprocessing
+    utilities, making this function model-agnostic and much simpler.
+
+    Args:
+        model: Neural network model (LSTM, Transformer, or GRU)
+        train_sequences: Training sequences [batch, seq_len]
+        val_sequences: Validation sequences [batch, seq_len]
+        criterion: Loss function
+        optimizer: Optimizer
+        batch_size: Training batch size
+        epochs: Maximum training epochs
+        patience: Early stopping patience
+        window_size: Optional window size (triggers preprocessing)
+        left_pad: Whether to left-pad sequences
+
+    Returns:
+        Trained model with best validation weights loaded
+
     """
-    dataset = torch.utils.data.TensorDataset(train_sequences)  # Create dataset
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)  # Create dataloader
+    # Import here to avoid circular dependencies
+    from logicsponge.processmining.neural_networks import GRUModel, LSTMModel
 
-    best_val_accuracy = 0.0
-    best_model_state = None
-    patience_counter = 0
-    # Determine model device robustly: prefer explicit model.device, else fall back to param device
+    # Detect model type
+    is_recurrent = isinstance(model, (LSTMModel, GRUModel))
+    model_type = "lstm" if is_recurrent else "transformer"
+
+    # Preprocessing: Create windowed dataset if window_size is specified
+    if window_size is not None:
+        logger.info(
+            "Creating windowed dataset for %s | window_size=%d | type=%s",
+            model.__class__.__name__, window_size, model_type
+        )
+
+        # Use dedicated preprocessing utility
+
+        train_dataset_tensor = create_windowed_dataset(
+            sequences=train_sequences,
+            window_size=window_size,
+            model_type=model_type,
+            stride=1,
+            left_pad=left_pad,
+        )
+
+        logger.info(
+            "Windowed dataset created | original=%d seqs | windowed=%d samples",
+            train_sequences.shape[0],
+            train_dataset_tensor.shape[0],
+        )
+    else:
+        # No windowing - use original sequences
+        train_dataset_tensor = train_sequences
+
+    # Create dataloader
+    dataset = TensorDataset(train_dataset_tensor)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    # Get model device
     model_device = getattr(model, "device", None)
     if model_device is None:
         try:
@@ -1557,171 +1625,140 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
         except StopIteration:
             model_device = None
 
+    # Training loop
+    best_val_accuracy = 0.0
+    best_model_state = None
+    patience_counter = 0
+
     for epoch in range(epochs):
         model.train()
         epoch_loss = 0
+        num_batches = 0
 
-        # Create progress bar for the training loop
         with tqdm(total=len(dataloader), desc=f"Epoch {epoch + 1}/{epochs}", unit="batch") as pbar:
             for batch in dataloader:
                 sequences = batch[0]
 
-                # Build teacher-forcing pairs: x is all but last token, y is shifted by one
-                x_full = sequences[:, :-1]
-                y_full = sequences[:, 1:]
+                # Split into input and target
+                x_batch = sequences[:, :-1]
+                y_batch = sequences[:, 1:]
 
-                # Windowed training: align with prefix_evaluate_rnn semantics.
-                # Previous implementation only kept the final window of each sequence,
-                # causing the model to overfit to predicting the STOP token and yield
-                # near-zero accuracy on prefix evaluation (all predictions became STOP).
-                #
-                # Fix: when window_size is provided, build a list of ALL prefixes for
-                # every sequence row, cropping each prefix to its last `window_size`
-                # tokens. We then compute loss ONLY on the last token of each cropped
-                # prefix (next-token prediction), mirroring prefix evaluation logic.
-                if window_size is not None:
-                    pref_x: list[torch.Tensor] = []
-                    pref_y: list[torch.Tensor] = []
-                    # Effective non-padding target lengths per row
-                    lengths = (y_full != 0).sum(dim=1).tolist()
-                    for b, eff_len in enumerate(lengths):
-                        eff = int(eff_len)
-                        if eff < 1:
-                            continue
-                        # Iterate over prefix lengths k = 1..eff. Each prefix predicts token k.
-                        for k in range(1, eff + 1):
-                            # Raw prefix (may contain padding near the end of the original max length; slice to eff first)
-                            x_pref_raw = x_full[b, :k]
-                            y_pref_raw = y_full[b, :k]
-                            # Remove any trailing padding inside the selected prefix (defensive; normally none)
-                            valid_len_pref = int((y_pref_raw != 0).sum().item())
-                            if valid_len_pref == 0:
-                                continue
-                            x_pref = x_pref_raw[:valid_len_pref].clone()
-                            y_pref = y_pref_raw[:valid_len_pref].clone()
-                            # Crop to last window_size NON-PADDING tokens
-                            if x_pref.numel() > window_size:
-                                x_pref = x_pref[-window_size:]
-                                y_pref = y_pref[-window_size:]
-                            pref_x.append(x_pref)
-                            pref_y.append(y_pref)
-
-                    if len(pref_x) == 0:
-                        pbar.update(1)
-                        continue
-
-                    # Crop-first done above; now left-pad to fixed window size for batch alignment
-                    if left_pad:
-                        x_batch = _left_pad_stack(pref_x, target_len=window_size)
-                        y_batch = _left_pad_stack(pref_y, target_len=window_size)
-                    else:
-                        x_batch = pad_sequence(pref_x, batch_first=True, padding_value=0)
-                        y_batch = pad_sequence(pref_y, batch_first=True, padding_value=0)
-                else:
-                    x_batch = x_full
-                    y_batch = y_full
-
-                # Move tensors to the model device when available to avoid device mismatch
+                # Move to device
                 if model_device is not None:
                     x_batch = x_batch.to(model_device)
                     y_batch = y_batch.to(model_device)
 
-                optimizer.zero_grad()
-
                 # Forward pass
+                optimizer.zero_grad()
                 outputs = model(x_batch)
-                # Some model forward() implementations (e.g., LSTMModel/GRUModel/QNetwork) return
-                # a tuple (logits, hidden). We only need the logits for the loss below.
-                if isinstance(outputs, tuple):  # (logits, hidden)
+
+                # Handle models that return (logits, hidden)
+                if isinstance(outputs, tuple):
                     outputs = outputs[0]
 
-                if window_size is not None:
-                    # Compute loss on LAST token of each prefix window (next-token prediction)
-                    # Determine effective lengths per row (exclude padding)
-                    lengths_eff = (y_batch != 0).sum(dim=1)  # [batch]
-                    batch_indices = torch.arange(y_batch.size(0), device=y_batch.device)
-                    last_positions = lengths_eff - 1  # index of last non-padding target
-                    # Filter rows that have at least one valid target
-                    valid_mask = lengths_eff > 0
-                    if valid_mask.any():
-                        # Gather logits at last positions
-                        # outputs shape: [B, seq_len, vocab]
-                        last_logits = outputs[batch_indices[valid_mask], last_positions[valid_mask], :]
-                        last_targets = y_batch[batch_indices[valid_mask], last_positions[valid_mask]]
-                        loss = criterion(last_logits, last_targets)
-                        loss.backward()
-                        optimizer.step()
-                        epoch_loss += loss.item()
-                else:
-                    # Original (non-windowed) token-level loss over all non-padding positions
+                # Compute loss based on model type
+                if is_recurrent or window_size is None:
+                    # LSTM/GRU or non-windowed: loss on ALL non-padding tokens
                     logits = outputs.view(-1, outputs.shape[-1])
                     targets = y_batch.reshape(-1)
                     mask = targets != 0
-                    logits_masked = logits[mask]
-                    targets_masked = targets[mask]
-                    if logits_masked.size(0) > 0:
+
+                    if mask.sum().item() > 0:
+                        logits_masked = logits[mask]
+                        targets_masked = targets[mask]
                         loss = criterion(logits_masked, targets_masked)
-                        loss.backward()
-                        optimizer.step()
-                        epoch_loss += loss.item()
+                    else:
+                        pbar.update(1)
+                        continue
+                else:
+                    # Transformer with windowing: loss on LAST token only
+                    lengths = (y_batch != 0).sum(dim=1)
+                    batch_indices = torch.arange(y_batch.size(0), device=y_batch.device)
+                    last_positions = lengths - 1
+                    valid_mask = lengths > 0
+
+                    if valid_mask.any():
+                        last_logits = outputs[batch_indices[valid_mask], last_positions[valid_mask], :]
+                        last_targets = y_batch[batch_indices[valid_mask], last_positions[valid_mask]]
+                        loss = criterion(last_logits, last_targets)
+                    else:
+                        pbar.update(1)
+                        continue
+
+                # Backward pass
+                loss.backward()
+                optimizer.step()
+
+                epoch_loss += loss.item()
+                num_batches += 1
                 pbar.update(1)
 
-        msg = f"Epoch {epoch + 1}/{epochs}, Average Loss: {epoch_loss / len(dataloader):.4f}"
+        # Calculate average loss
+        avg_loss = epoch_loss / num_batches if num_batches > 0 else 0.0
+        msg = f"Epoch {epoch + 1}/{epochs}, Average Loss: {avg_loss:.4f}"
         logger.info(msg)
 
-        # Evaluate on validation set after each epoch
-        msg = "Evaluating on validation set..."
-        logger.info(msg)
-        # Use prefix-style validation when windowing is active so training/eval semantics match
-        # (one prediction per prefix). For non-windowed runs, keep token-level validation.
-        # updated unpacking to accept extra returned predicted-vector (ignored here)
+        # Validation
+        logger.info("Evaluating on validation set...")
+
+        # Import evaluation function
+        from logicsponge.processmining.batch_helpers import prefix_evaluate_rnn
+        from logicsponge.processmining.neural_networks import evaluate_rnn
+
         if window_size is not None:
-            stats, _, _, _ = evaluate_rnn(
-                model, val_sequences, window_size=window_size, prefix_mode=True, left_pad=left_pad
+            # Use prefix evaluation for windowed models
+            stats, _, _, _ = prefix_evaluate_rnn(
+                model=model,
+                sequences=val_sequences,
+                idx_to_activity=None,
+                max_k=3,
+                window_size=window_size,
+                left_pad=left_pad,
             )
         else:
+            # Use standard evaluation for non-windowed models
             stats, _, _, _ = evaluate_rnn(
-                model, val_sequences, window_size=window_size, left_pad=left_pad
+                model=model,
+                sequences=val_sequences,
+                max_k=3,
+                idx_to_activity=None,
+                window_size=None,
+                left_pad=left_pad,
             )
+
         val_accuracy = stats["accuracy"]
 
-        if not isinstance(val_accuracy, float):
-            msg = "Validation accuracy is not a float. Check the evaluation function."
-            logger.error(msg)
-            raise TypeError(msg)
-
-        # Check if current validation accuracy is better than the best recorded accuracy
-        if val_accuracy > best_val_accuracy:
+        # Early stopping
+        if val_accuracy > best_val_accuracy: # type: ignore  # noqa: PGH003
             best_val_accuracy = val_accuracy
-            best_model_state = copy.deepcopy(model.state_dict())  # Save the model state
-            patience_counter = 0  # Reset patience counter
-            msg = f"New best validation accuracy: {val_accuracy * 100:.2f}%"
-            logger.info(msg)
+            best_model_state = copy.deepcopy(model.state_dict())
+            patience_counter = 0
+            msg = f"Validation accuracy improved to {val_accuracy * 100:.2f}%. Saving best model."
         else:
             patience_counter += 1
-            msg = f"Validation accuracy did not improve. Patience counter: {patience_counter}/{patience}"
-            logger.info(msg)
+            msg = f"Validation accuracy did not improve. Patience: {patience_counter}/{patience}"
 
-        # Early stopping: Stop training if no improvement after patience epochs
+        logger.info(msg)
+
+        # Check early stopping
         if patience_counter >= patience:
-            msg = "Early stopping triggered. Restoring best model weights."
-            logger.info(msg)
-
             msg = f"Best validation accuracy: {best_val_accuracy * 100:.2f}%"
+            logger.info("Early stopping triggered. Restoring best model weights.")
             logger.info(msg)
-
             if best_model_state:
                 model.load_state_dict(best_model_state)
             break
 
-    # Load the best model state before returning
+    # Restore best weights
     if best_model_state:
         model.load_state_dict(best_model_state)
+
     return model
 
 
+
 def evaluate_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
-    model: LSTMModel | TransformerModel,
+    model: LSTMModel | TransformerModel | GRUModel | nn.Module,
     sequences: torch.Tensor,
     *,
     per_sequence_perplexity: bool = True,
