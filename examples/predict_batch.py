@@ -33,7 +33,6 @@ from logicsponge.processmining.algorithms_and_structures import (
 from logicsponge.processmining.batch_helpers import (
     build_and_save_comparison_matrices,
     build_strategies,
-    prefix_evaluate_rnn,
     record_model_results,
     write_prediction_vectors,
 )
@@ -53,9 +52,9 @@ from logicsponge.processmining.neural_networks import (
     PreprocessData,
     QNetwork,
     TransformerModel,
-    evaluate_rl,
+    # evaluate_rl,
     evaluate_rnn,
-    train_rl,
+    # train_rl,
     train_rnn,
 )
 from logicsponge.processmining.utils import (
@@ -117,7 +116,6 @@ def process_neural_model(  # noqa: C901, PLR0912, PLR0913
     epochs: int = 20,
     *,
     window_size: int | None = None,
-    left_pad: bool = False,
 ) -> None:
     """
     Train and evaluate a NN model.
@@ -163,7 +161,7 @@ def process_neural_model(  # noqa: C901, PLR0912, PLR0913
         batch_size=run_config.get("nn", {}).get("batch_size", 8),
         epochs=epochs,
         window_size=window_size,
-        left_pad=left_pad,
+        patience=6
     )
     end_time = time.time()
     training_time = (end_time - start_time) * SEC_TO_MICRO / (TRAIN_EVENTS + VAL_EVENTS)
@@ -180,32 +178,13 @@ def process_neural_model(  # noqa: C901, PLR0912, PLR0913
     # If a window_size is provided we want to evaluate the model in "prefix" mode
     # (one prediction per prefix), so that the resulting flattened prediction vector
     # aligns with the baseline `actual` vector and with how RL/qlearning is evaluated.
-    if window_size is None:
-        # Exclude START token prediction to align with baseline actual_vector (which has no START)
-        start_idx = (
-            nn_processor.activity_to_idx.get(start_symbol)
-            if start_symbol in nn_processor.activity_to_idx else None
-        )
-        stats, perplexities, eval_time, prediction_vector = evaluate_rnn(
-            model,
-            nn_test_set_transformed,
-            max_k=config["top_k"],
-            idx_to_activity=nn_processor.idx_to_activity,
-            window_size=None,
-            left_pad=left_pad,
-            start_idx=start_idx,
-            exclude_start_token=True,
-        )
-    else:
-        # Refactored: use helper preserving original behavior
-        stats, perplexities, eval_time, prediction_vector = prefix_evaluate_rnn(
-            model=model,
-            sequences=nn_test_set_transformed,
-            idx_to_activity=nn_processor.idx_to_activity,
-            max_k=config["top_k"],
-            window_size=window_size,
-            left_pad=left_pad,
-        )
+    stats, perplexities, eval_time, prediction_vector = evaluate_rnn(
+        model,
+        nn_test_set_transformed,
+        max_k=config["top_k"],
+        idx_to_activity=nn_processor.idx_to_activity,
+        window_size=window_size
+    )
 
     # Store neural model prediction vector in global memory under display name
     prediction_vectors_memory.setdefault(display_name, []).append(prediction_vector)
@@ -265,7 +244,9 @@ VOTING_NGRAMS = [(2, 3, 4), (2, 3, 5, 8), (2, 3, 4, 5)]  # (2, 3, 5, 6), (2, 3, 
 
 SELECT_BEST_ARGS = ["prob"]  # ["acc", "prob", "prob x acc"]
 
-WINDOW_RANGE = [1, 2, 3, 4, 5, 6, 7, 8]  # , 9, 10, 12, 14, 16]
+WINDOW_RANGE = [1, 2, 3, 4, 5, 6, 7]  # 8, 9, 10, 12, 14, 16]
+
+NN_WINDOW_RANGE = WINDOW_RANGE.copy() #[8, 16, 32, 64, 128, 256]
 
 NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 # ] + [
@@ -285,20 +266,20 @@ POS_ENCODINGS = [
 
 
 
-def qnetwork_model() -> tuple[QNetwork, optim.Optimizer, nn.Module]:
-    """Initialize a QNetwork model for RL training."""
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# def qnetwork_model() -> tuple[QNetwork, optim.Optimizer, nn.Module]:
+#     """Initialize a QNetwork model for RL training."""
+#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = QNetwork(
-        vocab_size=run_config.get("qlearning", {}).get("vocab_size", 32),
-        embedding_dim=run_config.get("qlearning", {}).get("embedding_dim", 32),
-        hidden_dim=run_config.get("qlearning", {}).get("hidden_dim", 1024),
-        device=device,
-    ).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=run_config.get("rl", {}).get("lr", 0.001))
-    criterion = nn.MSELoss()  # Use MSE for Q-learning
+#     model = QNetwork(
+#         vocab_size=run_config.get("qlearning", {}).get("vocab_size", 32),
+#         embedding_dim=run_config.get("qlearning", {}).get("embedding_dim", 32),
+#         hidden_dim=run_config.get("qlearning", {}).get("hidden_dim", 1024),
+#         device=device,
+#     ).to(device)
+#     optimizer = optim.Adam(model.parameters(), lr=run_config.get("rl", {}).get("lr", 0.001))
+#     criterion = nn.MSELoss()  # Use MSE for Q-learning
 
-    return model, optimizer, criterion
+#     return model, optimizer, criterion
 
 
 @dataclass
@@ -312,65 +293,65 @@ class RLModelResults:
     train_time: float
 
 
-def process_rl_model(
-    _name: str,
-    window_size: int | None,
-    _iteration_data: dict[str, Any],
-    nn_train_set_transformed: torch.Tensor,
-    nn_val_set_transformed: torch.Tensor,
-    nn_eval_set_transformed: torch.Tensor,
-    epochs: int = 20,
-) -> tuple[dict[str, Any], list[Any], float, list[Any], float]:
-    """
-    Train and evaluate a Q-learning model with specified window size.
+# def process_rl_model(
+#     _name: str,
+#     window_size: int | None,
+#     _iteration_data: dict[str, Any],
+#     nn_train_set_transformed: torch.Tensor,
+#     nn_val_set_transformed: torch.Tensor,
+#     nn_eval_set_transformed: torch.Tensor,
+#     epochs: int = 20,
+# ) -> tuple[dict[str, Any], list[Any], float, list[Any], float]:
+#     """
+#     Train and evaluate a Q-learning model with specified window size.
 
-    Evaluation is performed on the same sequences as other models (test set),
-    transformed to tensor format, and intentionally WITHOUT an added START token
-    so that prediction vectors align with the common "actual" baseline.
-    """
-    start_time = time.time()
+#     Evaluation is performed on the same sequences as other models (test set),
+#     transformed to tensor format, and intentionally WITHOUT an added START token
+#     so that prediction vectors align with the common "actual" baseline.
+#     """
+#     start_time = time.time()
 
-    # Initialize model
-    model, optimizer, criterion = qnetwork_model()
+#     # Initialize model
+#     model, optimizer, criterion = qnetwork_model()
 
-    # Train model
-    model = train_rl(
-        model=model,
-        train_sequences=nn_train_set_transformed,
-        val_sequences=nn_val_set_transformed,
-        criterion=criterion,
-        optimizer=optimizer,
-        batch_size=run_config.get("rl", {}).get("batch_size", 8),
-        epochs=epochs,
-        window_size=window_size,
-        gamma=run_config.get("rl", {}).get("gamma", 0.99),  # Standard RL discount factor
-    )
+#     # Train model
+#     model = train_rl(
+#         model=model,
+#         train_sequences=nn_train_set_transformed,
+#         val_sequences=nn_val_set_transformed,
+#         criterion=criterion,
+#         optimizer=optimizer,
+#         batch_size=run_config.get("rl", {}).get("batch_size", 8),
+#         epochs=epochs,
+#         window_size=window_size,
+#         gamma=run_config.get("rl", {}).get("gamma", 0.99),  # Standard RL discount factor
+#     )
 
-    train_time = time.time() - start_time
+#     train_time = time.time() - start_time
 
-    # Evaluate on the common evaluation set (same sequences as other models)
-    model.eval()
-    with torch.no_grad():
-        # evaluate_rl returns: metrics, perplexities, eval_time, prediction_vector
-        metrics, eval_pp, eval_time, prediction_vector = evaluate_rl(
-            model=model,
-            sequences=nn_eval_set_transformed,
-            max_k=3,
-            idx_to_activity=nn_processor.idx_to_activity,
-            window_size=window_size,
-        )
+#     # Evaluate on the common evaluation set (same sequences as other models)
+#     model.eval()
+#     with torch.no_grad():
+#         # evaluate_rl returns: metrics, perplexities, eval_time, prediction_vector
+#         metrics, eval_pp, eval_time, prediction_vector = evaluate_rl(
+#             model=model,
+#             sequences=nn_eval_set_transformed,
+#             max_k=3,
+#             idx_to_activity=nn_processor.idx_to_activity,
+#             window_size=window_size,
+#         )
 
-    # Persist RL model weights (best state) to models directory
-    try:
-        rl_name = f"qlearning_win{window_size}" if window_size is not None else "qlearning"
-        model_file = models_dir / f"{rl_name}.pt"
-        torch.save(model.state_dict(), model_file)
-        logger.info("Saved RL model weights: %s", model_file)
-    except (OSError, RuntimeError) as _e:
-        logger.debug("Failed to save RL model weights (window=%s): %s", window_size, _e, exc_info=True)
+#     # Persist RL model weights (best state) to models directory
+#     try:
+#         rl_name = f"qlearning_win{window_size}" if window_size is not None else "qlearning"
+#         model_file = models_dir / f"{rl_name}.pt"
+#         torch.save(model.state_dict(), model_file)
+#         logger.info("Saved RL model weights: %s", model_file)
+#     except (OSError, RuntimeError) as _e:
+#         logger.debug("Failed to save RL model weights (window=%s): %s", window_size, _e, exc_info=True)
 
-    # Return the relevant outputs so the caller can integrate them into iteration records
-    return metrics, eval_pp, eval_time, prediction_vector, train_time
+#     # Return the relevant outputs so the caller can integrate them into iteration records
+#     return metrics, eval_pp, eval_time, prediction_vector, train_time
 
 
 ML_TRAINING = True
@@ -594,11 +575,11 @@ all_metrics: dict = {
     # Add transformer positional-encoding base variants
     *[f"transformer_pos_{pe}" for pe, _ in POS_ENCODINGS],
     "qlearning",
-    *[f"LSTM_win{w}" for w in WINDOW_RANGE],
-    *[f"transformer_win{w}" for w in WINDOW_RANGE],
+    *[f"LSTM_win{w}" for w in NN_WINDOW_RANGE],
+    *[f"transformer_win{w}" for w in NN_WINDOW_RANGE],
     # Add windowed transformer positional-encoding variants
-    *[f"transformer_pos_{pe}_win{w}" for pe, _ in POS_ENCODINGS for w in WINDOW_RANGE],
-    *[f"qlearning_win{w}" for w in WINDOW_RANGE],
+    *[f"transformer_pos_{pe}_win{w}" for pe, _ in POS_ENCODINGS for w in NN_WINDOW_RANGE],
+    *[f"qlearning_win{w}" for w in NN_WINDOW_RANGE],
         "bayesian train",
         "bayesian test",
         "bayesian t+t",
@@ -993,7 +974,6 @@ for iteration in range(N_ITERATIONS):
                         nn_test_set_transformed=nn_test_set_transformed,
                         epochs=default_run_config.get("nn", {}).get("epochs", 20),
                         window_size=w,
-                        left_pad=False,
                     )
             # After NN evaluation in this iteration, print a short summary of NN entries
             for nn_name in ("LSTM", "transformer", "transformer_2heads"):
