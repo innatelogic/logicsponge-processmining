@@ -246,7 +246,7 @@ SELECT_BEST_ARGS = ["prob"]  # ["acc", "prob", "prob x acc"]
 
 WINDOW_RANGE = [1, 2, 3, 4, 5, 6, 7]  # 8, 9, 10, 12, 14, 16]
 
-NN_WINDOW_RANGE = WINDOW_RANGE.copy() #[8, 16, 32, 64, 128, 256]
+NN_WINDOW_RANGE = [8, 16, 32, 64, 128, 256] #  WINDOW_RANGE.copy() #
 
 NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 # ] + [
@@ -961,7 +961,7 @@ for iteration in range(N_ITERATIONS):
                     epochs=default_run_config.get("nn", {}).get("epochs", 20),
                 )
             # Also train/evaluate windowed variants similar to RL qlearning windows
-            for w in WINDOW_RANGE:
+            for w in NN_WINDOW_RANGE:
                 for name in ["LSTM", "transformer"]:
                     msg = f"Training and evaluating {name} with window={w}..."
                     logger.info(msg)
@@ -992,7 +992,7 @@ for iteration in range(N_ITERATIONS):
 
         # RL (QNetwork) evaluation in batch mode (no RLMiner). Use process_rl_model to run training/eval
         if RL_TRAINING:
-            for w in [None, *WINDOW_RANGE] : # Include both no-window and windowed variants
+            for w in [None, *NN_WINDOW_RANGE] : # Include both no-window and windowed variants
                 rl_name = f"qlearning_win{w}" if w is not None else "qlearning"
                 logger.info("Training and evaluating %s model...", rl_name)
 

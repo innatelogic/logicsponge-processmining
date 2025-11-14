@@ -4,6 +4,7 @@ import copy
 import logging
 import time
 
+import numpy as np
 import torch
 import torch.nn.functional as F  # noqa: N812
 import torch.utils.data
@@ -1127,206 +1128,174 @@ def evaluate_rnn(
     window_size: int | None = None,
 ) -> tuple[dict[str, float | list[int]], list[float], float, list[str]]:
     """
-    Evaluate the LSTM/Transformer model on a dataset (train, test, or validation).
+    Evaluate the RNN model on the given sequences.
 
-    Returns:
-        - stats (dict): accuracy and other counts
-        - perplexities (list[float]): per-sequence (or aggregated) perplexities
-        - eval_time (float): evaluation runtime (seconds)
-        - predicted_vector (list[str]): flattened vector of predicted next-activity names
-          (one entry per non-padding prediction). If idx_to_activity is not provided,
-          indices are stringified.
+    Unified evaluation for teacher-forcing (window_size=None)
+    and autoregressive sliding-window evaluation (window_size=int).
+
+    Option B semantics:
+        - If window_size=None → teacher-forcing (vectorized)
+        - If window_size>=1  → autoregressive prefix-by-prefix evaluation
+        - If window_size is large, it *still uses prefix-by-prefix decoding*
+
     """
-    eval_start_time = time.time()
-    pause_time = 0.0
+    eval_start = time.time()
+    model.eval()
 
-    model.eval()  # Set the model to evaluation mode
-    correct_predictions = 0
-    total_predictions = 0
-    model_device = model.device  # Get model's device once
-
-    # Initialize list to count top-k correct predictions
-    top_k_correct_preds = [0] * max_k
-
-    total_nll = 0.0  # Accumulate negative log-likelihood
-    token_count = 0
-    perplexities = []
-
-    # New: collect predicted activity names (as strings) for each non-padding prediction
+    device = model.device
     predicted_vector: list[str] = []
 
-    with torch.no_grad():
-        for i in range(sequences.size(0)):  # Iterate through sequences by index
-            single_sequence_trace = sequences[i]
+    # ---- Metrics ----
+    correct = 0
+    total = 0
+    top_k_correct = [0] * max_k
 
-            # When window_size is set, we need to make predictions for all positions
-            # using a sliding window approach (one prediction per prefix)
-            if window_size is not None:
-                # Process each prefix position with a sliding window
-                full_sequence = single_sequence_trace[single_sequence_trace != 0]  # Remove padding
-                seq_len = len(full_sequence)
-                
-                for pos in range(1, seq_len):  # Start from position 1 (predict after first token)
-                    # Get the context window ending at this position
-                    start_idx = max(0, pos - window_size)
-                    x_input_cpu = full_sequence[start_idx:pos]
-                    y_target_cpu = full_sequence[pos:pos+1]
-                    
-                    x_input = x_input_cpu.unsqueeze(0)
-                    y_target = y_target_cpu.unsqueeze(0)
-                    
-                    if model_device is not None:
-                        x_input = x_input.to(device=model_device)
-                        y_target = y_target.to(device=model_device)
-                    
-                    outputs = model(x_input)
-                    
-                    # Get the prediction for the last position
-                    predicted_idx = torch.argmax(outputs[:, -1, :], dim=-1).item()
-                    target_idx = y_target.item()
-                    
-                    # Add to predicted vector
-                    if idx_to_activity is not None:
-                        pred_str = str(idx_to_activity.get(int(predicted_idx), str(int(predicted_idx))))
-                    else:
-                        pred_str = str(int(predicted_idx))
-                    predicted_vector.append(pred_str)
-                    
-                    # Update metrics
-                    if predicted_idx == target_idx:
-                        correct_predictions += 1
-                    total_predictions += 1
-                    
-                    # Top-k and perplexity metrics for this position
-                    log_probs = torch.nn.functional.log_softmax(outputs[:, -1, :], dim=-1)
-                    _, top_k_indices = torch.topk(outputs[:, -1, :], k=max_k, dim=-1)
-                    
-                    for k in range(max_k):
-                        if target_idx in top_k_indices[0, :(k+1)].tolist():
-                            top_k_correct_preds[k] += 1
-                    
-                    # NLL for perplexity
-                    token_log_prob = log_probs[0, int(target_idx)].item()
-                    total_nll += -token_log_prob
-                    token_count += 1
-                
-                # Per-sequence perplexity: record after processing all positions in the sequence
-                if per_sequence_perplexity and seq_len > 1:
-                    # Calculate perplexity for the sequence
-                    num_preds_in_seq = seq_len - 1
-                    if num_preds_in_seq > 0:
-                        # Use only NLL accumulated for this sequence
-                        # (we would need to track per-sequence NLL separately for true per-seq perplexity,
-                        # but for simplicity we approximate with the overall average)
-                        perplexities.append(float("inf"))  # placeholder
-            else:
-                # Original logic without window_size (process entire sequence at once)
-                # Input is all but the last token, target is the sequence shifted by one
-                x_input_cpu = single_sequence_trace[:-1]
-                y_target_cpu = single_sequence_trace[1:]
+    total_nll = 0.0
+    token_count = 0
+    perplexities: list[float] = []
 
-                x_input = x_input_cpu.unsqueeze(0)
-                y_target = y_target_cpu.unsqueeze(0)
+    # =================================================================
+    #  MODE 1: TEACHER-FORCING (window_size = None)
+    # =================================================================
+    if window_size is None:
 
-                if model_device is not None:
-                    x_input = x_input.to(device=model_device)
-                    y_target = y_target.to(device=model_device)
+        with torch.no_grad():
+            for i in range(sequences.size(0)):
+                seq = sequences[i]
+                seq = seq[seq != 0]        # remove padding
+                if len(seq) <= 1:
+                    continue
 
-                outputs = model(x_input)
+                x = seq[:-1].unsqueeze(0).to(device)
+                y = seq[1:].unsqueeze(0).to(device)
 
-                # Flatten for comparison
-                predicted_indices = torch.argmax(outputs, dim=-1)
-                predicted_indices = predicted_indices.view(-1)
-                y_target = y_target.view(-1)
+                outputs = model(x)  # [1, T-1, vocab]
 
-                # Create a mask to ignore padding
-                mask = y_target != 0  # Mask for non-padding targets
-                masked_targets = y_target[mask]
+                # predictions
+                pred = torch.argmax(outputs, dim=-1).view(-1)
+                target = y.view(-1)
 
-                # Save predicted values for non-padding positions, mapped to activity names
-                if mask.sum().item() > 0:
-                    masked_predicted = predicted_indices[mask].cpu().tolist()
-                    if idx_to_activity is not None:
-                        mapped = [str(idx_to_activity.get(int(idx), str(int(idx)))) for idx in masked_predicted]
-                    else:
-                        # Fallback: stringify indices so callers can still inspect values
-                        mapped = [str(int(idx)) for idx in masked_predicted]
-                    predicted_vector.extend(mapped)  # All predictions
+                # metrics mask
+                mask = target != 0
+                masked_pred = pred[mask]
+                masked_target = target[mask]
 
-                # Apply the mask and count correct predictions
-                correct_predictions += (predicted_indices[mask] == masked_targets).sum().item()
-                total_predictions += mask.sum().item()  # Count non-padding tokens
+                # predicted_vector
+                preds_cpu = masked_pred.cpu().tolist()
+                if idx_to_activity:
+                    predicted_vector.extend(
+                        [str(idx_to_activity.get(int(p), str(int(p)))) for p in preds_cpu]
+                    )
+                else:
+                    predicted_vector.extend([str(int(p)) for p in preds_cpu])
 
-                pause_start_time = time.time()
+                # accuracy
+                correct += (masked_pred == masked_target).sum().item()
+                total += mask.sum().item()
 
-                # ================ Start for metrics ================
-
-                # Get top-k predictions for each position
-                # Shape: [batch_size, seq_len, k]
-                _, top_k_indices = torch.topk(outputs, k=max_k, dim=-1)
-
-                # Reshape top_k_indices to [batch_size*seq_len, k]
-                top_k_indices = top_k_indices.view(-1, max_k)
-                log_probs = torch.nn.functional.log_softmax(outputs, dim=-1)  # Log probabilities
-                log_probs = log_probs.view(-1, log_probs.shape[-1])
-                masked_log_probs = log_probs[mask]
-
-                # Apply mask to top-k predictions
-                masked_top_k = top_k_indices[mask]
-
-                # Count correct predictions for each k
+                # top-k accuracy
+                _, tk = torch.topk(outputs, k=max_k, dim=-1)
+                tk = tk.view(-1, max_k)[mask]
                 for k in range(max_k):
-                    # For each position, check if the true label is in the top k predictions
-                    # Get the predictions up to k+1 (inclusive) for each position
-                    top_k_preds = masked_top_k[:, : (k + 1)]
+                    top_k_correct[k] += (tk[:, :k+1] == masked_target.unsqueeze(1)).any(dim=1).sum().item() # type: ignore
 
-                    # Check if true label is in the top-k predictions for each position
-                    # Expand target to match shape of predictions for comparison
-                    expanded_targets = masked_targets.unsqueeze(1).expand_as(top_k_preds)
+                # NLL + perplexity
+                log_probs = torch.log_softmax(outputs, dim=-1)
+                log_probs = log_probs.view(-1, log_probs.size(-1))[mask]
+                nll = -log_probs[torch.arange(len(masked_target)), masked_target].sum().item()
 
-                    # Count positions where the true label appears in the top-k predictions
-                    top_k_correct = (top_k_preds == expanded_targets).any(dim=1).sum().item()
-                    top_k_correct_preds[k] += int(top_k_correct)
-
-                # NLL for perplexity
-                token_log_probs = masked_log_probs[torch.arange(len(masked_targets)), masked_targets]
-
-                # Non-classical way (to match ngrams)
-                sequence_nll = -token_log_probs.sum().item()  # Negative log likelihood
-                sequence_length = masked_targets.size(0)
+                total_nll += nll
+                token_count += len(masked_target)
 
                 if per_sequence_perplexity:
-                    # Calculate perplexity for the sequence
-                    sequence_perplexity = (
-                        torch.exp(torch.tensor(sequence_nll / sequence_length)).item()
-                        if sequence_length > 0
-                        else float("inf")
+                    perp = np.exp(nll / len(masked_target))
+                    perplexities.append(perp)
+
+        if not per_sequence_perplexity:
+            perp = np.exp(total_nll / token_count) if token_count > 0 else float("inf")
+            perplexities.append(perp)
+
+        stats = {
+            "accuracy": correct / total if total > 0 else 0.0,
+            "total_predictions": total,
+            "correct_predictions": correct,
+            "top_k_correct_preds": top_k_correct,
+        }
+
+        eval_time = time.time() - eval_start
+        return stats, perplexities, eval_time, predicted_vector
+
+    # =================================================================
+    #  MODE 2: AUTOREGRESSIVE SLIDING-WINDOW EVALUATION
+    # =================================================================
+
+    with torch.no_grad():
+        for i in range(sequences.size(0)):
+            seq = sequences[i]
+            seq = seq[seq != 0]            # remove padding
+            L = len(seq)
+            if L <= 1:
+                continue
+
+            seq_nll = 0.0
+            seq_tokens = 0
+
+            for pos in range(1, L):
+                start = max(0, pos - window_size)
+                x_cpu = seq[start:pos]
+                y_cpu = seq[pos:pos+1]
+
+                x = x_cpu.unsqueeze(0).to(device)
+                y = y_cpu.to(device)
+
+                outputs = model(x)               # [1, current_length, vocab]
+                logits = outputs[:, -1, :]       # last position only
+                log_probs = torch.log_softmax(logits, dim=-1)
+
+                # predicted token
+                pred_idx = torch.argmax(logits, dim=-1).item()
+                true_idx = y.item()
+
+                # predicted_vector
+                if idx_to_activity:
+                    predicted_vector.append(
+                        str(idx_to_activity.get(int(pred_idx), str(int(pred_idx))))
                     )
-                    perplexities.append(sequence_perplexity)
+                else:
+                    predicted_vector.append(str(int(pred_idx)))
 
-                total_nll += sequence_nll
-                token_count += sequence_length
+                # accuracy
+                if pred_idx == true_idx:
+                    correct += 1
+                total += 1
 
-                # ================= End for metrics =================
-                pause_time += time.time() - pause_start_time
+                # top-k accuracy
+                _, tk = torch.topk(logits, k=max_k, dim=-1)
+                tk_list = tk[0].tolist()
+                for k in range(max_k):
+                    if true_idx in tk_list[:k+1]:
+                        top_k_correct[k] += 1
 
-    accuracy = correct_predictions / total_predictions if total_predictions > 0 else 0
+                # NLL + perplexity
+                token_nll = -log_probs[0, true_idx].item() # type: ignore
+                seq_nll += token_nll
+                seq_tokens += 1
+                total_nll += token_nll
+                token_count += 1
 
-    pause_start_time = time.time()
+            if per_sequence_perplexity and seq_tokens > 0:
+                perplexities.append(np.exp(seq_nll / seq_tokens))
+
     if not per_sequence_perplexity:
-        perplexities.append(
-            torch.exp(torch.tensor(total_nll / token_count)).item() if token_count > 0 else float("inf")
-        )
-
-    logger.debug("Perplexity: %s", perplexities[-1] if len(perplexities) > 0 else None)
+        perp = np.exp(total_nll / token_count) if token_count > 0 else float("inf")
+        perplexities.append(perp)
 
     stats = {
-        "accuracy": accuracy,
-        "total_predictions": total_predictions,
-        "correct_predictions": correct_predictions,
-        "top_k_correct_preds": top_k_correct_preds,
+        "accuracy": correct / total if total > 0 else 0.0,
+        "total_predictions": total,
+        "correct_predictions": correct,
+        "top_k_correct_preds": top_k_correct,
     }
-    pause_time += time.time() - pause_start_time
-    eval_time = time.time() - eval_start_time - pause_time
 
+    eval_time = time.time() - eval_start
     return stats, perplexities, eval_time, predicted_vector
