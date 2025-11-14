@@ -31,7 +31,7 @@ from logicsponge.processmining.neural_networks import (
     RNNModel,
     TransformerModel,
     # Use left-padding helper to align streaming NN batches with batch-mode training/eval
-    # _left_pad_stack,
+    _left_pad_stack,
 )
 from logicsponge.processmining.types import (
     ActivityDelays,

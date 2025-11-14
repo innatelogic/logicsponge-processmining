@@ -469,7 +469,7 @@ hidden_dim = lstm_cfg.get("hidden_dim", 128)
 num_layers = lstm_cfg.get("num_layers", 2)
 model_lstm = LSTMModel(
     vocab_size,
-    embedding_dim=embedding_dim, hidden_dim=hidden_dim, num_layers=num_layers, device=device, use_one_hot=True
+    embedding_dim=embedding_dim, hidden_dim=hidden_dim, device=device, use_one_hot=True
 ).to(device)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model_lstm.parameters(), lr=nn_cfg.get("lr", 0.001))
