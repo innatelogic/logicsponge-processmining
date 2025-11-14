@@ -52,9 +52,9 @@ from logicsponge.processmining.neural_networks import (
     PreprocessData,
     QNetwork,
     TransformerModel,
-    # evaluate_rl,
+    evaluate_rl,
     evaluate_rnn,
-    # train_rl,
+    train_rl,
     train_rnn,
 )
 from logicsponge.processmining.utils import (
@@ -106,8 +106,7 @@ def transformer_model(
     optimizer = optim.Adam(model.parameters(), lr=run_config.get("nn", {}).get("lr", 0.001))
     return model, optimizer, criterion
 
-def process_neural_model(  # noqa: C901, PLR0912, PLR0913
-    name: str,
+def process_neural_model(  # noqa: PLR0913
     iteration_data: dict,
     all_metrics: dict,
     nn_train_set_transformed: torch.Tensor,
@@ -266,20 +265,20 @@ POS_ENCODINGS = [
 
 
 
-# def qnetwork_model() -> tuple[QNetwork, optim.Optimizer, nn.Module]:
-#     """Initialize a QNetwork model for RL training."""
-#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def qnetwork_model() -> tuple[QNetwork, optim.Optimizer, nn.Module]:
+    """Initialize a QNetwork model for RL training."""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-#     model = QNetwork(
-#         vocab_size=run_config.get("qlearning", {}).get("vocab_size", 32),
-#         embedding_dim=run_config.get("qlearning", {}).get("embedding_dim", 32),
-#         hidden_dim=run_config.get("qlearning", {}).get("hidden_dim", 1024),
-#         device=device,
-#     ).to(device)
-#     optimizer = optim.Adam(model.parameters(), lr=run_config.get("rl", {}).get("lr", 0.001))
-#     criterion = nn.MSELoss()  # Use MSE for Q-learning
+    model = QNetwork(
+        vocab_size=run_config.get("qlearning", {}).get("vocab_size", 32),
+        embedding_dim=run_config.get("qlearning", {}).get("embedding_dim", 32),
+        hidden_dim=run_config.get("qlearning", {}).get("hidden_dim", 1024),
+        device=device,
+    ).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=run_config.get("rl", {}).get("lr", 0.001))
+    criterion = nn.MSELoss()  # Use MSE for Q-learning
 
-#     return model, optimizer, criterion
+    return model, optimizer, criterion
 
 
 @dataclass
@@ -293,65 +292,65 @@ class RLModelResults:
     train_time: float
 
 
-# def process_rl_model(
-#     _name: str,
-#     window_size: int | None,
-#     _iteration_data: dict[str, Any],
-#     nn_train_set_transformed: torch.Tensor,
-#     nn_val_set_transformed: torch.Tensor,
-#     nn_eval_set_transformed: torch.Tensor,
-#     epochs: int = 20,
-# ) -> tuple[dict[str, Any], list[Any], float, list[Any], float]:
-#     """
-#     Train and evaluate a Q-learning model with specified window size.
+def process_rl_model(
+    _name: str,
+    window_size: int | None,
+    _iteration_data: dict[str, Any],
+    nn_train_set_transformed: torch.Tensor,
+    nn_val_set_transformed: torch.Tensor,
+    nn_eval_set_transformed: torch.Tensor,
+    epochs: int = 20,
+) -> tuple[dict[str, Any], list[Any], float, list[Any], float]:
+    """
+    Train and evaluate a Q-learning model with specified window size.
 
-#     Evaluation is performed on the same sequences as other models (test set),
-#     transformed to tensor format, and intentionally WITHOUT an added START token
-#     so that prediction vectors align with the common "actual" baseline.
-#     """
-#     start_time = time.time()
+    Evaluation is performed on the same sequences as other models (test set),
+    transformed to tensor format, and intentionally WITHOUT an added START token
+    so that prediction vectors align with the common "actual" baseline.
+    """
+    start_time = time.time()
 
-#     # Initialize model
-#     model, optimizer, criterion = qnetwork_model()
+    # Initialize model
+    model, optimizer, criterion = qnetwork_model()
 
-#     # Train model
-#     model = train_rl(
-#         model=model,
-#         train_sequences=nn_train_set_transformed,
-#         val_sequences=nn_val_set_transformed,
-#         criterion=criterion,
-#         optimizer=optimizer,
-#         batch_size=run_config.get("rl", {}).get("batch_size", 8),
-#         epochs=epochs,
-#         window_size=window_size,
-#         gamma=run_config.get("rl", {}).get("gamma", 0.99),  # Standard RL discount factor
-#     )
+    # Train model
+    model = train_rl(
+        model=model,
+        train_sequences=nn_train_set_transformed,
+        val_sequences=nn_val_set_transformed,
+        criterion=criterion,
+        optimizer=optimizer,
+        batch_size=run_config.get("rl", {}).get("batch_size", 8),
+        epochs=epochs,
+        window_size=window_size,
+        gamma=run_config.get("rl", {}).get("gamma", 0.99),  # Standard RL discount factor
+    )
 
-#     train_time = time.time() - start_time
+    train_time = time.time() - start_time
 
-#     # Evaluate on the common evaluation set (same sequences as other models)
-#     model.eval()
-#     with torch.no_grad():
-#         # evaluate_rl returns: metrics, perplexities, eval_time, prediction_vector
-#         metrics, eval_pp, eval_time, prediction_vector = evaluate_rl(
-#             model=model,
-#             sequences=nn_eval_set_transformed,
-#             max_k=3,
-#             idx_to_activity=nn_processor.idx_to_activity,
-#             window_size=window_size,
-#         )
+    # Evaluate on the common evaluation set (same sequences as other models)
+    model.eval()
+    with torch.no_grad():
+        # evaluate_rl returns: metrics, perplexities, eval_time, prediction_vector
+        metrics, eval_pp, eval_time, prediction_vector = evaluate_rl(
+            model=model,
+            sequences=nn_eval_set_transformed,
+            max_k=3,
+            idx_to_activity=nn_processor.idx_to_activity,
+            window_size=window_size,
+        )
 
-#     # Persist RL model weights (best state) to models directory
-#     try:
-#         rl_name = f"qlearning_win{window_size}" if window_size is not None else "qlearning"
-#         model_file = models_dir / f"{rl_name}.pt"
-#         torch.save(model.state_dict(), model_file)
-#         logger.info("Saved RL model weights: %s", model_file)
-#     except (OSError, RuntimeError) as _e:
-#         logger.debug("Failed to save RL model weights (window=%s): %s", window_size, _e, exc_info=True)
+    # Persist RL model weights (best state) to models directory
+    try:
+        rl_name = f"qlearning_win{window_size}" if window_size is not None else "qlearning"
+        model_file = models_dir / f"{rl_name}.pt"
+        torch.save(model.state_dict(), model_file)
+        logger.info("Saved RL model weights: %s", model_file)
+    except (OSError, RuntimeError) as _e:
+        logger.debug("Failed to save RL model weights (window=%s): %s", window_size, _e, exc_info=True)
 
-#     # Return the relevant outputs so the caller can integrate them into iteration records
-#     return metrics, eval_pp, eval_time, prediction_vector, train_time
+    # Return the relevant outputs so the caller can integrate them into iteration records
+    return metrics, eval_pp, eval_time, prediction_vector, train_time
 
 
 ML_TRAINING = True
@@ -891,13 +890,15 @@ for iteration in range(N_ITERATIONS):
             if isinstance(strategy, NGram):
                 try:
                     top3 = strategy.top_three_visit_rates()
-                except Exception as _e:
-                    logger.exception("Failed to compute top3 visit rates for %s: %s", strategy_name, _e)
+                except Exception:
+                    logger.exception("Failed to compute top3 visit rates for %s", strategy_name)
                     top3 = []
                 state_mining_iteration[strategy_name] = top3
-        except Exception:
+        except Exception:  # noqa: BLE001
             # defensive: if isinstance check or top3 extraction fails, continue
-            logger.debug("Non-critical: could not collect state mining info for strategy %s", strategy_name, exc_info=True)
+            logger.warning(
+                "Non-critical: could not collect state mining info for strategy %s", strategy_name, exc_info=True
+            )
 
 
     # LSTM + Transformer + RL Evaluation
@@ -908,7 +909,7 @@ for iteration in range(N_ITERATIONS):
             try:
                 with state_mining_path.open("r") as _f:
                     existing = json.load(_f)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 existing = {}
         else:
             existing = {}
@@ -952,7 +953,6 @@ for iteration in range(N_ITERATIONS):
                 msg = f"Training and evaluating {name} model..."
                 logger.info(msg)
                 process_neural_model(
-                    name=name,
                     iteration_data=iteration_data,
                     all_metrics=all_metrics,
                     nn_train_set_transformed=nn_train_set_transformed,
@@ -966,7 +966,6 @@ for iteration in range(N_ITERATIONS):
                     msg = f"Training and evaluating {name} with window={w}..."
                     logger.info(msg)
                     process_neural_model(
-                        name=name,
                         iteration_data=iteration_data,
                         all_metrics=all_metrics,
                         nn_train_set_transformed=nn_train_set_transformed,

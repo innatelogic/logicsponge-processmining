@@ -31,7 +31,7 @@ from logicsponge.processmining.neural_networks import (
     RNNModel,
     TransformerModel,
     # Use left-padding helper to align streaming NN batches with batch-mode training/eval
-    # _left_pad_stack,
+    _left_pad_stack,
 )
 from logicsponge.processmining.types import (
     ActivityDelays,
@@ -1566,8 +1566,10 @@ class NeuralNetworkMiner(StreamingMiner):
         This method leaves incremental caches untouched; you may want to recompute caches after training.
         """
         sequences = [torch.tensor(self.sequences[cid], dtype=torch.long, device=self.device) for cid in batch_case_ids]
-        # LEFT-pad sequences to align with causal/source masks used by NN models
+
+        # Pad sequences to the same length (left-padding with 0)
         batch = _left_pad_stack(sequences, pad_value=0)
+
         # teacher-forcing next-token prediction
         x = batch[:, :-1]
         y = batch[:, 1:]

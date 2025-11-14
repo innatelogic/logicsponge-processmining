@@ -559,7 +559,6 @@ class TransformerModel(nn.Module):
         embedding_dim: int = 64,
         hidden_dim: int = 128,
         num_layers: int = 2,
-        padding_idx: int = 0,
         attention_heads: int = 4,
         use_one_hot: bool = False,
         device: torch.device | None = None,
@@ -603,7 +602,6 @@ class TransformerModel(nn.Module):
             nn.Embedding(vocab_size, embedding_dim, padding_idx=0, device=device) if not use_one_hot else None
         )
 
-
         # Transformer encoder
         # Use a custom rotary-aware encoder layer stack so we can apply RoPE to Q/K
         # inside attention. This keeps the rest of the Transformer semantics intact
@@ -617,7 +615,9 @@ class TransformerModel(nn.Module):
         self.enable_amp = False  # type: bool
         # Build stack of rotary encoder layers
         self.transformer_layers = nn.ModuleList([
-            RotaryTransformerEncoderLayer(d_model, attention_heads, dim_feedforward=hidden_dim, dropout=0.0, device=device)
+            RotaryTransformerEncoderLayer(
+                d_model, attention_heads, dim_feedforward=hidden_dim, dropout=0.0, device=device
+            )
             for _ in range(num_layers)
         ])
 
@@ -643,7 +643,7 @@ class TransformerModel(nn.Module):
         return cached.to(device)
 
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:  # noqa: C901, PLR0912, PLR0915
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Forward pass through the Transformer model.
 
@@ -722,7 +722,7 @@ class TransformerModel(nn.Module):
             cos, sin = _build_rotary_cos_sin(
                 seq_len, head_dim, x_device, x.dtype, base=getattr(self, "_rotary_base", 10000.0)
             )
-        except Exception:
+        except ValueError:
             cos = sin = None
 
 
@@ -745,8 +745,10 @@ class TransformerModel(nn.Module):
         logits_small = self.fc(x)  # [B, L', V]
         # If we cropped leading all-pad columns, left-pad the logits back to original length
         if s > 0:
-            V = logits_small.size(-1)
-            logits_full = torch.zeros(batch_size, s + seq_len, V, device=logits_small.device, dtype=logits_small.dtype)
+            vvv = logits_small.size(-1)
+            logits_full = torch.zeros(
+                batch_size, s + seq_len, vvv, device=logits_small.device, dtype=logits_small.dtype
+            )
             logits_full[:, s:, :] = logits_small
             return logits_full
         return logits_small
@@ -772,7 +774,11 @@ class RotaryTransformerEncoderLayer(nn.Module):
     linear projections for Q/K/V so we can apply RoPE before attention.
     """
 
-    def __init__(self, d_model: int, nhead: int, dim_feedforward: int = 2048, dropout: float = 0.0, device: torch.device | None = None):
+    def __init__(
+            self, d_model: int, nhead: int, dim_feedforward: int = 2048, dropout: float = 0.0,
+            device: torch.device | None = None
+        ) -> None:
+        """Initialize the Rotary Transformer Encoder Layer."""
         super().__init__()
         if d_model % nhead != 0:
             msg = "d_model must be divisible by nhead"
@@ -814,7 +820,7 @@ class RotaryTransformerEncoderLayer(nn.Module):
                 src_key_padding_mask: [B, L] with True at PAD positions (blocks keys/columns).
         """
         # src: [B, seq_len, d_model]
-        B, seq_len, _ = src.shape
+        bbb, seq_len, _ = src.shape
 
         # Project
         q = self.q_proj(src)
@@ -822,9 +828,9 @@ class RotaryTransformerEncoderLayer(nn.Module):
         v = self.v_proj(src)
 
         # reshape to [B, seq_len, nhead, head_dim]
-        q = q.view(B, seq_len, self.nhead, self.head_dim)
-        k = k.view(B, seq_len, self.nhead, self.head_dim)
-        v = v.view(B, seq_len, self.nhead, self.head_dim)
+        q = q.view(bbb, seq_len, self.nhead, self.head_dim)
+        k = k.view(bbb, seq_len, self.nhead, self.head_dim)
+        v = v.view(bbb, seq_len, self.nhead, self.head_dim)
 
         # Apply rotary if available
         if cos is not None and sin is not None:
@@ -837,14 +843,16 @@ class RotaryTransformerEncoderLayer(nn.Module):
         k = k.permute(0, 2, 1, 3)
         v = v.permute(0, 2, 1, 3)
 
+        two_constant = 2
+        three_constant = 3
         # Scaled dot-product attention via SDPA (FlashAttention when available)
         attn_mask = None
         if src_mask is not None:
-            if src_mask.dim() == 2:
+            if src_mask.dim() == two_constant:
                 attn_mask = src_mask.unsqueeze(0).unsqueeze(0)  # [1,1,L,L]
-            elif src_mask.dim() == 3:
-                if src_mask.size(0) != B:
-                    msg = f"Batch mask first dim {src_mask.size(0)} != batch size {B}"
+            elif src_mask.dim() == three_constant:
+                if src_mask.size(0) != bbb:
+                    msg = f"Batch mask first dim {src_mask.size(0)} != batch size {bbb}"
                     raise ValueError(msg)
                 attn_mask = src_mask.unsqueeze(1)  # [B,1,L,L]
             else:
@@ -870,7 +878,7 @@ class RotaryTransformerEncoderLayer(nn.Module):
             attn = torch.nan_to_num(attn, nan=0.0)
 
         # combine heads
-        attn = attn.permute(0, 2, 1, 3).contiguous().view(B, seq_len, self.d_model)
+        attn = attn.permute(0, 2, 1, 3).contiguous().view(bbb, seq_len, self.d_model)
         attn = self.out_proj(attn)
 
         # Residual + norm
@@ -878,8 +886,7 @@ class RotaryTransformerEncoderLayer(nn.Module):
 
         # Feedforward
         ff = self.linear2(self.dropout(self.activation(self.linear1(src2))))
-        src_out = self.norm2(src2 + self.dropout(ff))
-        return src_out
+        return self.norm2(src2 + self.dropout(ff))
 
 
 # --------------------------
@@ -1000,7 +1007,7 @@ class PreprocessData:
         return pad_sequence(processed_sequences, batch_first=True, padding_value=0)
 
 
-def train_rnn(
+def train_rnn(  # noqa: C901, PLR0913, PLR0915
     model: LSTMModel | TransformerModel,
     train_sequences: torch.Tensor,
     val_sequences: torch.Tensor,
@@ -1118,7 +1125,7 @@ def train_rnn(
     return model
 
 
-def evaluate_rnn(
+def evaluate_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
     model: LSTMModel | TransformerModel,
     sequences: torch.Tensor,
     *,
@@ -1197,7 +1204,7 @@ def evaluate_rnn(
                 _, tk = torch.topk(outputs, k=max_k, dim=-1)
                 tk = tk.view(-1, max_k)[mask]
                 for k in range(max_k):
-                    top_k_correct[k] += (tk[:, :k+1] == masked_target.unsqueeze(1)).any(dim=1).sum().item() # type: ignore
+                    top_k_correct[k] += (tk[:, :k+1] == masked_target.unsqueeze(1)).any(dim=1).sum().item() # type: ignore  # noqa: PGH003
 
                 # NLL + perplexity
                 log_probs = torch.log_softmax(outputs, dim=-1)
@@ -1233,14 +1240,14 @@ def evaluate_rnn(
         for i in range(sequences.size(0)):
             seq = sequences[i]
             seq = seq[seq != 0]            # remove padding
-            L = len(seq)
-            if L <= 1:
+            lll = len(seq)
+            if lll <= 1:
                 continue
 
             seq_nll = 0.0
             seq_tokens = 0
 
-            for pos in range(1, L):
+            for pos in range(1, lll):
                 start = max(0, pos - window_size)
                 x_cpu = seq[start:pos]
                 y_cpu = seq[pos:pos+1]
@@ -1277,7 +1284,7 @@ def evaluate_rnn(
                         top_k_correct[k] += 1
 
                 # NLL + perplexity
-                token_nll = -log_probs[0, true_idx].item() # type: ignore
+                token_nll = -log_probs[0, true_idx].item() # type: ignore  # noqa: PGH003
                 seq_nll += token_nll
                 seq_tokens += 1
                 total_nll += token_nll
@@ -1299,3 +1306,319 @@ def evaluate_rnn(
 
     eval_time = time.time() - eval_start
     return stats, perplexities, eval_time, predicted_vector
+
+
+
+def _left_pad_stack(
+        seqs: list[torch.Tensor], *, pad_value: int = 0, target_len: int | None = None
+    ) -> torch.Tensor:
+    """
+    Left-pad 1D LongTensors to a common length and stack as [B, L].
+
+    If target_len is None, pad to the maximum length found in seqs. Assumes all seqs have dtype Long.
+    """
+    if not seqs:
+        return torch.zeros((0, 1), dtype=torch.long)
+    max_len = target_len if target_len is not None else max(int(s.numel()) for s in seqs)
+    out = torch.full((len(seqs), max_len), pad_value, dtype=seqs[0].dtype)
+    for i, s in enumerate(seqs):
+        lll = int(s.numel())
+        if lll == 0:
+            continue
+        out[i, max_len - lll : max_len] = s[-max_len:]
+    return out
+
+
+
+
+
+
+
+
+
+
+
+
+RL_MIN_PREFIX_LEN = 1
+
+def train_rl(  # noqa: PLR0913, PLR0915, C901
+    model: QNetwork,
+    train_sequences: torch.Tensor,
+    val_sequences: torch.Tensor,
+    criterion: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    batch_size: int,
+    epochs: int = 10,
+    patience: int = 3,
+    *,
+    window_size: int | None = None,
+    gamma: float = 0.99  # Discount factor for future rewards
+) -> QNetwork:
+    """
+    Train QNetwork to converge to N-gram statistics using cross-entropy loss.
+
+    This implementation uses Maximum Likelihood Estimation (MLE) through cross-entropy,
+    which should converge to the same empirical distribution as N-gram frequency counts.
+
+    Key features for proper convergence:
+    - Sufficient model capacity (embedding_dim and hidden_dim should be large enough)
+    - Proper learning rate (use adaptive optimizer like Adam)
+    - See all training examples multiple times (epochs)
+    - Early stopping based on validation accuracy
+
+    If window_size is provided, each sampled prefix is cropped to its last `window_size` tokens.
+    """
+    device = model.device or train_sequences.device
+    _ = criterion  # Unused, we use cross-entropy
+    _ = gamma  # Not used in this supervised learning approach
+    model = model.to(device)
+
+    # Build complete dataset of all prefixes and their targets
+    # This ensures we train on the full empirical distribution
+    prefixes: list[torch.Tensor] = []
+    targets: list[int] = []
+
+    for i in range(train_sequences.shape[0]):
+        seq = train_sequences[i]
+        valid_len = int((seq != 0).sum().item())
+        if valid_len < RL_MIN_PREFIX_LEN:
+            continue
+
+        # Create all possible prefixes (like N-gram does)
+        for k in range(1, valid_len):
+            prefix = seq[:k].clone()
+            if window_size is not None and prefix.numel() > window_size:
+                prefix = prefix[-window_size:]
+            prefixes.append(prefix)
+            targets.append(int(seq[k].item()))
+
+    if not prefixes:
+        return model
+
+    # Create dataset and dataloader
+    class PrefixDataset(torch.utils.data.Dataset):
+        def __init__(self, xs: list[torch.Tensor], ys: list[int]) -> None:
+            self.xs = xs
+            self.ys = ys
+
+        def __len__(self) -> int:
+            return len(self.xs)
+
+        def __getitem__(self, idx: int) -> tuple[torch.Tensor, int]:
+            return self.xs[idx], self.ys[idx]
+
+    def collate(batch: list[tuple[torch.Tensor, int]]) -> tuple[torch.Tensor, torch.Tensor]:
+        xs = [b[0] for b in batch]
+        ys = torch.tensor([b[1] for b in batch], dtype=torch.long)
+        x_pad = _left_pad_stack(xs)
+        return x_pad, ys
+
+    dataset = PrefixDataset(prefixes, targets)
+    # Shuffle to avoid order bias and help convergence
+    loader = torch.utils.data.DataLoader(
+        dataset, batch_size=batch_size, shuffle=True, collate_fn=collate
+    )
+
+    best_val_acc = 0.0
+    best_state = None
+    patience_counter = 0
+
+    logger.info("Training on %d prefix examples to learn empirical distribution", len(prefixes))
+
+    for epoch in range(epochs):
+        model.train()
+        epoch_loss = 0.0
+        epoch_correct = 0
+        epoch_total = 0
+
+        with tqdm(total=len(loader), desc=f"Epoch {epoch + 1}/{epochs}", unit="batch") as pbar:
+            for x_pad, y_batch_loop in loader:
+                x_batch = x_pad.to(device)
+                y_batch = y_batch_loop.to(device)
+
+                # Forward pass: get Q-values (logits) for all actions
+                outputs = model(x_batch)
+                # Some model.forward() implementations return (logits, hidden). We only need logits.
+                if isinstance(outputs, tuple):
+                    outputs = outputs[0]
+                # outputs: [batch, seq_len, vocab]
+                # We need logits for the last (non-padding) timestep of each prefix in the batch.
+                lengths = (x_batch != 0).sum(dim=1)
+                # last index per row (lengths >= 1 since prefixes are non-empty)
+                last_idx = lengths - 1
+                batch_idx = torch.arange(x_batch.size(0), device=outputs.device)
+                q_values = outputs[batch_idx, last_idx, :]  # [batch_size, vocab_size]
+
+                # Cross-entropy loss = negative log-likelihood = MLE training
+                # This makes the model learn P(next_activity | prefix) from the data
+                loss = F.cross_entropy(q_values, y_batch)
+
+                optimizer.zero_grad()
+                loss.backward()
+
+                # Optional: gradient clipping for stability
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
+                optimizer.step()
+
+                # Track accuracy
+                predicted_actions = torch.argmax(q_values, dim=-1)
+                epoch_correct += (predicted_actions == y_batch).sum().item()
+                epoch_total += y_batch.size(0)
+
+                epoch_loss += loss.item()
+                pbar.update(1)
+
+        avg_loss = epoch_loss / len(loader)
+        train_acc = epoch_correct / epoch_total if epoch_total > 0 else 0.0
+
+        # Validation
+        model.eval()
+        with torch.no_grad():
+            _, _, val_acc, _ = evaluate_rl(model, val_sequences, window_size=window_size)
+
+        logger.info(
+            "Epoch %d: Loss=%.4f, Train Acc=%.4f, Val Acc=%.4f",
+            epoch,
+            avg_loss,
+            train_acc,
+            val_acc,
+        )
+
+        # Early stopping based on validation accuracy
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            patience_counter = 0
+            logger.info("New best validation accuracy: %.4f", val_acc)
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                logger.info("Early stopping! Best val accuracy: %.4f", best_val_acc)
+                break
+
+    # Restore best model (the one that generalizes best)
+    if best_state is not None:
+        model.load_state_dict(best_state)
+
+    return model
+
+
+def evaluate_rl(  # noqa: C901, PLR0912, PLR0915
+    model: QNetwork,
+    sequences: torch.Tensor,
+    *,
+    max_k: int = 3,
+    idx_to_activity: dict[int, ActivityName] | None = None,
+    window_size: int | None = None,
+) -> tuple[dict[str, float | list[int]], list[float], float, list[str]]:
+    """
+
+    Evaluate QNetwork in batch mode by predicting next token for every prefix in each sequence.
+
+    Returns (stats, perplexities, eval_time, predicted_vector). Perplexities is empty for RL.
+    predicted_vector is a flattened list of predicted next-activity names/indices.
+
+    """
+    eval_start = time.time()
+    pause_time = 0.0
+
+    model.eval()
+    # Determine the device the model is on. Prefer explicit model.device when provided;
+    # otherwise fall back to the device of model parameters.
+    model_device = getattr(model, "device", None)
+    if model_device is None:
+        try:
+            model_device = next(model.parameters()).device
+        except StopIteration:
+            model_device = None
+    correct = 0
+    total = 0
+    top_k_correct = [0] * max_k
+    predicted_vector: list[str] = []
+
+    with torch.no_grad():
+        for i in range(sequences.shape[0]):
+            seq = sequences[i]
+            # build list of non-padding positions
+            valid_len = int((seq != 0).sum().item())
+            if valid_len < RL_MIN_PREFIX_LEN:
+                continue
+            # iterate over prefixes
+            for k in range(1, valid_len):
+                prefix = seq[:k].unsqueeze(0)  # [1, k]
+                if window_size is not None:
+                    if prefix.shape[1] > window_size:
+                        prefix = prefix[:, -window_size:]
+                    elif prefix.shape[1] < window_size:
+                        # Left-pad to align the last token positions
+                        pad_len = window_size - prefix.shape[1]
+                        pad = torch.zeros((1, pad_len), dtype=prefix.dtype, device=prefix.device)
+                        prefix = torch.cat([pad, prefix], dim=1)
+                # Ensure prefix is on the same device as the model to avoid
+                # "Expected all tensors to be on the same device" runtime error.
+                if model_device is not None:
+                    prefix = prefix.to(device=model_device)
+                outputs = model(prefix)
+                if isinstance(outputs, tuple):
+                    outputs = outputs[0]
+
+
+                two_constant = 2
+                three_constant = 3
+                # outputs may have shape [1, seq_len, vocab] or [1, 1, vocab]
+                # or (in some forward implementations) [seq_len, vocab].
+                # We need the logits for the last timestep of the prefix.
+                if outputs.dim() == three_constant:
+                    # [batch=1, seq_len, vocab] -> take last timestep
+                    q_vals = outputs[0, -1, :]
+                elif outputs.dim() == two_constant:
+                    # Could be [1, vocab] or [seq_len, vocab]; in both cases take last row
+                    q_vals = outputs[-1, :]
+                elif outputs.dim() == 1:
+                    # Already [vocab]
+                    q_vals = outputs
+                else:
+                    # Fallback: flatten and take last vocab-sized chunk if possible
+                    q_flat = outputs.view(-1)
+                    if q_flat.numel() >= 1:
+                        q_vals = q_flat[-1:]
+                    else:
+                        msg = "Unexpected logits shape in evaluate_rl"
+                        raise RuntimeError(msg)
+
+                # Ensure k does not exceed vocabulary size
+                k_eff = min(max_k, q_vals.numel())
+                topk = torch.topk(q_vals, k=k_eff)
+                # topk.indices is 1-D (length k_eff); extract the top-1 prediction safely
+                pred_idx = int(topk.indices[0].item())
+
+                # map to activity name if provided
+                if idx_to_activity is not None and pred_idx in idx_to_activity:
+                    predicted_vector.append(str(idx_to_activity[pred_idx]))
+                else:
+                    predicted_vector.append(str(pred_idx))
+
+                target_idx = int(seq[k].item())
+                total += 1
+                if pred_idx == target_idx:
+                    correct += 1
+                    for j in range(max_k):
+                        top_k_correct[j] += 1
+                else:
+                    # count inclusion in top-k
+                    for j in range(max_k):
+                        if target_idx in {int(x) for x in topk.indices[: j + 1].tolist()}:
+                            top_k_correct[j] += 1
+
+    accuracy = (correct / total) if total > 0 else 0.0
+    stats = {
+        "accuracy": accuracy,
+        "total_predictions": total,
+        "correct_predictions": correct,
+        "top_k_correct_preds": top_k_correct,
+    }
+    eval_time = time.time() - eval_start - pause_time
+    perplexities: list[float] = []  # not computed for RL
+    return stats, perplexities, eval_time, predicted_vector
+
