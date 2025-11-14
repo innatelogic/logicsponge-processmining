@@ -1622,3 +1622,23 @@ def evaluate_rl(  # noqa: C901, PLR0912, PLR0915
     perplexities: list[float] = []  # not computed for RL
     return stats, perplexities, eval_time, predicted_vector
 
+
+# Global default: use left-padding for variable-length sequences
+LEFT_PAD_DEFAULT = True
+
+def _left_pad_stack(seqs: list[torch.Tensor], *, pad_value: int = 0, target_len: int | None = None) -> torch.Tensor:
+    """
+    Left-pad 1D LongTensors to a common length and stack as [B, L].
+
+    If target_len is None, pad to the maximum length found in seqs. Assumes all seqs have dtype Long.
+    """
+    if not seqs:
+        return torch.zeros((0, 1), dtype=torch.long)
+    max_len = target_len if target_len is not None else max(int(s.numel()) for s in seqs)
+    out = torch.full((len(seqs), max_len), pad_value, dtype=seqs[0].dtype)
+    for i, s in enumerate(seqs):
+        l = int(s.numel())
+        if l == 0:
+            continue
+        out[i, max_len - l : max_len] = s[-max_len:]
+    return out

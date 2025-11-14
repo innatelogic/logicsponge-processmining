@@ -16,6 +16,7 @@
     "gamma": 0.99
   },
   "lstm": {
+<<<<<<< HEAD
     "vocab_size": 24,
     "embedding_dim": 24,
     "hidden_dim": 256
@@ -33,6 +34,25 @@
   "qlearning": {
     "vocab_size": 24,
     "embedding_dim": 24,
+=======
+    "vocab_size": 8,
+    "embedding_dim": 8,
+    "hidden_dim": 256
+  },
+  "gru": {
+    "vocab_size": 8,
+    "embedding_dim": 8,
+    "hidden_dim": 256
+  },
+  "transformer": {
+    "vocab_size": 8,
+    "embedding_dim": 8,
+    "hidden_dim": 256
+  },
+  "qlearning": {
+    "vocab_size": 8,
+    "embedding_dim": 8,
+>>>>>>> patch-from-0d7841e
     "hidden_dim": 256
   }
 }
