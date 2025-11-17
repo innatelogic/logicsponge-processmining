@@ -143,8 +143,6 @@ def process_neural_model(  # noqa: PLR0913
                 model, optimizer, criterion = lstm_model()
             case "transformer":
                 model, optimizer, criterion = transformer_model(attention_heads=1)
-            case "transformer_2heads":
-                model, optimizer, criterion = transformer_model(attention_heads=2)
             case _:
                 msg = "Unknown NN model."
                 raise ValueError(msg)
@@ -260,7 +258,7 @@ NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 # Positional encodings for transformer variants (parity with predict_streaming)
 # Add any encodings used in predict_streaming here so batch experiments include them.
 POS_ENCODINGS = [
-    ("learnable_relative", None),
+    # ("learnable_relative", None),
 ]
 
 
@@ -395,8 +393,15 @@ logger = logging.getLogger(__name__)
 _args = parse_cli_args()
 # Support on-demand synthetic dataset generation like predict_streaming
 if getattr(_args, "data", None) and str(_args.data).lower().startswith("synthetic"):
+    # For synthetic dataset requests, always go through the
+    # `prepare_synthetic_dataset` helper. That function will detect an
+    # existing CSV and return an iterator, or generate the CSV if missing.
+    data_arg = str(_args.data)
+    # Extract the pattern suffix (characters after 'synthetic') and pass it
+    # to the helper. The helper accepts either a str or list[int].
+    pattern_part = data_arg[len("synthetic") :]
     try:
-        res = prepare_synthetic_dataset(_args, SELECTED_PATTERN, total_activities=10000)
+        res = prepare_synthetic_dataset(_args, pattern_part, total_activities=10000)
         if res is not None:
             data_name, dataset, dataset_test_opt = res
         else:
@@ -570,7 +575,6 @@ all_metrics: dict = {
         "alergia",
     "LSTM",
     "transformer",
-    "transformer_2heads",
     # Add transformer positional-encoding base variants
     *[f"transformer_pos_{pe}" for pe, _ in POS_ENCODINGS],
     "qlearning",
@@ -949,7 +953,7 @@ for iteration in range(N_ITERATIONS):
         rl_eval_set_transformed = nn_processor.preprocess_data(rl_eval_set_with_start)
 
         if NN_TRAINING:
-            for name in ["LSTM", "transformer", "transformer_2heads"]:
+            for name in ["LSTM", "transformer"]:
                 msg = f"Training and evaluating {name} model..."
                 logger.info(msg)
                 process_neural_model(
@@ -975,7 +979,7 @@ for iteration in range(N_ITERATIONS):
                         window_size=w,
                     )
             # After NN evaluation in this iteration, print a short summary of NN entries
-            for nn_name in ("LSTM", "transformer", "transformer_2heads"):
+            for nn_name in ("LSTM", "transformer"):
                 vecs = prediction_vectors_memory.get(nn_name, [])
                 if vecs:
                     last = vecs[-1]
