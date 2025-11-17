@@ -34,14 +34,11 @@ from logicsponge.processmining.streaming import (
     ActualCSVWriter,
     AddStartSymbol,
     CSVStatsWriter,
-    CustomStreamer,
     Evaluation,
-    InfiniteDiscriminerSource,  # noqa: F401
     IteratorStreamer,
     PredictionCSVWriter,
     PrintEval,
     StreamingActivityPredictor,
-    SynInfiniteStreamer,  # noqa: F401
 )
 from logicsponge.processmining.utils import (
     add_file_log_handler,
@@ -79,8 +76,21 @@ _dataset_test_unused = None
 
 # If user requested a synthetic dataset, try to prepare it via shared helper
 if getattr(_args, "data", None) and str(_args.data).lower().startswith("synthetic"):
+    data_arg = str(_args.data)
+    # extract the suffix after 'synthetic'
+    suffix = data_arg[len("synthetic") :]
+    # If the user provided a numeric pattern suffix like '111000', convert to list[int]
+    if suffix and suffix.isdigit():
+        selected_pattern_arg = [int(c) for c in suffix]
+    elif suffix:
+        # Keep as string (helper handles str and iterable of digits)
+        selected_pattern_arg = suffix
+    else:
+        # No suffix provided; fall back to the module-level selected pattern
+        selected_pattern_arg = SELECTED_PATTERN
+
     try:
-        res = prepare_synthetic_dataset(_args, SELECTED_PATTERN, total_activities=10000)
+        res = prepare_synthetic_dataset(_args, selected_pattern_arg, total_activities=10000)
         if res is not None:
             data_name, dataset, _dataset_test_unused = res
         else:
@@ -90,10 +100,13 @@ if getattr(_args, "data", None) and str(_args.data).lower().startswith("syntheti
         data_name, dataset, _dataset_test_unused = resolve_dataset_from_args(_args)
 else:
     data_name, dataset, _dataset_test_unused = resolve_dataset_from_args(_args)
-RUN_ID = (
-    time.strftime("%Y-%m-%d_%H-%M", time.localtime())
-    + f"_{str_pattern if SELECTED_PATTERN else data_name}"
-)
+# Build a RUN_ID that includes the resolved dataset name when available.
+# Prefer the `data_name` returned by the dataset resolver/helper so the
+# run directory and filenames reflect the actual dataset used (matches
+# the convention in `predict_batch.py`). Fall back to the module-level
+# selected pattern string or 'unknown' if neither is available.
+run_suffix = data_name if data_name is not None else (str_pattern if SELECTED_PATTERN else "unknown")
+RUN_ID = time.strftime("%Y-%m-%d_%H-%M", time.localtime()) + f"_{run_suffix}"
 stats_to_log = []
 # create a run-specific results directory: results/{RUN_ID}
 run_results_dir = Path(f"results/{RUN_ID}_streaming")
@@ -910,7 +923,7 @@ streamer = IteratorStreamer(data_iterator=dataset)
 
 # streamer = SynInfiniteStreamer(max_prefix_length=10)
 # streamer = InfiniteDiscriminerSource()
-streamer = CustomStreamer(sequence = SELECTED_PATTERN)
+# streamer = CustomStreamer(sequence = SELECTED_PATTERN)
 
 def start_filter(item: DataItem) -> bool:
     """Filter function to check if the activity is not the start symbol."""

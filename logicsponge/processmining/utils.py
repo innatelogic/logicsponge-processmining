@@ -690,7 +690,7 @@ def parse_cli_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def resolve_dataset_from_args(args: argparse.Namespace) -> tuple[str, Iterator[Event], Iterator[Event] | None]:
+def resolve_dataset_from_args(args: argparse.Namespace) -> tuple[str, Iterator[Event], Iterator[Event] | None]:  # noqa: C901
     """
     Resolve dataset choice.
 
@@ -699,6 +699,46 @@ def resolve_dataset_from_args(args: argparse.Namespace) -> tuple[str, Iterator[E
 
     Returns (data_name, dataset_train_iter, dataset_test_iter_or_None).
     """
+    # If the user provided an explicit dataset name, prefer a direct CSV file
+    # under the repository `data/` directory. Doing this before importing
+    # `test_data` avoids triggering test_data's module-level side-effects
+    # (which may log for a different default dataset during import).
+    if getattr(args, "data", None):
+        name = str(args.data)
+        csv_candidate = Path(__file__).resolve().parents[2] / "data" / f"{name}.csv"
+        if csv_candidate.exists():
+            logging.getLogger(__name__).info("File %s already exists.", csv_candidate)
+            # Build a lightweight pandas-based row iterator and an Event iterator
+            from logicsponge.processmining.data_utils import parse_timestamp
+
+            def csv_row_iterator(file_path: Path, delimiter: str = ",", chunksize: int = 1000) -> Iterator[dict]:
+                for chunk in pd.read_csv(
+                    file_path, chunksize=chunksize, delimiter=delimiter, dtype=str, keep_default_na=False
+                ):
+                    yield from chunk.to_dict("records")
+
+            entry = {
+                "case_keys": ["case:concept:name"], "activity_keys": ["concept:name"], "timestamp": "time:timestamp"
+            }
+
+            def my_iterator_from_csv(iter_data: dict, iter_row_iterator: Iterator[dict]) -> Iterator[Event]:
+                timestamp_key = iter_data.get("timestamp")
+                for row in iter_row_iterator:
+                    ev = {
+                        "case_id": row.get("case:concept:name"),
+                        "activity": row.get("concept:name"),
+                        "timestamp": None,
+                    }
+                    if timestamp_key:
+                        raw_ts = row.get(timestamp_key)
+                        if raw_ts:
+                            ev["timestamp"] = parse_timestamp(raw_ts)
+                    yield ev  # type: ignore  # Event-compatible dict  # noqa: PGH003
+
+            dataset_train = my_iterator_from_csv(entry, csv_row_iterator(csv_candidate))
+            # No paired test iterator by default when using direct CSV
+            return name, dataset_train, None
+
     # Defer import to avoid heavy module import for utilities that don't need datasets
     from logicsponge.processmining import test_data as td  # local import to avoid cycles
 

@@ -243,7 +243,7 @@ SELECT_BEST_ARGS = ["prob"]  # ["acc", "prob", "prob x acc"]
 
 WINDOW_RANGE = [1, 2, 3, 4, 5, 6, 7]  # 8, 9, 10, 12, 14, 16]
 
-NN_WINDOW_RANGE = [8, 16, 32, 64, 128, 256] #  WINDOW_RANGE.copy() #
+NN_WINDOW_RANGE = [*WINDOW_RANGE, 32, 256]
 
 NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 # ] + [
