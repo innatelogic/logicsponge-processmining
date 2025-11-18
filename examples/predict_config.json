@@ -13,7 +13,7 @@
   "lstm": {
     "vocab_size": 10,
     "embedding_dim": 10,
-    "hidden_dim": 128,
+    "hidden_dim": 512,
     "output_dim": 10
   },
   "transformer": {

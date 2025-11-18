@@ -237,13 +237,15 @@ def process_neural_model(  # noqa: PLR0913
 # ============================================================
 # Generate a list of ngrams to test
 # ============================================================
-VOTING_NGRAMS = [(2, 3, 4), (2, 3, 5, 8), (2, 3, 4, 5)]  # (2, 3, 5, 6), (2, 3, 5, 7), (2, 3, 4, 7)
+VOTING_NGRAMS = [(2, 3, 5, 8), (2, 3, 4, 5)]
+#[(2, 3, 4), (2, 3, 5, 8), (2, 3, 4, 5)]
+# # (2, 3, 5, 6), (2, 3, 5, 7), (2, 3, 4, 7)
 
 SELECT_BEST_ARGS = ["prob"]  # ["acc", "prob", "prob x acc"]
 
 WINDOW_RANGE = [1, 2, 3, 4, 5, 6, 7]  # 8, 9, 10, 12, 14, 16]
 
-NN_WINDOW_RANGE = [*WINDOW_RANGE, 64, 256] # [1, 2, 3, 4, 5, 6, 7, 8]
+NN_WINDOW_RANGE = [*WINDOW_RANGE] # [1, 2, 3, 4, 5, 6, 7, 8]
 
 NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 # ] + [
@@ -486,7 +488,7 @@ config_file_path = Path(__file__).parent / "predict_config.json"
 default_run_config = {
     "nn": {"lr": 0.001, "batch_size": 8, "epochs": 20},
     "rl": {"lr": 0.001, "batch_size": 64, "epochs": 20, "gamma": 0.99},
-    "lstm": {"vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 128, "output_dim": MAGIC_NUMBER},
+    "lstm": {"vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 512, "output_dim": MAGIC_NUMBER},
     "transformer": {
         "vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 512, "output_dim": MAGIC_NUMBER
     },

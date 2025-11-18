@@ -134,7 +134,7 @@ if __name__ == "__main__":
     p = generate_synthetic(pattern=args.pattern, save_path=args.out, total_activities=args.total)
     print(f"Wrote synthetic CSV to: {p}")
 
-def generate_probabilistic_synthetic(  # noqa: PLR0913, PLR0915
+def generate_probabilistic_synthetic(  # noqa: C901, PLR0912, PLR0913, PLR0915
     name: str,
     save_path: Path | str | None = None,
     total_activities: int = DEFAULT_TOTAL_ACTIVITIES,
@@ -247,9 +247,49 @@ def generate_probabilistic_synthetic(  # noqa: PLR0913, PLR0915
                     writer.writerow([case_id, activity, timestamp])
                     activities_added += 1
                     current_time += time_increment
+
+                case "x1x0":
+                    random_pick = rng.integers(0, 2)
+                    for i in range(2):
+                        activity = f"act_{random_pick}"
+                        timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
+
+                        writer.writerow([case_id, activity, timestamp])
+                        activities_added += 1
+                        current_time += time_increment
+                        timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
+
+                        activity = f"act_{i}"
+                        writer.writerow([case_id, activity, timestamp])
+                        activities_added += 1
+                        current_time += time_increment
+
+                case "x10x01":
+                    random_pick = rng.integers(0, 2)
+                    for i in range(2):
+                        activity = f"act_{random_pick}"
+                        timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
+
+                        writer.writerow([case_id, activity, timestamp])
+                        activities_added += 1
+                        current_time += time_increment
+                        timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
+
+                        activity = f"act_{i}"
+                        writer.writerow([case_id, activity, timestamp])
+                        activities_added += 1
+                        current_time += time_increment
+                        timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
+
+                        activity = f"act_{(i+1)%2}"
+                        writer.writerow([case_id, activity, timestamp])
+                        activities_added += 1
+                        current_time += time_increment
+
                 case _:
                     msg = f"Unknown synthetic dataset name: {name}"
                     raise ValueError(msg)
+
 
     return save_path
 

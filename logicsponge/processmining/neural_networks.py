@@ -1104,52 +1104,43 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
 
     Returns the trained model.
     """
-    # Build dataloader. If window_size is set we precompute ALL prefixes once
-    # and train on the prefix dataset (one next-token target per prefix). This
-    # avoids rebuilding prefixes every epoch and mirrors prefix-style evaluation.
-    if window_size is not None:
-        prefixes: list[torch.Tensor] = []
-        targets: list[int] = []
-        for i in range(train_sequences.shape[0]):
-            seq = train_sequences[i]
-            valid_len = int((seq != 0).sum().item())
-            if valid_len < 1:
-                continue
-            for k in range(1, valid_len):
-                prefix = seq[:k].clone()
-                if prefix.numel() > window_size:
-                    prefix = prefix[-window_size:]
-                prefixes.append(prefix)
-                targets.append(int(seq[k].item()))
+    # Build dataloader using full padded sequences and a smart collate that
+    # produces inputs, targets and a boolean mask indicating which positions
+    # should contribute to the loss. This avoids materializing a prefixes
+    # dataset and keeps computation vectorized on the GPU.
 
-        if not prefixes:
-            return model
+    # keep criterion in scope (we use functional cross-entropy, but preserve API)
+    _ = criterion
+    dataset = torch.utils.data.TensorDataset(train_sequences)  # Create dataset (each item is a full padded sequence)
 
-        class PrefixDataset(torch.utils.data.Dataset):
-            def __init__(self, xs: list[torch.Tensor], ys: list[int]) -> None:
-                self.xs = xs
-                self.ys = ys
+    def _collate_sequences(batch: list[tuple[torch.Tensor]]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # batch is list of tuples because TensorDataset yields tuples
+        seqs = torch.stack([b[0] for b in batch], dim=0)
+        # inputs: all tokens except last, targets: all tokens except first
+        if seqs.size(1) <= 1:
+            # degenerate case: nothing to predict
+            return seqs[:, :-1], seqs[:, 1:], torch.zeros((seqs.size(0), max(0, seqs.size(1) - 1)), dtype=torch.bool)
 
-            def __len__(self) -> int:
-                return len(self.xs)
+        inputs = seqs[:, :-1]
+        targets = seqs[:, 1:]
 
-            def __getitem__(self, idx: int) -> tuple[torch.Tensor, int]:
-                return self.xs[idx], self.ys[idx]
+        # compute valid lengths per sequence (count non-pad tokens)
+        device = seqs.device
+        valid_lens = (seqs != 0).sum(dim=1).unsqueeze(1)  # [B,1]
 
-        def _collate_prefix(batch: list[tuple[torch.Tensor, int]]) -> tuple[torch.Tensor, torch.Tensor]:
-            xs = [b[0] for b in batch]
-            ys = torch.tensor([b[1] for b in batch], dtype=torch.long)
-            # left-pad each prefix to the configured window_size for alignment
-            x_pad = _left_pad_stack(xs, target_len=window_size)
-            return x_pad, ys
+        # positions correspond to original token positions 1..L-1 (these are target indices)
+        l = seqs.size(1)
+        pos = torch.arange(1, l, device=device).unsqueeze(0)  # [1, l-1]
 
-        dataset = PrefixDataset(prefixes, targets)
-        dataloader = torch.utils.data.DataLoader(
-            dataset, batch_size=batch_size, shuffle=True, collate_fn=_collate_prefix
-        )
-    else:
-        dataset = torch.utils.data.TensorDataset(train_sequences)  # Create dataset
-        dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)  # Create dataloader
+        lb = torch.ones_like(valid_lens) if window_size is None else (valid_lens - window_size).clamp(min=1)
+
+        # mask: target position p (original index) is valid iff 1 <= p < valid_len and p >= lb
+        mask = (pos < valid_lens) & (pos >= lb)  # [B, L-1]
+        return inputs, targets, mask
+
+    dataloader = torch.utils.data.DataLoader(
+        dataset, batch_size=batch_size, shuffle=True, collate_fn=_collate_sequences
+    )
 
     best_val_accuracy = 0.0
     best_model_state = None
@@ -1163,76 +1154,38 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
         # Create progress bar for the training loop
         with tqdm(total=len(dataloader), desc=f"Epoch {epoch + 1}/{epochs}", unit="batch") as pbar:
             for batch in dataloader:
-                # Two modes depending on how the dataloader was created:
-                # - windowed prefix dataset: batch == (x_batch, y_batch) where y_batch is [B]
-                # - full-sequence dataset: batch == (sequences,) where sequences is [B, L]
-                if window_size is not None:
-                    x_batch, y_batch = batch
-                    # x_batch: [B, window_size], y_batch: [B]
-                    if model_device is not None:
-                        x_batch = x_batch.to(model_device)
-                        y_batch = y_batch.to(model_device)
+                # batch := inputs, targets, mask
+                x_batch, y_batch, mask = batch
+                if model_device is not None:
+                    x_batch = x_batch.to(model_device)
+                    y_batch = y_batch.to(model_device)
+                    mask = mask.to(model_device)
 
-                    optimizer.zero_grad()
+                optimizer.zero_grad()
 
-                    outputs = model(x_batch)
-                    if isinstance(outputs, tuple):
-                        outputs = outputs[0]
+                outputs = model(x_batch)
+                if isinstance(outputs, tuple):
+                    outputs = outputs[0]
 
-                    # outputs: [B, seq_len, vocab]
-                    lengths = (x_batch != 0).sum(dim=1)
-                    last_idx = lengths - 1
-                    batch_idx = torch.arange(x_batch.size(0), device=outputs.device)
-                    last_logits = outputs[batch_idx, last_idx, :]
+                # outputs: [b, t, v], targets: [b, t], mask: [b, t]
+                _b, _t, v = outputs.shape
+                outputs_flat = outputs.view(-1, v)
+                targets_flat = y_batch.reshape(-1)
+                mask_flat = mask.reshape(-1)
 
-                    loss = criterion(last_logits, y_batch)
+                # select only masked positions
+                if mask_flat.any():
+                    # compute per-token loss using functional cross-entropy (independent of passed criterion)
+                    loss_per_token = F.cross_entropy(outputs_flat, targets_flat, reduction="none")
+                    loss = loss_per_token[mask_flat].mean()
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                     optimizer.step()
-                    epoch_loss += loss.item()
+                    epoch_loss += float(loss.item())
                 else:
-                    sequences = batch[0]
-
-                    # Input is the entire sequence except the last element (predict all positions)
-                    x_batch = sequences[:, :-1]  # All but the last token are input
-                    y_batch = sequences[:, 1:]  # Target: sequence shifted by one
-
-                    if model_device is not None:
-                        x_batch = x_batch.to(model_device)
-                        y_batch = y_batch.to(model_device)
-
-                    optimizer.zero_grad()
-
-                    # Forward pass
-                    outputs = model(x_batch)
-
-                    # Reshape the outputs and targets for loss computation
-                    outputs = outputs.view(-1, outputs.shape[-1])  # [batch_size * sequence_length, output_dim]
-                    y_batch = y_batch.reshape(-1)  # Flatten the target for CrossEntropyLoss
-
-                    # If the provided criterion is CrossEntropyLoss configured with ignore_index=0,
-                    # we can pass the flattened tensors directly and let the loss ignore padding.
-                    use_ignore = hasattr(criterion, "ignore_index") and criterion.ignore_index == 0
-                    if use_ignore:
-                        loss = criterion(outputs, y_batch)
-                        # Backward pass and optimization with gradient clipping
-                        loss.backward()
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                        optimizer.step()
-                        epoch_loss += loss.item()
-                    else:
-                        # Fallback: manually mask padding positions (legacy behavior)
-                        mask = y_batch != 0  # Mask for non-padding targets
-                        outputs_masked = outputs[mask]
-                        y_batch_masked = y_batch[mask]
-                        # Compute the loss only for non-padding positions
-                        if outputs_masked.size(0) > 0:  # Ensure there are non-padded targets
-                            loss = criterion(outputs_masked, y_batch_masked)
-                            # Backward pass and optimization with gradient clipping
-                            loss.backward()
-                            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                            optimizer.step()
-                            epoch_loss += loss.item()
+                    # no valid targets in this batch (all sequences too short); skip
+                    pbar.update(1)
+                    continue
                 pbar.update(1)
 
         msg = f"Epoch {epoch + 1}/{epochs}, Average Loss: {epoch_loss / len(dataloader):.4f}"
@@ -1320,58 +1273,77 @@ def evaluate_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
     #  MODE 1: TEACHER-FORCING (window_size = None)
     # =================================================================
     if window_size is None:
+        # Vectorized teacher-forcing evaluation using masks. Process in chunks
+        # to avoid blowing memory on large datasets.
+        eval_batch = 128
+        n = sequences.size(0)
+        l = sequences.size(1)
+        for st in range(0, n, eval_batch):
+            ed = min(n, st + eval_batch)
+            batch = sequences[st:ed].to(device)
+            if batch.size(1) <= 1:
+                continue
 
-        with torch.no_grad():
-            for i in range(sequences.size(0)):
-                seq = sequences[i]
-                seq = seq[seq != 0]        # remove padding
-                if len(seq) <= 1:
-                    continue
+            inputs = batch[:, :-1]
+            targets = batch[:, 1:]
 
-                x = seq[:-1].unsqueeze(0).to(device)
-                y = seq[1:].unsqueeze(0).to(device)
+            # valid lengths
+            valid_lens = (batch != 0).sum(dim=1).unsqueeze(1)  # [B,1]
+            pos = torch.arange(1, l, device=device).unsqueeze(0)  # [1, l-1]
+            lb = torch.ones_like(valid_lens)
+            mask = (pos < valid_lens) & (pos >= lb)  # [B, L-1]
 
-                outputs = model(x)  # [1, T-1, vocab]
+            outputs = model(inputs)
+            if isinstance(outputs, tuple):
+                outputs = outputs[0]
 
-                # predictions
-                pred = torch.argmax(outputs, dim=-1).view(-1)
-                target = y.view(-1)
+            # predictions
+            preds = torch.argmax(outputs, dim=-1)  # [B, T]
 
-                # metrics mask
-                mask = target != 0
-                masked_pred = pred[mask]
-                masked_target = target[mask]
+            mask_flat = mask.reshape(-1)
+            preds_flat = preds.reshape(-1)
+            targets_flat = targets.reshape(-1)
 
-                # predicted_vector
-                preds_cpu = masked_pred.cpu().tolist()
-                if idx_to_activity:
-                    predicted_vector.extend(
-                        [str(idx_to_activity.get(int(p), str(int(p)))) for p in preds_cpu]
-                    )
-                else:
-                    predicted_vector.extend([str(int(p)) for p in preds_cpu])
+            masked_pred = preds_flat[mask_flat]
+            masked_target = targets_flat[mask_flat]
 
-                # accuracy
-                correct += (masked_pred == masked_target).sum().item()
-                total += mask.sum().item()
+            # predicted_vector
+            preds_cpu = masked_pred.cpu().tolist()
+            if idx_to_activity:
+                predicted_vector.extend([str(idx_to_activity.get(int(p), str(int(p)))) for p in preds_cpu])
+            else:
+                predicted_vector.extend([str(int(p)) for p in preds_cpu])
 
-                # top-k accuracy
-                _, tk = torch.topk(outputs, k=max_k, dim=-1)
-                tk = tk.view(-1, max_k)[mask]
-                for k in range(max_k):
-                    top_k_correct[k] += (tk[:, :k+1] == masked_target.unsqueeze(1)).any(dim=1).sum().item() # type: ignore  # noqa: PGH003
+            # accuracy
+            correct += (masked_pred == masked_target).sum().item()
+            total += mask_flat.sum().item()
 
-                # NLL + perplexity
-                log_probs = torch.log_softmax(outputs, dim=-1)
-                log_probs = log_probs.view(-1, log_probs.size(-1))[mask]
-                nll = -log_probs[torch.arange(len(masked_target)), masked_target].sum().item()
+            # top-k accuracy
+            tk = torch.topk(outputs, k=max_k, dim=-1)[1]  # [B, T, k]
+            tk_flat = tk.reshape(-1, max_k)
+            tk_masked = tk_flat[mask_flat]
+            for k_i in range(max_k):
+                top_k_correct[k_i] += (tk_masked[:, : k_i + 1] == masked_target.unsqueeze(1)).any(dim=1).sum().item()  # type: ignore  # noqa: PGH003
 
-                total_nll += nll
-                token_count += len(masked_target)
+            # NLL and perplexity
+            log_probs = torch.log_softmax(outputs, dim=-1)
+            # gather log prob of true targets per position -> [B, T]
+            true_logp = log_probs.gather(-1, targets.unsqueeze(-1)).squeeze(-1)
+            # zero-out non-masked positions
+            true_logp_masked = true_logp * mask.to(dtype=true_logp.dtype)
 
-                if per_sequence_perplexity:
-                    perp = np.exp(nll / len(masked_target))
-                    perplexities.append(perp)
+            # per-sample nll and token counts
+            nll_per_sample = -true_logp_masked.sum(dim=1)  # [B]
+            tokens_per_sample = mask.sum(dim=1)
+
+            # accumulate global NLL/token count
+            total_nll += float(nll_per_sample.sum().item())
+            token_count += int(tokens_per_sample.sum().item())
+
+            if per_sequence_perplexity:
+                for nnl, ntok in zip(nll_per_sample.tolist(), tokens_per_sample.tolist()):
+                    if ntok > 0:
+                        perplexities.append(np.exp(nnl / float(ntok)))
 
         if not per_sequence_perplexity:
             perp = np.exp(total_nll / token_count) if token_count > 0 else float("inf")
