@@ -510,6 +510,87 @@ class LSTMModel(nn.Module):
 
         return self.fc(lstm_out)
 
+    def step(  # noqa: C901, PLR0912
+        self,
+        input_token: torch.Tensor,
+        hidden: tuple[torch.Tensor, torch.Tensor]
+            | tuple[tuple[torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]]
+            | None = None,
+    ) -> tuple[torch.Tensor, tuple[tuple[torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]]]:
+        """
+        Single-timestep update for LSTM compatible with streaming caches.
+
+        Accepts input_token of shape [batch] or [batch, 1] and an optional
+        hidden state. Returns (logits_last_step, new_hidden) where new_hidden is
+        a tuple of ((h1,c1), (h2,c2)) matching the two LSTM layers.
+        """
+        # Ensure on model device
+        if self.device is not None and input_token.device != self.device:
+            input_token = input_token.to(self.device)
+        # Normalize hidden placement
+        if hidden is not None and self.device is not None:
+            # If nested ((h1,c1),(h2,c2)) keep as-is but move tensors to device
+            if len(hidden) == 2 and isinstance(hidden[0], tuple):
+                (h1, c1), (h2, c2) = hidden
+                if h1 is not None and h1.device != self.device:
+                    h1 = h1.to(self.device)
+                if c1 is not None and c1.device != self.device:
+                    c1 = c1.to(self.device)
+                if h2 is not None and h2.device != self.device:
+                    h2 = h2.to(self.device)
+                if c2 is not None and c2.device != self.device:
+                    c2 = c2.to(self.device)
+                hidden = ((h1, c1), (h2, c2))
+            # If combined (h_all, c_all) from multi-layer LSTM, split into two
+            elif len(hidden) == 2 and isinstance(hidden[0], torch.Tensor) and hidden[0].dim() == 3:
+                h_all, c_all = hidden
+                # split first dim into two single-layer tensors
+                h1 = h_all[0:1].to(self.device) # type: ignore  # noqa: PGH003
+                h2 = h_all[1:2].to(self.device) # type: ignore  # noqa: PGH003
+                c1 = c_all[0:1].to(self.device) # type: ignore  # noqa: PGH003
+                c2 = c_all[1:2].to(self.device) # type: ignore  # noqa: PGH003
+                hidden = ((h1, c1), (h2, c2))
+            else:
+                msg = "Invalid hidden state format for LSTMModel.step()"
+                raise ValueError(msg)
+
+        if input_token.dim() == 1:
+            input_token = input_token.unsqueeze(1)
+
+        if not self.use_one_hot and self.embedding is not None:
+            x = self.embedding(input_token)
+        else:
+            x = torch.nn.functional.one_hot(input_token, num_classes=self.vocab_size).float().to(
+                input_token.device
+            )
+
+        batch_size = x.size(0)
+
+        # Prepare initial hidden states for both LSTM layers if not provided
+        if hidden is None:
+            h1 = torch.zeros((1, batch_size, self.lstm1.hidden_size), device=self.device)
+            c1 = torch.zeros_like(h1)
+            h2 = torch.zeros((1, batch_size, self.lstm2.hidden_size), device=self.device)
+            c2 = torch.zeros_like(h2)
+        else:
+            try:
+                (h1, c1), (h2, c2) = hidden
+            except Exception:
+                # Fallback: zeros
+                h1 = torch.zeros((1, batch_size, self.lstm1.hidden_size), device=self.device)
+                c1 = torch.zeros_like(h1)
+                h2 = torch.zeros((1, batch_size, self.lstm2.hidden_size), device=self.device)
+                c2 = torch.zeros_like(h2)
+
+        # Run single timestep through stacked LSTMs
+        out1, (h1n, c1n) = self.lstm1(x, (h1, c1))
+        out2, (h2n, c2n) = self.lstm2(out1, (h2, c2))
+
+        logits = self.fc(out2[:, -1, :])
+
+        new_hidden = ((h1n, c1n), (h2n, c2n))
+        return logits, new_hidden
+
     def _init_weights(self, m: nn.Module) -> None:
         if isinstance(m, nn.Linear):
             nn.init.xavier_uniform_(m.weight)
@@ -1007,7 +1088,7 @@ class PreprocessData:
         return pad_sequence(processed_sequences, batch_first=True, padding_value=0)
 
 
-def train_rnn(  # noqa: C901, PLR0913, PLR0915
+def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
     model: LSTMModel | TransformerModel,
     train_sequences: torch.Tensor,
     val_sequences: torch.Tensor,
@@ -1023,13 +1104,57 @@ def train_rnn(  # noqa: C901, PLR0913, PLR0915
 
     Returns the trained model.
     """
-    dataset = torch.utils.data.TensorDataset(train_sequences)  # Create dataset
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)  # Create dataloader
+    # Build dataloader. If window_size is set we precompute ALL prefixes once
+    # and train on the prefix dataset (one next-token target per prefix). This
+    # avoids rebuilding prefixes every epoch and mirrors prefix-style evaluation.
+    if window_size is not None:
+        prefixes: list[torch.Tensor] = []
+        targets: list[int] = []
+        for i in range(train_sequences.shape[0]):
+            seq = train_sequences[i]
+            valid_len = int((seq != 0).sum().item())
+            if valid_len < 1:
+                continue
+            for k in range(1, valid_len):
+                prefix = seq[:k].clone()
+                if prefix.numel() > window_size:
+                    prefix = prefix[-window_size:]
+                prefixes.append(prefix)
+                targets.append(int(seq[k].item()))
+
+        if not prefixes:
+            return model
+
+        class PrefixDataset(torch.utils.data.Dataset):
+            def __init__(self, xs: list[torch.Tensor], ys: list[int]) -> None:
+                self.xs = xs
+                self.ys = ys
+
+            def __len__(self) -> int:
+                return len(self.xs)
+
+            def __getitem__(self, idx: int) -> tuple[torch.Tensor, int]:
+                return self.xs[idx], self.ys[idx]
+
+        def _collate_prefix(batch: list[tuple[torch.Tensor, int]]) -> tuple[torch.Tensor, torch.Tensor]:
+            xs = [b[0] for b in batch]
+            ys = torch.tensor([b[1] for b in batch], dtype=torch.long)
+            # left-pad each prefix to the configured window_size for alignment
+            x_pad = _left_pad_stack(xs, target_len=window_size)
+            return x_pad, ys
+
+        dataset = PrefixDataset(prefixes, targets)
+        dataloader = torch.utils.data.DataLoader(
+            dataset, batch_size=batch_size, shuffle=True, collate_fn=_collate_prefix
+        )
+    else:
+        dataset = torch.utils.data.TensorDataset(train_sequences)  # Create dataset
+        dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)  # Create dataloader
 
     best_val_accuracy = 0.0
     best_model_state = None
     patience_counter = 0
-    model_device = model.device  # Get model's device once
+    model_device = getattr(model, "device", None)  # Get model's device once (robust)
 
     for epoch in range(epochs):
         model.train()
@@ -1038,46 +1163,76 @@ def train_rnn(  # noqa: C901, PLR0913, PLR0915
         # Create progress bar for the training loop
         with tqdm(total=len(dataloader), desc=f"Epoch {epoch + 1}/{epochs}", unit="batch") as pbar:
             for batch in dataloader:
-                sequences = batch[0]
-
-                # Input is the entire sequence except the last element (predict all positions)
-                x_batch = sequences[:, :-1]  # All but the last token are input
-                y_batch = sequences[:, 1:]  # Target: sequence shifted by one
-
+                # Two modes depending on how the dataloader was created:
+                # - windowed prefix dataset: batch == (x_batch, y_batch) where y_batch is [B]
+                # - full-sequence dataset: batch == (sequences,) where sequences is [B, L]
                 if window_size is not None:
-                    # keep only the last `window_size` timesteps
-                    x_batch = x_batch[:, -window_size:]
-                    y_batch = y_batch[:, -window_size:]
+                    x_batch, y_batch = batch
+                    # x_batch: [B, window_size], y_batch: [B]
+                    if model_device is not None:
+                        x_batch = x_batch.to(model_device)
+                        y_batch = y_batch.to(model_device)
 
-                if model_device is not None:
-                    x_batch = x_batch.to(model_device)
-                    y_batch = y_batch.to(model_device)
+                    optimizer.zero_grad()
 
-                optimizer.zero_grad()
+                    outputs = model(x_batch)
+                    if isinstance(outputs, tuple):
+                        outputs = outputs[0]
 
-                # Forward pass
-                outputs = model(x_batch)
+                    # outputs: [B, seq_len, vocab]
+                    lengths = (x_batch != 0).sum(dim=1)
+                    last_idx = lengths - 1
+                    batch_idx = torch.arange(x_batch.size(0), device=outputs.device)
+                    last_logits = outputs[batch_idx, last_idx, :]
 
-                # Reshape the outputs and targets for loss computation
-                outputs = outputs.view(-1, outputs.shape[-1])  # [batch_size * sequence_length, output_dim]
-                y_batch = y_batch.reshape(-1)  # Flatten the target for CrossEntropyLoss
-
-                # Create a mask for positions that are not padding (non-zero indices)
-                mask = y_batch != 0  # Mask for non-padding targets
-
-                # Apply the mask to outputs and targets
-                outputs_masked = outputs[mask]
-                y_batch_masked = y_batch[mask]
-
-                # Compute the loss only for non-padding positions
-                if outputs_masked.size(0) > 0:  # Ensure there are non-padded targets
-                    loss = criterion(outputs_masked, y_batch_masked)
-
-                    # Backward pass and optimization
+                    loss = criterion(last_logits, y_batch)
                     loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                     optimizer.step()
-
                     epoch_loss += loss.item()
+                else:
+                    sequences = batch[0]
+
+                    # Input is the entire sequence except the last element (predict all positions)
+                    x_batch = sequences[:, :-1]  # All but the last token are input
+                    y_batch = sequences[:, 1:]  # Target: sequence shifted by one
+
+                    if model_device is not None:
+                        x_batch = x_batch.to(model_device)
+                        y_batch = y_batch.to(model_device)
+
+                    optimizer.zero_grad()
+
+                    # Forward pass
+                    outputs = model(x_batch)
+
+                    # Reshape the outputs and targets for loss computation
+                    outputs = outputs.view(-1, outputs.shape[-1])  # [batch_size * sequence_length, output_dim]
+                    y_batch = y_batch.reshape(-1)  # Flatten the target for CrossEntropyLoss
+
+                    # If the provided criterion is CrossEntropyLoss configured with ignore_index=0,
+                    # we can pass the flattened tensors directly and let the loss ignore padding.
+                    use_ignore = hasattr(criterion, "ignore_index") and criterion.ignore_index == 0
+                    if use_ignore:
+                        loss = criterion(outputs, y_batch)
+                        # Backward pass and optimization with gradient clipping
+                        loss.backward()
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                        optimizer.step()
+                        epoch_loss += loss.item()
+                    else:
+                        # Fallback: manually mask padding positions (legacy behavior)
+                        mask = y_batch != 0  # Mask for non-padding targets
+                        outputs_masked = outputs[mask]
+                        y_batch_masked = y_batch[mask]
+                        # Compute the loss only for non-padding positions
+                        if outputs_masked.size(0) > 0:  # Ensure there are non-padded targets
+                            loss = criterion(outputs_masked, y_batch_masked)
+                            # Backward pass and optimization with gradient clipping
+                            loss.backward()
+                            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                            optimizer.step()
+                            epoch_loss += loss.item()
                 pbar.update(1)
 
         msg = f"Epoch {epoch + 1}/{epochs}, Average Loss: {epoch_loss / len(dataloader):.4f}"
@@ -1620,4 +1775,23 @@ def _left_pad_stack(seqs: list[torch.Tensor], *, pad_value: int = 0, target_len:
         if lll == 0:
             continue
         out[i, max_len - lll : max_len] = s[-max_len:]
+    return out
+
+
+def _right_pad_stack(seqs: list[torch.Tensor], *, pad_value: int = 0, target_len: int | None = None) -> torch.Tensor:
+    """
+    Right-pad 1D LongTensors to a common length and stack as [B, L].
+
+    If target_len is None, pad to the maximum length found in seqs. Assumes all seqs have dtype Long.
+    """
+    if not seqs:
+        return torch.zeros((0, 1), dtype=torch.long)
+    max_len = target_len if target_len is not None else max(int(s.numel()) for s in seqs)
+    out = torch.full((len(seqs), max_len), pad_value, dtype=seqs[0].dtype)
+    for i, s in enumerate(seqs):
+        lll = int(s.numel())
+        if lll == 0:
+            continue
+        # place sequence at the left, pad on the right
+        out[i, :lll] = s[-max_len:]
     return out

@@ -14,6 +14,14 @@ import numpy as np
 import pandas as pd
 import torch
 
+from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
+from logicsponge.processmining.miners import BasicMiner, Fallback, HardVoting, SoftVoting
+from logicsponge.processmining.utils import (
+    RED_TO_GREEN_CMAP,
+    compare_models_comparison,
+    save_all_comparison_heatmaps,
+)
+
 # Global default for left-padding behavior (align sequence ends)
 LEFT_PAD_DEFAULT = True
 
@@ -26,14 +34,6 @@ def _left_pad_window(prefix: torch.Tensor, window_size: int) -> torch.Tensor:
         pad = torch.zeros((prefix.shape[0], pad_len), dtype=prefix.dtype, device=prefix.device)
         return torch.cat([pad, prefix], dim=1)
     return prefix
-
-from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
-from logicsponge.processmining.miners import BasicMiner, Fallback, HardVoting, SoftVoting
-from logicsponge.processmining.utils import (
-    RED_TO_GREEN_CMAP,
-    compare_models_comparison,
-    save_all_comparison_heatmaps,
-)
 
 if TYPE_CHECKING:
     import logging
@@ -195,7 +195,7 @@ def record_model_results(  # noqa: PLR0913, PLR0915
     all_metrics[display_name]["num_delay_predictions"].append(num_delay_predictions)
 
 
-def write_prediction_vectors(
+def write_prediction_vectors(  # noqa: C901, PLR0912
     *,
     prediction_vectors_memory: dict[str, list[Any]],
     run_id: str,
@@ -229,18 +229,17 @@ def write_prediction_vectors(
                             "predicted": preds,
                             "actual": actuals,
                         })
+                    # Baseline 'actual' case has no separate actual_vec; treat preds as ground truth
+                    elif model_name == "actual":
+                        df_iter = pd.DataFrame({
+                            "index": list(range(len(preds))),
+                            "actual": preds,
+                        })
                     else:
-                        # Baseline 'actual' case has no separate actual_vec; treat preds as ground truth
-                        if model_name == "actual":
-                            df_iter = pd.DataFrame({
-                                "index": list(range(len(preds))),
-                                "actual": preds,
-                            })
-                        else:
-                            df_iter = pd.DataFrame({
-                                "index": list(range(len(preds))),
-                                "predicted": preds,
-                            })
+                        df_iter = pd.DataFrame({
+                            "index": list(range(len(preds))),
+                            "predicted": preds,
+                        })
                 except (ValueError, TypeError, OSError):
                     if actual_vec is not None:
                         try:
@@ -248,11 +247,10 @@ def write_prediction_vectors(
                             df_iter = pd.DataFrame({"predicted": [str(pred_vec)], "actual": [str(actuals)]})
                         except (ValueError, TypeError, OSError):
                             df_iter = pd.DataFrame({"predicted": [str(pred_vec)]})
+                    elif model_name == "actual":
+                        df_iter = pd.DataFrame({"actual": [str(pred_vec)]})
                     else:
-                        if model_name == "actual":
-                            df_iter = pd.DataFrame({"actual": [str(pred_vec)]})
-                        else:
-                            df_iter = pd.DataFrame({"predicted": [str(pred_vec)]})
+                        df_iter = pd.DataFrame({"predicted": [str(pred_vec)]})
 
                 iter_csv_path = predictions_dir / f"{run_id}_{model_name}_iter{it_idx}.csv"
                 df_iter.to_csv(iter_csv_path, index=False)
@@ -270,7 +268,7 @@ def write_prediction_vectors(
         logger.debug("Could not write prediction vectors to CSV: %s", e, exc_info=True)
 
 
-def prefix_evaluate_rnn(  # noqa: C901, PLR0912
+def prefix_evaluate_rnn(  # noqa: C901, PLR0912, PLR0913
     *,
     model: torch.nn.Module,
     sequences: torch.Tensor,

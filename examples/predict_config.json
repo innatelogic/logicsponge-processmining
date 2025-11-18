@@ -16,23 +16,23 @@
     "gamma": 0.99
   },
   "lstm": {
-    "vocab_size": 8,
-    "embedding_dim": 8,
+    "vocab_size": 64,
+    "embedding_dim": 64,
     "hidden_dim": 256
   },
   "gru": {
-    "vocab_size": 8,
-    "embedding_dim": 8,
+    "vocab_size": 64,
+    "embedding_dim": 64,
     "hidden_dim": 256
   },
   "transformer": {
-    "vocab_size": 8,
-    "embedding_dim": 8,
+    "vocab_size": 64,
+    "embedding_dim": 64,
     "hidden_dim": 256
   },
   "qlearning": {
-    "vocab_size": 8,
-    "embedding_dim": 8,
+    "vocab_size": 64,
+    "embedding_dim": 64,
     "hidden_dim": 256
   }
 }

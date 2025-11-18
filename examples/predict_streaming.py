@@ -122,7 +122,7 @@ models_dir.mkdir(parents=True, exist_ok=True)
 
 # --- Run configuration (defaults + writing config file like predict_batch.py)
 config_file_path = Path(__file__).parent / "predict_config.json"
-MAGIC_VALUE = 8
+MAGIC_VALUE = 64
 HIDDEN_DIM_DEFAULT = 256 #128
 default_run_config = {
     "nn": {"lr": 0.001, "batch_size": 8, "epochs": 20},
@@ -252,7 +252,7 @@ SOFT_VOTING_NGRAMS = [
 WINDOW_RANGE = [1, 2, 3, 4, 5, 6, 7]  # 0, 1, 2, 3, 4, 5, 6, 7, 8 , 9, 10, 12, 14, 16]
 
 # NN/RL window range aligned with predict_batch.py
-NN_WINDOW_RANGE = WINDOW_RANGE # [1, 2, 3, 4, 5, 6, 7, 8]
+NN_WINDOW_RANGE = [*WINDOW_RANGE, 32, 256] # [1, 2, 3, 4, 5, 6, 7, 8]
 
 NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 # ] + [
