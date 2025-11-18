@@ -158,7 +158,7 @@ def process_neural_model(  # noqa: PLR0913
         batch_size=run_config.get("nn", {}).get("batch_size", 8),
         epochs=epochs,
         window_size=window_size,
-        patience=6
+        patience=3
     )
     end_time = time.time()
     training_time = (end_time - start_time) * SEC_TO_MICRO / (TRAIN_EVENTS + VAL_EVENTS)
@@ -243,7 +243,7 @@ SELECT_BEST_ARGS = ["prob"]  # ["acc", "prob", "prob x acc"]
 
 WINDOW_RANGE = [1, 2, 3, 4, 5, 6, 7]  # 8, 9, 10, 12, 14, 16]
 
-NN_WINDOW_RANGE = [*WINDOW_RANGE, 32, 256]
+NN_WINDOW_RANGE = [*WINDOW_RANGE, 64, 256] # [1, 2, 3, 4, 5, 6, 7, 8]
 
 NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 # ] + [

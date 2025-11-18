@@ -252,7 +252,7 @@ SOFT_VOTING_NGRAMS = [
 WINDOW_RANGE = [1, 2, 3, 4, 5, 6, 7]  # 0, 1, 2, 3, 4, 5, 6, 7, 8 , 9, 10, 12, 14, 16]
 
 # NN/RL window range aligned with predict_batch.py
-NN_WINDOW_RANGE = [*WINDOW_RANGE, 32, 256] # [1, 2, 3, 4, 5, 6, 7, 8]
+NN_WINDOW_RANGE = [*WINDOW_RANGE, 64, 256] # [1, 2, 3, 4, 5, 6, 7, 8]
 
 NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 # ] + [
