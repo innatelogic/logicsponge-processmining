@@ -243,9 +243,9 @@ VOTING_NGRAMS = [(2, 3, 5, 8), (2, 3, 4, 5)]
 
 SELECT_BEST_ARGS = ["prob"]  # ["acc", "prob", "prob x acc"]
 
-WINDOW_RANGE = [1, 2, 3, 4, 5, 6, 7]  # 8, 9, 10, 12, 14, 16]
+WINDOW_RANGE = [] #[1, 2, 3, 4, 5, 6, 7]  # 8, 9, 10, 12, 14, 16]
 
-NN_WINDOW_RANGE = [*WINDOW_RANGE] # [1, 2, 3, 4, 5, 6, 7, 8]
+NN_WINDOW_RANGE = [*WINDOW_RANGE, 256] # [1, 2, 3, 4, 5, 6, 7, 8]
 
 NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 # ] + [

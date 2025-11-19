@@ -298,7 +298,7 @@ if __name__ == "__main__":
     # Simple CLI so the script can be invoked directly for quick tests.
     import argparse
 
-    admissible_names = ["Lazy_Decrement", "Random_Decision_win2", "Random_Decision_win3"]
+    admissible_names = ["Lazy_Decrement", "Random_Decision_win2", "Random_Decision_win3", "x1x0", "x10x01"]
 
     for name in admissible_names:
         p = generate_probabilistic_synthetic(name=name)
