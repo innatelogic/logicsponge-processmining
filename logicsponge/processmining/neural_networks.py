@@ -472,14 +472,18 @@ class LSTMModel(nn.Module):
         else:
             self.embedding = None
 
-        # Input dimension to LSTM depends on the encoding method
-        input_dim = vocab_size if use_one_hot else embedding_dim
+        # Input dimension to LSTM depends on the encoding method (one-hot -> vocab_size, else embedding_dim)
+        in_dim = vocab_size if use_one_hot else embedding_dim
 
-        # LSTM layers
-        self.lstm1 = nn.LSTM(input_dim, hidden_dim, batch_first=True, device=device)
+        # LSTM layers (operate on in_dim features per timestep)
+        self.lstm1 = nn.LSTM(in_dim, hidden_dim, batch_first=True, device=device)
         self.lstm2 = nn.LSTM(hidden_dim, hidden_dim, batch_first=True, device=device)
 
-        self.fc = nn.Linear(hidden_dim, input_dim, device=device)
+        # Final projection: always project to vocabulary logits (vocab_size)
+        # Previous implementation incorrectly projected to `in_dim` which is
+        # the embedding size when not using one-hot; that produced non-logit
+        # outputs and could make teacher-forcing evaluation behave incorrectly.
+        self.fc = nn.Linear(hidden_dim, vocab_size, device=device)
 
         # Apply custom weight initialization
         self.apply(self._init_weights)
@@ -1238,11 +1242,12 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
         msg = f"Epoch {epoch + 1}/{epochs}, Average Loss: {epoch_loss / len(dataloader):.4f}"
         logger.info(msg)
 
-        # Evaluate on validation set after each epoch
+        # Evaluate on validation set after each epoch (use same windowing mode as training)
         msg = "Evaluating on validation set..."
         logger.info(msg)
+        # Pass through the same window_size so validation matches training mode
         # updated unpacking to accept extra returned predicted-vector (ignored here)
-        stats, _, _, _ = evaluate_rnn(model, val_sequences)
+        stats, _, _, _ = evaluate_rnn(model, val_sequences, window_size=window_size)
         val_accuracy = stats["accuracy"]
 
         if not isinstance(val_accuracy, float):

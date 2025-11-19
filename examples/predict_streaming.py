@@ -42,6 +42,7 @@ from logicsponge.processmining.streaming import (
 )
 from logicsponge.processmining.utils import (
     add_file_log_handler,
+    get_git_log,
     parse_cli_args,
     prepare_synthetic_dataset,
     resolve_dataset_from_args,
@@ -177,6 +178,14 @@ try:
     fh = add_file_log_handler(log_file_path, fmt="%(asctime)s %(levelname)s %(name)s: %(message)s")
 except OSError:
     logger.debug("Could not create log file %s; continuing with console logging.", log_file_path)
+
+# Log current git HEAD (one-line) for reproducibility and debugging
+try:
+    git_log = get_git_log()
+    if git_log:
+        logger.info("Git log -1:\n%s", git_log)
+except Exception:
+    logger.exception("Failed to retrieve git log info")
 
 # # disable circular gc here, since a phase 2 may take minutes
 gc.disable()

@@ -60,6 +60,7 @@ from logicsponge.processmining.neural_networks import (
 from logicsponge.processmining.utils import (
     add_file_log_handler,
     compute_perplexity_stats,
+    get_git_log,
     parse_cli_args,
     prepare_synthetic_dataset,
     resolve_dataset_from_args,
@@ -74,7 +75,7 @@ def lstm_model() -> tuple[LSTMModel, optim.Optimizer, nn.Module]:
         vocab_size=run_config.get("lstm", {}).get("vocab_size", 64),
         embedding_dim=run_config.get("lstm", {}).get("embedding_dim", 64),
         hidden_dim=run_config.get("lstm", {}).get("hidden_dim", 128),
-        use_one_hot=True,
+        use_one_hot=False,
         device=device
     )
     criterion = nn.CrossEntropyLoss()
@@ -93,7 +94,7 @@ def transformer_model(
             "embedding_dim": run_config.get("transformer", {}).get("embedding_dim", 64),
             "hidden_dim": run_config.get("transformer", {}).get("hidden_dim", 128),
             "attention_heads": attention_heads,
-            "use_one_hot": True,
+            "use_one_hot": False,
             "device": device,
         }
         if pos_encoding is not None:
@@ -243,9 +244,9 @@ VOTING_NGRAMS = [(2, 3, 5, 8), (2, 3, 4, 5)]
 
 SELECT_BEST_ARGS = ["prob"]  # ["acc", "prob", "prob x acc"]
 
-WINDOW_RANGE = [1, 2, 3, 4, 5, 6, 7]  # 8, 9, 10, 12, 14, 16]
+WINDOW_RANGE = [1, 2, 3, 4, 5, 6, 7, 8]  # 8, 9, 10, 12, 14, 16]
 
-NN_WINDOW_RANGE = [*WINDOW_RANGE, 256] # [1, 2, 3, 4, 5, 6, 7, 8]
+NN_WINDOW_RANGE = [*WINDOW_RANGE] # [1, 2, 3, 4, 5, 6, 7, 8]
 
 NGRAM_NAMES = [f"ngram_{i + 1}" for i in WINDOW_RANGE]
 # ] + [
@@ -449,6 +450,14 @@ try:
 except OSError:
     logger.debug("Could not create log file %s; continuing with console logging.", log_file_path)
 
+# Log current git HEAD (one-line) for reproducibility and debugging
+try:
+    git_log = get_git_log()
+    if git_log:
+        logger.info("Git log -1:\n%s", git_log)
+except Exception:
+    logger.exception("Failed to retrieve git log info")
+
 if torch.backends.mps.is_available():
     # device = torch.device("mps")
     device = torch.device("cpu")
@@ -488,12 +497,14 @@ config_file_path = Path(__file__).parent / "predict_config.json"
 default_run_config = {
     "nn": {"lr": 0.001, "batch_size": 8, "epochs": 20},
     "rl": {"lr": 0.001, "batch_size": 64, "epochs": 20, "gamma": 0.99},
-    "lstm": {"vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 512, "output_dim": MAGIC_NUMBER},
+    "lstm": {
+        "vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 128, "output_dim": MAGIC_NUMBER
+    },
     "transformer": {
-        "vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 512, "output_dim": MAGIC_NUMBER
+        "vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 128, "output_dim": MAGIC_NUMBER
     },
     "qlearning": {
-        "vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 512, "output_dim": MAGIC_NUMBER
+        "vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 128, "output_dim": MAGIC_NUMBER
     },
 }
 

@@ -10,6 +10,7 @@ import copy
 import json
 import logging
 import math
+import subprocess
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -67,6 +68,29 @@ def add_file_log_handler(log_file_path: Path, fmt: str = "%(message)s") -> loggi
         return None
     else:
         return file_handler
+
+
+def get_git_log(repo_path: Path | None = None) -> str:
+    """
+    Return the output of `git log -1` as a string for the repository at repo_path.
+
+    If repo_path is None the repository root is inferred relative to this file
+    (two parents up, matching other helpers in this package). On failure an
+    empty string is returned and a debug log entry is written.
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        repo_root = Path(__file__).resolve().parents[2] if repo_path is None else  Path(repo_path)
+        proc = subprocess.run(
+            ["git", "log", "-1"], cwd=str(repo_root), capture_output=True, text=True,
+            check=False,
+        )
+        if proc.returncode == 0:
+            return proc.stdout.strip()
+        logger.debug("git log returned non-zero (%s): %s", proc.returncode, proc.stderr)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.debug("Exception while running git log: %s", exc)
+    return ""
 
 def extract_event_fields(event: Event) -> Event:
     """Extract the required fields from an event."""
