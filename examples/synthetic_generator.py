@@ -170,6 +170,13 @@ def generate_probabilistic_synthetic(  # noqa: C901, PLR0912, PLR0913, PLR0915
     activities_added = 0
 
 
+    def get_timestamp_and_increment(current_time: datetime) -> tuple[str, datetime]:
+        """Compute timestamp, then increment the datetime."""
+        timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
+        next_time = current_time + time_increment
+        return timestamp, next_time
+
+
     with save_path.open("w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["case:concept:name", "concept:name", "time:timestamp"])
@@ -193,98 +200,108 @@ def generate_probabilistic_synthetic(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     prefix_length = rng.integers(2, 6)
                     for i in range(prefix_length, 0, -1):
                         activity = f"act_{i}"
-                        timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
+                        timestamp, current_time = get_timestamp_and_increment(current_time=current_time)
                         writer.writerow([case_id, activity, timestamp])
-
                         activities_added += 1
-                        current_time += time_increment
+
                 case "Random_Decision_win2":
                     marker01 = rng.integers(0, 2)
                     activity = f"act_{marker01}"
-                    timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
+                    timestamp, current_time = get_timestamp_and_increment(current_time=current_time)
 
                     writer.writerow([case_id, activity, timestamp])
                     activities_added += 1
-                    current_time += time_increment
-                    timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
 
+                    timestamp, current_time = get_timestamp_and_increment(current_time=current_time)
                     writer.writerow([case_id, activity, timestamp])
                     activities_added += 1
-                    current_time += time_increment
-                    timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
 
                     activity = f"act_{(marker01+1)%2}"
+                    timestamp, current_time = get_timestamp_and_increment(current_time=current_time)
                     writer.writerow([case_id, activity, timestamp])
                     activities_added += 1
-                    current_time += time_increment
-                    timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
-
 
                 case "Random_Decision_win3":
                     marker012 = rng.integers(0, 3)
                     activity = f"act_{marker012}"
-                    timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
-                    writer.writerow([case_id, activity, timestamp])
-                    activities_added += 1
-                    current_time += time_increment
-                    timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
 
+                    timestamp, current_time = get_timestamp_and_increment(current_time=current_time)
                     writer.writerow([case_id, activity, timestamp])
                     activities_added += 1
-                    current_time += time_increment
-                    timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
+
+                    timestamp, current_time = get_timestamp_and_increment(current_time=current_time)
+                    writer.writerow([case_id, activity, timestamp])
+                    activities_added += 1
 
                     remaining012 = [i for i in [0, 1, 2] if i != marker012]
                     random012 = rng.choice(remaining012)
                     last012 = next(i for i in remaining012 if i != random012)
                     activity = f"act_{random012}"
+
+                    timestamp, current_time = get_timestamp_and_increment(current_time=current_time)
                     writer.writerow([case_id, activity, timestamp])
                     activities_added += 1
-                    current_time += time_increment
-                    timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
 
                     activity = f"act_{last012}"
+                    timestamp, current_time = get_timestamp_and_increment(current_time=current_time)
                     writer.writerow([case_id, activity, timestamp])
                     activities_added += 1
-                    current_time += time_increment
 
                 case "x1x0":
                     random_pick = rng.integers(0, 2)
                     for i in range(2):
                         activity = f"act_{random_pick}"
-                        timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
-
+                        timestamp, current_time = get_timestamp_and_increment(current_time=current_time)
                         writer.writerow([case_id, activity, timestamp])
                         activities_added += 1
-                        current_time += time_increment
-                        timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
 
                         activity = f"act_{i}"
+                        timestamp, current_time = get_timestamp_and_increment(current_time=current_time)
                         writer.writerow([case_id, activity, timestamp])
                         activities_added += 1
-                        current_time += time_increment
 
                 case "x10x01":
                     random_pick = rng.integers(0, 2)
                     for i in range(2):
                         activity = f"act_{random_pick}"
-                        timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
-
+                        timestamp, current_time = get_timestamp_and_increment(current_time=current_time)
                         writer.writerow([case_id, activity, timestamp])
                         activities_added += 1
-                        current_time += time_increment
-                        timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
 
                         activity = f"act_{i}"
+                        timestamp, current_time = get_timestamp_and_increment(current_time=current_time)
                         writer.writerow([case_id, activity, timestamp])
                         activities_added += 1
-                        current_time += time_increment
-                        timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S+00:00")
 
                         activity = f"act_{(i+1)%2}"
+                        timestamp, current_time = get_timestamp_and_increment(current_time=current_time)
                         writer.writerow([case_id, activity, timestamp])
                         activities_added += 1
-                        current_time += time_increment
+
+                case "Interruption_30":
+                    activity = "act_sep"
+                    timestamp, current_time = get_timestamp_and_increment(current_time=current_time)
+                    writer.writerow([case_id, activity, timestamp])
+                    activities_added += 1
+
+                    n = rng.integers(1, 30)
+                    for _ in range(n):
+                        activity = f"act_{1}"
+                        timestamp, current_time = get_timestamp_and_increment(current_time=current_time)
+                        writer.writerow([case_id, activity, timestamp])
+                        activities_added += 1
+
+                    for _ in range(30):
+                        activity = f"act_{0}"
+                        timestamp, current_time = get_timestamp_and_increment(current_time=current_time)
+                        writer.writerow([case_id, activity, timestamp])
+                        activities_added += 1
+
+                    for _ in range(30-n):
+                        activity = f"act_{0}"
+                        timestamp, current_time = get_timestamp_and_increment(current_time=current_time)
+                        writer.writerow([case_id, activity, timestamp])
+                        activities_added += 1
 
                 case _:
                     msg = f"Unknown synthetic dataset name: {name}"
