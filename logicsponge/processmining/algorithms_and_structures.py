@@ -2,12 +2,14 @@
 
 
 import copy
+import json
 import logging
 import math
 import time
 from abc import ABC, abstractmethod
 from collections import deque
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 from logicsponge.processmining.automata import PDFA
@@ -104,7 +106,7 @@ class BayesianClassifier:
 
         self.memory = mem_frequency
 
-    def evaluate(
+    def evaluate(  # noqa: C901, PLR0912
         self,
         data: list[list[Event]],
         mode: str = "",
@@ -171,7 +173,7 @@ class BayesianClassifier:
                 else:
                     seq_perplexity = float("inf")
 
-            perplexities.append(seq_perplexity if compute_perplexity else float("inf"))  # type: ignore
+            perplexities.append(seq_perplexity if compute_perplexity else float("inf"))  # type: ignore  # noqa: PGH003
             pause_time += time.time() - pause_start_time
 
         eval_time = time.time() - eval_start_time - pause_time
@@ -250,7 +252,7 @@ class BaseStructure(PDFA, ABC):
     min_max_prob: float
     modified_cases: set[CaseId]
 
-    def __init__(self, *args, min_total_visits: int = 1, min_max_prob: float = 0.0, **kwargs) -> None:
+    def __init__(self, *args, min_total_visits: int = 1, min_max_prob: float = 0.0, **kwargs) -> None:  # noqa: ANN002, ANN003
         """Initialize the BaseStructure."""
         super().__init__(*args, **kwargs)
 
@@ -630,6 +632,91 @@ class BaseStructure(PDFA, ABC):
 
         return result
 
+    def export_automaton(
+            self, output_path: Path
+        ) -> tuple[dict[StateId, str], dict[StateId, dict[ActivityName, dict[str, Any]]]]:
+        """
+        Return a compact representation of the automaton.
+
+        Returns a tuple (states_map, transitions_map) where:
+            - states_map: dict[state_id, access_string_as_str]
+            - transitions_map: dict[state_id, dict[activity, [next_state, frequency, occurrences]]]
+
+        Frequency is computed as: occurrences / (total_visits - active_visits).
+        We do not count active visits in the denominator and skip the configured stop symbol.
+        """
+        states_map: dict[StateId, str] = {}
+        transitions_map: dict[StateId, dict[ActivityName, dict[str, Any]]] = {}
+
+        stop_symbol = self.config.get("stop_symbol")
+
+        # Build states mapping from state_info.access_string (fallback to state id)
+        for sid, info in self.state_info.items():
+            access = info.get("access_string", "")
+            states_map[sid] = (
+                "(" + (
+                    str(access) if not isinstance(access, (list, tuple)) else ",".join(map(str, access))
+                ) + ")"
+            )
+
+        # Build transitions with occurrence counts and frequencies
+        for sid in self.state_info:
+            transitions_map[sid] = {}
+
+            total_visits = int(self.state_info[sid].get("total_visits", 0))
+            active_visits = int(self.state_info[sid].get("active_visits", 0))
+            denom = total_visits - active_visits
+
+            # iterate explicit transitions recorded in the automaton
+            for activity, next_state in self.transitions.get(sid, {}).items():
+                # don't include stop transitions in the reported transitions
+                if activity == stop_symbol:
+                    continue
+
+                occurrences = int(self.state_info[sid]["activity_frequency"].get(activity, 0))
+                frequency = float(occurrences / denom) if denom > 0 else 0.0
+
+                if occurrences > 0:
+                    # store as [next_state, frequency, occurrences] to match requested shape
+                    transitions_map[sid][activity] = {
+                        "next_state": next_state, "frequency": frequency, "occurrences": occurrences
+                    }
+
+        # Also persist a JSON-serializable copy under `models/automaton_<ts>.json`
+        try:
+            # Prefer using sid.value when available (for compatibility with different StateId implementations)
+            # Fall back to int(sid) otherwise. This ensures JSON keys look like "5" instead of
+            # the verbose representation 'StateId(5, in_recovery=False)'.
+            serial_states: dict[str, str] = {}
+            serial_transitions: dict[str, dict[str, dict[str, Any]]] = {}
+
+            for sid, label in states_map.items():
+                sid_value = getattr(sid, "value", int(sid))
+                serial_states[str(sid_value)] = label
+
+            for sid, act_map in transitions_map.items():
+                sid_value = getattr(sid, "value", int(sid))
+                sid_s = str(sid_value)
+                serial_transitions[sid_s] = {}
+                for act, info in act_map.items():
+                    next_state = info["next_state"]
+                    next_state_value = getattr(next_state, "value", int(next_state))
+                    serial_transitions[sid_s][str(act)] = {
+                        "next_state": str(next_state_value),
+                        "frequency": info["frequency"],
+                        "occurrences": info["occurrences"],
+                    }
+
+            models_dir = Path("models")
+            models_dir.mkdir(parents=True, exist_ok=True)
+            with output_path.open("w", encoding="utf-8") as f:
+                json.dump({"states": serial_states, "transitions": serial_transitions}, f, indent=2)
+            logger.info("Exported automaton to %s", output_path.resolve())
+        except OSError:
+            logger.exception("Failed to write automaton to models directory")
+
+        return states_map, transitions_map
+
 
 # ============================================================
 # Frequency Prefix Tree
@@ -639,7 +726,7 @@ class BaseStructure(PDFA, ABC):
 class FrequencyPrefixTree(BaseStructure):
     """Frequency Prefix Tree structure for process mining."""
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
         """Initialize the FrequencyPrefixTree structure."""
         super().__init__(*args, **kwargs)
         self.last_transition = None  # for visualization of frequency prefix tree
@@ -940,7 +1027,7 @@ class Bag(BaseStructure):
 
     activity_sets: dict[frozenset, StateId]
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
         """Initialize the Bag structure."""
         super().__init__(*args, **kwargs)
         initial_set: frozenset = frozenset()
