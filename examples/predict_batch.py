@@ -33,7 +33,9 @@ from logicsponge.processmining.algorithms_and_structures import (
 from logicsponge.processmining.batch_helpers import (
     build_and_save_comparison_matrices,
     build_strategies,
+    plot_accuracy_by_window,
     record_model_results,
+    save_results_summary,
     write_prediction_vectors,
 )
 from logicsponge.processmining.config import DEFAULT_CONFIG
@@ -244,7 +246,7 @@ VOTING_NGRAMS = [(2, 3, 5, 8), (2, 3, 4, 5)]
 
 SELECT_BEST_ARGS = ["prob"]  # ["acc", "prob", "prob x acc"]
 
-WINDOW_RANGE = [1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 48, 64, 96, 128]  # 8, 9, 10, 12, 14, 16]
+WINDOW_RANGE = [1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 48, 64, 96, 128, 192, 256]  # 8, 9, 10, 12, 14, 16]
 
 NN_WINDOW_RANGE = [*WINDOW_RANGE] # [1, 2, 3, 4, 5, 6, 7, 8]
 
@@ -1207,8 +1209,32 @@ data = pd.DataFrame(results).round(2)
 if not SHOW_DELAYS:
     # Remove the delay columns
     data = data.drop(columns=["Delay Error", "Actual Delay", "Normalized Error", "Delay Predictions"])
-msg = "\n" + str(data)
+
+# Ensure the DataFrame is rendered fully (no collapsed rows/columns) in logs.
+# Use a temporary pandas option context and DataFrame.to_string() which
+# returns the full multi-line representation suitable for logging.
+with pd.option_context("display.max_rows", None, "display.max_columns", None, "display.width", None):
+    msg = "\n" + data.to_string()
 logger.info(msg)
+
+# Save the final summary DataFrame as CSV in the run-specific results folder
+save_results_summary(
+    csv_path=run_results_dir / f"{RUN_ID}_summary.csv",
+    data=data,
+    logger=logger,
+)
+
+# Produce accuracy-by-window plot (NGram / Transformer / LSTM)
+try:
+    plot_accuracy_by_window(
+        all_metrics=all_metrics,
+        window_sizes=WINDOW_RANGE,
+        run_id=RUN_ID,
+        out_dir=run_results_dir,
+        logger=logger,
+    )
+except Exception:
+    logger.exception("Failed to generate accuracy-by-window plot")
 
 # === Cross-reference table of comparison ratios between all models ===
 build_and_save_comparison_matrices(

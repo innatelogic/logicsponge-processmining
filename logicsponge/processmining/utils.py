@@ -10,6 +10,8 @@ import copy
 import json
 import logging
 import math
+import os
+import shutil
 import subprocess
 import time
 from collections.abc import Iterator
@@ -80,16 +82,34 @@ def get_git_log(repo_path: Path | None = None) -> str:
     """
     logger = logging.getLogger(__name__)
     try:
-        repo_root = Path(__file__).resolve().parents[2] if repo_path is None else  Path(repo_path)
-        proc = subprocess.run(
-            ["git", "log", "-1"], cwd=str(repo_root), capture_output=True, text=True,
-            check=False,
-        )
+        repo_root = Path(__file__).resolve().parents[2] if repo_path is None else Path(repo_path)
+
+        # Basic validation of the repo root path to avoid surprising subprocess cwd
+        if not repo_root.exists() or not repo_root.is_dir():
+            logger.debug("git repo path does not exist or is not a directory: %s", repo_root)
+            return ""
+
+        # Resolve git executable to avoid starting a process with a partial executable path
+        git_exe = shutil.which("git")
+        if git_exe is None:
+            logger.debug("'git' executable not found in PATH; cannot run git log")
+            return ""
+
+        # Ensure the resolved executable is a file and is executable to avoid running untrusted input
+        git_path = Path(git_exe)
+        if not git_path.is_file() or not os.access(str(git_path), os.X_OK):
+            logger.debug("Resolved git executable is not a regular executable: %s", git_exe)
+            return ""
+
+        # Build a command from validated, fixed components (no user input)
+        cmd = [str(git_path), "log", "-1"]
+
+        proc = subprocess.run(cmd, cwd=str(repo_root), capture_output=True, text=True, check=False)  # noqa: S603
         if proc.returncode == 0:
             return proc.stdout.strip()
         logger.debug("git log returned non-zero (%s): %s", proc.returncode, proc.stderr)
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.debug("Exception while running git log: %s", exc)
+    except (FileNotFoundError, subprocess.SubprocessError, OSError) as exc:  # pragma: no cover - defensive logging
+        logger.debug("Error while running git log: %s", exc)
     return ""
 
 def extract_event_fields(event: Event) -> Event:

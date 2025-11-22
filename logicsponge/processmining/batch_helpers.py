@@ -7,12 +7,16 @@ without changing outputs or behavior.
 
 from __future__ import annotations
 
+import csv
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
+from tabulate import tabulate
 
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
 from logicsponge.processmining.miners import BasicMiner, Fallback, HardVoting, SoftVoting
@@ -37,7 +41,6 @@ def _left_pad_window(prefix: torch.Tensor, window_size: int) -> torch.Tensor:
 
 if TYPE_CHECKING:
     import logging
-    from pathlib import Path
 
 
 def _pick_perplexity_value(
@@ -524,3 +527,108 @@ def build_and_save_comparison_matrices(
 
     except (ValueError, KeyError, TypeError, ZeroDivisionError, IndexError, OSError, RuntimeError):
         logger.exception("Failed to build cross-reference comparison table")
+
+
+
+
+def save_results_summary(csv_path: str | Path, data: pd.DataFrame, logger: logging.Logger) -> None:
+    """Save a results summary dictionary as a JSON file."""
+    if isinstance(csv_path, str):
+        csv_path = Path(csv_path)
+    try:
+        data.to_csv(csv_path, index=False)
+        logger.info("Saved final summary CSV: %s", csv_path)
+    except Exception:
+        logger.exception("Failed to save final summary CSV.")
+
+    with Path.open(csv_path) as f:
+        reader = csv.reader(f)
+        # Capture the rendered table as a string so we can both log it and save it to a file
+        rows = list(reader)
+        table_str = tabulate(rows, headers="firstrow", tablefmt="github")
+        logger.info(table_str)
+
+        # Also save the table string next to the CSV for easy reference
+        try:
+            csv_p = Path(csv_path)
+            out_path = csv_p.with_name(f"{csv_p.stem}_table.md")
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with out_path.open("w", encoding="utf-8") as out_f:
+                out_f.write(table_str)
+        except OSError:
+            logger.exception("Failed to write tabulated summary to file")
+
+
+def plot_accuracy_by_window(
+    *,
+    all_metrics: dict[str, dict[str, list[Any]]],
+    window_sizes: list[int],
+    run_id: str,
+    out_dir: Path,
+    logger: logging.Logger,
+) -> None:
+    """
+    Plot accuracy vs window size for three families: NGrams, Transformers and LSTMs.
+
+    For each provided window size `n` the function looks up the corresponding keys
+    in `all_metrics` as:
+      - NGram -> f"ngram_{n+1}"
+      - Transformer -> f"transformer_win{n}"
+      - LSTM -> f"LSTM_win{n}"
+
+    The `all_metrics` structure is expected to match the one produced by
+    `record_model_results` (accuracies stored as floats in [0,1]). The plotted
+    values are percentages (0-100).
+
+    The plot is saved as `{run_id}_accuracy_by_window.png` inside `out_dir`.
+    """
+    try:
+        # Helper to compute mean accuracy (percentage) for a given model key
+        def _mean_acc_pct(key: str) -> float:
+            if key not in all_metrics:
+                return float("nan")
+            vals = all_metrics[key].get("accuracies", [])
+            if not vals:
+                return float("nan")
+            # filter None and convert
+            nums = [float(v) for v in vals if v is not None]
+            if len(nums) == 0:
+                return float("nan")
+            return float(np.nanmean(nums) * 100.0)
+
+        ngram_vals: list[float] = []
+        transformer_vals: list[float] = []
+        lstm_vals: list[float] = []
+
+        for n in window_sizes:
+            ngram_key = f"ngram_{n+1}"
+            transformer_key = f"transformer_win{n}"
+            lstm_key = f"LSTM_win{n}"
+
+            ngram_vals.append(_mean_acc_pct(ngram_key))
+            transformer_vals.append(_mean_acc_pct(transformer_key))
+            lstm_vals.append(_mean_acc_pct(lstm_key))
+
+        # Prepare output dir
+        out_dir.mkdir(parents=True, exist_ok=True)
+        fig_path = out_dir / f"{run_id}_accuracy_by_window.png"
+
+        # Plot
+        plt.figure(figsize=(10, 5))
+        plt.plot(window_sizes, ngram_vals, marker="o", label="NGram")
+        plt.plot(window_sizes, transformer_vals, marker="s", label="Transformer")
+        plt.plot(window_sizes, lstm_vals, marker="^", label="LSTM")
+        plt.xticks(window_sizes)
+        plt.xlabel("Window size")
+        plt.ylabel("Accuracy (%)")
+        plt.ylim(0, 100)
+        plt.title("Model accuracy vs window size")
+        plt.grid(alpha=0.3)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(fig_path)
+        plt.close()
+
+        logger.info("Saved accuracy-by-window plot to %s", fig_path)
+    except Exception:
+        logger.exception("Failed to generate accuracy-by-window plot")
