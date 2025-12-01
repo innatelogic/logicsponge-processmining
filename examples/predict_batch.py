@@ -5,6 +5,7 @@ Usage example:
     python examples/predict_batch.py --data path/to/log.csv
 """
 
+import gc
 import json
 import logging
 import time
@@ -356,7 +357,7 @@ def process_rl_model(
     return metrics, eval_pp, eval_time, prediction_vector, train_time
 
 
-ML_TRAINING = True
+ML_TRAINING = False
 NN_TRAINING = True
 ALERGIA_TRAINING = False
 SHOW_DELAYS = False
@@ -669,6 +670,41 @@ for iteration in range(N_ITERATIONS):
     TEST_EVENTS = sum(len(lst) for lst in test_set_transformed)
 
 
+
+    # ============================================================
+    # Initialize iteration data storage
+    # ============================================================
+
+    # Store the statistics for each iteration and also print them out
+    iteration_data: dict = {
+        "Model": [],
+        "PP Arithm": [],
+        "PP Harmo": [],
+        "PP Median": [],
+        "PP Q1": [],
+        "PP Q3": [],
+        "Correct (%)": [],
+        "Wrong (%)": [],
+        "Empty (%)": [],
+        "Top-2": [],
+        "Top-3": [],
+        "Pred Time": [],
+        "Train Time": [],
+        "Good Preds": [],
+        "Tot Preds": [],
+        "Nb States": [],
+        # "Mean Delay Error": [],
+        # "Mean Actual Delay": [],
+        # "Mean Normalized Error": [],
+        # "Delay Predictions": [],
+    }
+    # for k in range(1, config["top_k"]):
+    #     iteration_data[f"Top-{k+1}"] = []
+
+    # collect state-mining info for NGram strategies for this iteration
+    state_mining_iteration: dict = {}
+
+
     # ============================================================
     # Initialize Process Miners
     # ============================================================
@@ -709,96 +745,29 @@ for iteration in range(N_ITERATIONS):
 
     # ================= Train Process Miners
     miners_start_time = time.time()
+    gc.disable()  # Disable garbage collection for performance during training
 
-    for event in tqdm(train_set, desc="Processing events"):
-        for strategy_name, (strategy, _) in strategies.items():
-            if "alergia" in strategy_name or "bayesian" in strategy_name:
-                continue
+    # Pop items from the dict until empty (frees each strategy as we go)
+    while strategies:
+        strategy_name, (strategy, test_data) = strategies.popitem()
+        if "alergia" in strategy_name or "bayesian" in strategy_name:
+            continue
+
+        # ============================================================
+        # Training loop
+        # ============================================================
+
+        for event in tqdm(train_set, desc="Processing events"):
             start_time = time.time()
             strategy.update(event)
             end_time = time.time()
             training_times[strategy_name] += end_time - start_time
 
-    for strategy_name in strategies:
-        if "alergia" in strategy_name or "bayesian" in strategy_name:
-            continue
-        training_times[strategy_name] /= len(train_set)
+        training_times[strategy_name] *= float(SEC_TO_MICRO) / len(train_set)
 
-    miners_end_time = time.time()
-    elapsed_time = miners_end_time - miners_start_time
-    msg = f"Total training time for process miners: {elapsed_time:.4f} seconds"
-    logger.info(msg)
-
-    # ================= Train Bayesian Classifiers
-    bayesian_start_time = time.time()
-
-    for model_name, model in BAYESIAN_MODELS.items():
-        if "train" in model_name:
-            start_time = time.time()
-            model.initialize_memory(train_set_transformed)
-            end_time = time.time()
-            training_times[model_name] = (end_time - start_time) / TRAIN_EVENTS
-        elif "test" in model_name:
-            start_time = time.time()
-            model.initialize_memory(test_set_transformed)
-            end_time = time.time()
-            training_times[model_name] = (end_time - start_time) / TEST_EVENTS
-        elif "t+t" in model_name:
-            start_time = time.time()
-            model.initialize_memory(train_set_transformed + test_set_transformed)
-            end_time = time.time()
-            training_times[model_name] = (end_time - start_time) / (TRAIN_EVENTS + TEST_EVENTS)
-
-    bayesian_end_time = time.time()
-    elapsed_time = bayesian_end_time - bayesian_start_time
-    msg = f"Training time for Bayesian Classifiers: {elapsed_time:.4f} seconds"
-    logger.info(msg)
-
-    for strategy_name in strategies:
-        training_times[strategy_name] *= SEC_TO_MICRO  # Convert to microseconds
-
-    # ============================================================
-    # Evaluation
-    # ============================================================
-
-    # Store the statistics for each iteration and also print them out
-    iteration_data: dict = {
-        "Model": [],
-        "PP Arithm": [],
-        "PP Harmo": [],
-        "PP Median": [],
-        "PP Q1": [],
-        "PP Q3": [],
-        "Correct (%)": [],
-        "Wrong (%)": [],
-        "Empty (%)": [],
-        "Top-2": [],
-        "Top-3": [],
-        "Pred Time": [],
-        "Train Time": [],
-        "Good Preds": [],
-        "Tot Preds": [],
-        "Nb States": [],
-        # "Mean Delay Error": [],
-        # "Mean Actual Delay": [],
-        # "Mean Normalized Error": [],
-        # "Delay Predictions": [],
-    }
-    # for k in range(1, config["top_k"]):
-    #     iteration_data[f"Top-{k+1}"] = []
-
-    # collect state-mining info for NGram strategies for this iteration
-    state_mining_iteration: dict = {}
-
-    for strategy_name, (strategy, test_data) in strategies.items():
-        # if "hard" in strategy_name:
-        #     continue
-        # if "bayesian" in strategy_name:
-        #     continue
-        # if "voting" in strategy_name or "ngram" in strategy_name:
-        #     continue
-        # if not strategy_name.startswith("ngram_"):
-        #     continue
+        # ============================================================
+        # Evaluation loop
+        # ============================================================
 
         msg = f"Evaluating {strategy_name}..."
         logger.info(msg)
@@ -922,6 +891,46 @@ for iteration in range(N_ITERATIONS):
             logger.warning(
                 "Non-critical: could not collect state mining info for strategy %s", strategy_name, exc_info=True
             )
+
+        # Release miner memory (we removed the reference from the container by popping)
+        try:
+            del strategy, test_data
+            # collected = gc.collect()
+            # logger.info("Freed memory for miner '%s' after eval (%s items collected).", strategy_name, collected)
+        except NameError:
+            logger.exception("Miner '%s' not found when attempting to free it", strategy_name)
+        # collected_items = gc.collect()
+        # msg = f"Garbage collector: collected {collected_items} objects after freeing miner '{strategy_name}'."
+        # logger.info(msg)
+
+
+    # ================= Train Bayesian Classifiers
+    bayesian_start_time = time.time()
+
+    for model_name, model in BAYESIAN_MODELS.items():
+        if "train" in model_name:
+            start_time = time.time()
+            model.initialize_memory(train_set_transformed)
+            end_time = time.time()
+            training_times[model_name] = (end_time - start_time) / TRAIN_EVENTS
+        elif "test" in model_name:
+            start_time = time.time()
+            model.initialize_memory(test_set_transformed)
+            end_time = time.time()
+            training_times[model_name] = (end_time - start_time) / TEST_EVENTS
+        elif "t+t" in model_name:
+            start_time = time.time()
+            model.initialize_memory(train_set_transformed + test_set_transformed)
+            end_time = time.time()
+            training_times[model_name] = (end_time - start_time) / (TRAIN_EVENTS + TEST_EVENTS)
+
+        training_times[model_name] *= SEC_TO_MICRO  # Convert to microseconds
+    bayesian_end_time = time.time()
+    elapsed_time = bayesian_end_time - bayesian_start_time
+    msg = f"Training time for Bayesian Classifiers: {elapsed_time:.4f} seconds"
+    logger.info(msg)
+
+    gc.enable()
 
 
     # LSTM + Transformer + RL Evaluation
