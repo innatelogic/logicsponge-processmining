@@ -32,6 +32,7 @@ from logicsponge.processmining.algorithms_and_structures import (
     NGram,
 )
 from logicsponge.processmining.batch_helpers import (
+    baseline_curve,
     build_and_save_comparison_matrices,
     build_strategies,
     plot_accuracy_by_window,
@@ -876,6 +877,7 @@ for iteration in range(N_ITERATIONS):
         # If this strategy is an NGram model collect its top-3 visited states and visit rates, as well as its automaton
         try:
             if "ngram" in strategy_name and isinstance(strategy, BasicMiner) and isinstance(strategy.algorithm, NGram):
+                logger.info("Collecting state mining info for %s...", strategy_name)
                 try:
                     top3 = strategy.algorithm.top_three_visit_rates()
                 except Exception:

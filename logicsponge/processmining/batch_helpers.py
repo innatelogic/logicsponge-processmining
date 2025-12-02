@@ -8,6 +8,7 @@ without changing outputs or behavior.
 from __future__ import annotations
 
 import csv
+import json
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -559,13 +560,14 @@ def save_results_summary(csv_path: str | Path, data: pd.DataFrame, logger: loggi
             logger.exception("Failed to write tabulated summary to file")
 
 
-def plot_accuracy_by_window(
+def plot_accuracy_by_window(  # noqa: C901, PLR0913, PLR0915
     *,
     all_metrics: dict[str, dict[str, list[Any]]],
     window_sizes: list[int],
     run_id: str,
     out_dir: Path,
     logger: logging.Logger,
+    baseline_curve: list[tuple[int, float]] | None = None,
 ) -> None:
     """
     Plot accuracy vs window size for three families: NGrams, Transformers and LSTMs.
@@ -613,22 +615,237 @@ def plot_accuracy_by_window(
         out_dir.mkdir(parents=True, exist_ok=True)
         fig_path = out_dir / f"{run_id}_accuracy_by_window.png"
 
-        # Plot
+        # Sort by window size to ensure monotonic x (useful if input isn't already sorted)
+        paired = sorted(zip(window_sizes, ngram_vals, transformer_vals, lstm_vals, strict=True), key=lambda x: x[0])
+        xs, ngram_vals_sorted, transformer_vals_sorted, lstm_vals_sorted = zip(*paired, strict=True)
+
+        xs = np.array(xs, dtype=float)
+
+        # Plot on a logarithmic x-axis (base 2) so exponentially-distributed windows are spaced sensibly.
         plt.figure(figsize=(10, 5))
-        plt.plot(window_sizes, ngram_vals, marker="o", label="NGram")
-        plt.plot(window_sizes, transformer_vals, marker="s", label="Transformer")
-        plt.plot(window_sizes, lstm_vals, marker="^", label="LSTM")
-        plt.xticks(window_sizes)
+        plt.plot(xs, ngram_vals_sorted, marker="o", label="NGram")
+        plt.plot(xs, transformer_vals_sorted, marker="s", label="Transformer")
+        plt.plot(xs, lstm_vals_sorted, marker="^", label="LSTM")
+        # If a baseline curve is provided, plot it as a black curve labelled 'Theoretical Best'
+        baseline_xs = None
+        baseline_ys = None
+        if baseline_curve:
+            # baseline_curve is list[tuple[int, float]] -> sort and unzip
+            baseline_sorted = sorted(baseline_curve, key=lambda t: t[0])
+            baseline_xs = np.array([t[0] for t in baseline_sorted], dtype=float)
+            baseline_ys = np.array([t[1] for t in baseline_sorted], dtype=float)
+            plt.plot(baseline_xs, baseline_ys, marker="o", color="k", linestyle="-", label="Theoretical Best")
+
+        # Use log scale to spread out exponential window sizes (base 2 looks natural for powers-of-two)
+        plt.xscale("log", base=2)
+
+        # Compute powers-of-two ticks that lie within the plotted x-range.
+        # This yields a "normal" log plot appearance: only powers-of-two shown
+        # as major x-ticks, and vertical gridlines only at those ticks.
+        # Consider baseline xs too when computing axis ticks
+
+        all_xs_for_ticks = np.concatenate([xs, baseline_xs]) if baseline_xs is not None and baseline_xs.size > 0 else xs
+
+        if all_xs_for_ticks.size > 0:
+            min_x = float(all_xs_for_ticks.min())
+            max_x = float(all_xs_for_ticks.max())
+            # Guard against non-positive values (log axis requires positive)
+            min_x = max(min_x, 1.0)
+            # Compute exponent bounds and create ticks
+            min_exp = int(np.floor(np.log2(min_x)))
+            max_exp = int(np.ceil(np.log2(max_x)))
+            pow2_ticks = [2 ** e for e in range(min_exp, max_exp + 1) if 2 ** e >= min_x and 2 ** e <= max_x]
+        else:
+            pow2_ticks = []
+
+        # If we have power-of-two ticks, show them; otherwise fall back to default ticking
+        if pow2_ticks:
+            plt.xticks(pow2_ticks, [str(int(x)) for x in pow2_ticks])
+        # Turn off minor ticks so there are no extra vertical grid lines
+        plt.minorticks_off()
+
         plt.xlabel("Window size")
         plt.ylabel("Accuracy (%)")
         plt.ylim(0, 100)
-        plt.title("Model accuracy vs window size")
-        plt.grid(alpha=0.3)
+        plt.title("Model accuracy vs window size (log-scale)")
+        # Draw horizontal grid lines and vertical grid lines only at the major ticks (powers of two)
+        plt.grid(axis="y", alpha=0.3, which="major", linestyle="--")
+        plt.grid(axis="x", alpha=0.3, which="major", linestyle="--")
         plt.legend()
         plt.tight_layout()
-        plt.savefig(fig_path)
+        # Save raster PNG
+        fig = plt.gcf()
+        fig.savefig(fig_path)
+        # Also save a vectorized SVG for later modifications
+        try:
+            vec_path = out_dir / f"{run_id}_accuracy_by_window.svg"
+            fig.savefig(vec_path)
+            logger.info("Saved accuracy-by-window plot to %s and %s", fig_path, vec_path)
+        except Exception:
+            # If SVG save fails, at least keep the PNG and log the error
+            logger.exception("Failed to save vectorized SVG for accuracy-by-window plot")
         plt.close()
-
-        logger.info("Saved accuracy-by-window plot to %s", fig_path)
     except Exception:
         logger.exception("Failed to generate accuracy-by-window plot")
+
+
+def evaluate_strategy(  # noqa: ANN201, D103, PLR0913
+        strategy_name: str,
+        strategy: BasicMiner | Fallback | HardVoting | SoftVoting,
+        test_data: list[list[Any]],
+        prediction_vectors_memory: dict[str, list[Any]],
+        logger: logging.Logger,
+        iteration: int,
+        *,
+        debug: bool,
+        compute_prediction_vectors: bool,
+        test_events_arg: int,
+        sec_to_micro_arg: float,
+    ):
+    msg = f"Evaluating {strategy_name}..."
+    logger.info(msg)
+
+    evaluation_time, prediction_vector = strategy.evaluate(
+        test_data,
+        mode="incremental",
+        debug=debug,
+        compute_perplexity=("hard" not in strategy_name and "qlearning" not in strategy_name),
+    )
+    evaluation_time *= sec_to_micro_arg / test_events_arg
+
+    # Store prediction vector for this strategy and iteration (keep ordering across iterations)
+    if compute_prediction_vectors:
+        prediction_vectors_memory.setdefault(strategy_name, []).append(prediction_vector)
+    else:
+        logger.debug(
+            "Skipping storage of prediction vector for strategy '%s' (iteration %d) due to dataset size",
+            strategy_name,
+            iteration + 1,
+        )
+
+    # Print debugging info about the stored prediction vector
+    try:
+        sample = prediction_vector[:10]
+    except (TypeError, AttributeError, IndexError):
+        sample = repr(prediction_vector)[:200]
+    logger.debug(
+        "Stored preds | strategy=%s | iteration=%d | preds_len=%d | sample=%s",
+        strategy_name,
+        iteration + 1,
+        len(prediction_vector) if hasattr(prediction_vector, "__len__") else -1,
+        sample,
+    )
+    logger.debug("prediction_vector repr (first 400 chars): %s", repr(prediction_vector)[:400])
+
+    stats = strategy.stats
+
+    per_state_stats = stats.get("per_state_stats", {})
+    # Convert each value in the dictionary (PerStateStats) to a dict
+    for key, value in per_state_stats.items():
+        per_state_stats[key] = value.to_dict()
+
+    return evaluation_time, stats, per_state_stats, prediction_vectors_memory
+
+
+def baseline_curve(data_name: str) -> list[tuple[int, float]]:
+    """
+    Return a baseline accuracy-by-window curve for reference in plots.
+
+    Currently uses hardcoded values for known datasets.
+    """
+    baseline_data = {
+        "Synthetic111000": [
+            (1, float(2/3 * 100)),
+            (2, float(2/3 * 100)),
+            (3, 100.0),
+            (256, 100.0),
+        ],
+        "Synthetic11100": [
+            (1, 60.0),
+            (2, 80.0),
+            (3, 100.0),
+            (256, 100.0),
+        ],
+        "Random_Decision_win2": [
+            (1, 50.0),
+            (2, float(2/3 * 100)),
+            (3, float(2/3 * 100)),
+            (4, float(5/6 * 100)),
+            (256, float(5/6 * 100)),
+        ],
+        "x1x0": [
+            (1, 50.0),
+            (2, float(7/12 * 100)),
+            (3, float(13/16 * 100)),
+            (4, float(13/16 * 100)),
+            (5, float(7/8 * 100)),
+            (256, float(7/8 * 100)),
+        ],
+        "x10x01": [
+            (1, float(7/12 * 100)),
+            (2, float(7/12 * 100)),
+            (3, float(5/6 * 100)),
+            (4, float(5/6 * 100)),
+            (5, float(7/8 * 100)),
+            (6, float(11/12 * 100)),
+            (256, float(11/12 * 100)),
+        ],
+    }
+    return baseline_data.get(data_name.lower(), [])
+
+
+def sample_datasets(
+    *,
+    data: list[list[Any]],
+    data_test: list[list[Any]],
+    fraction: float,
+    seed: int = 123,
+) -> tuple[list[list[Any]], list[list[Any]]]:
+    """
+    Return sampled copies of `data` and `data_test` using the provided fraction.
+
+    The sampling is deterministic given the `seed` and uses a single RNG
+    instance to mirror previous inline behavior.
+    """
+    if not (0.0 < fraction <= 1.0):
+        msg = "fraction must be in (0.0, 1.0]"
+        raise ValueError(msg)
+    if fraction >= 1.0:
+        return data, data_test
+
+    rng = np.random.default_rng(seed)
+
+    def _sample_list(lst: list[list[Any]]) -> list[list[Any]]:
+        if not lst:
+            return lst
+        n = max(1, int(len(lst) * fraction))
+        idx = rng.choice(len(lst), size=n, replace=False)
+        return [lst[i] for i in sorted(idx)]
+
+    return _sample_list(data), _sample_list(data_test)
+
+
+def persist_state_mining(
+    state_mining_iteration: dict[str, Any], run_results_dir: Path, iteration: int, logger: logging.Logger
+) -> None:
+    """
+    Persist state-mining information for the given iteration.
+
+    Saves to `run_results_dir/state_mining.json` by merging with any existing file.
+    """
+    try:
+        state_mining_path = run_results_dir / "state_mining.json"
+        if state_mining_path.exists():
+            with state_mining_path.open("r") as _f:
+                existing = json.load(_f)
+        else:
+            existing = {}
+
+        existing[f"iteration_{iteration}"] = state_mining_iteration
+
+        with state_mining_path.open("w") as _f:
+            json.dump(existing, _f, indent=2)
+
+        logger.info("Saved state mining info to %s", state_mining_path)
+    except Exception:
+        logger.exception("Failed to write state mining file %s", run_results_dir / "state_mining.json")
