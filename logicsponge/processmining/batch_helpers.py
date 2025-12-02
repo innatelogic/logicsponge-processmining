@@ -634,7 +634,17 @@ def plot_accuracy_by_window(  # noqa: C901, PLR0913, PLR0915
             baseline_sorted = sorted(baseline_curve, key=lambda t: t[0])
             baseline_xs = np.array([t[0] for t in baseline_sorted], dtype=float)
             baseline_ys = np.array([t[1] for t in baseline_sorted], dtype=float)
-            plt.plot(baseline_xs, baseline_ys, marker="o", color="k", linestyle="-", label="Theoretical Best")
+            plt.plot(
+                baseline_xs,
+                baseline_ys,
+                marker="D",
+                markersize=6,
+                markerfacecolor="none",
+                markeredgecolor="k",
+                color="k",
+                linestyle="--",
+                label="Theoretical Best",
+            )
 
         # Use log scale to spread out exponential window sizes (base 2 looks natural for powers-of-two)
         plt.xscale("log", base=2)
@@ -791,7 +801,7 @@ def baseline_curve(data_name: str) -> list[tuple[int, float]]:
             (256, float(11/12 * 100)),
         ],
     }
-    return baseline_data.get(data_name.lower(), [])
+    return baseline_data.get(data_name, [])
 
 
 def sample_datasets(

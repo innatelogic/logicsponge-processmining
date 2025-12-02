@@ -1236,21 +1236,19 @@ save_results_summary(
 )
 
 # Produce accuracy-by-window plot (NGram / Transformer / LSTM)
-try:
-    plot_accuracy_by_window(
+plot_accuracy_by_window(
         all_metrics=all_metrics,
         window_sizes=WINDOW_RANGE,
         run_id=RUN_ID,
         out_dir=run_results_dir,
         logger=logger,
+        baseline_curve=baseline_curve(data_name)
     )
-except Exception:
-    logger.exception("Failed to generate accuracy-by-window plot")
 
 # === Cross-reference table of comparison ratios between all models ===
 build_and_save_comparison_matrices(
     prediction_vectors_memory=prediction_vectors_memory,
     run_id=RUN_ID,
     out_dir=stats_file_path.parent,
-    logger=logger,
+    logger=logger
 )

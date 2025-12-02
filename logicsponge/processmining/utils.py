@@ -916,7 +916,7 @@ def prepare_synthetic_dataset(  # noqa: C901
                 yield ev  # type: ignore  # Event-compatible dict  # noqa: PGH003
 
         dataset = my_iterator_from_csv(entry, csv_row_iterator(save_path))
-        data_name = f"Synthetic_{pattern_str}"
+        data_name = f"Synthetic{pattern_str}"
     except Exception:
         logger.exception("Failed preparing synthetic dataset")
         return None
