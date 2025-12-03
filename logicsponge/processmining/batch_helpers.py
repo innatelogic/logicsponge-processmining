@@ -798,7 +798,31 @@ def baseline_curve(data_name: str) -> list[tuple[int, float]]:
             (4, float(5/6 * 100)),
             (5, float(7/8 * 100)),
             (6, float(11/12 * 100)),
-            (256, float(11/12 * 100)),
+            *[(x, float(11/12 * 100)) for x in [2**(3+i) for i in range(6)]],
+        ],
+        "Interruption_5": [
+            *[
+                (x, compute_interruption_best_acc(interruption_length=5, window_size=x))
+                for x in [2**i for i in range(9)]
+            ]
+        ],
+        "Interruption_10": [
+            *[
+                (x, compute_interruption_best_acc(interruption_length=10, window_size=x))
+                for x in [2**i for i in range(9)]
+            ]
+        ],
+        "Interruption_20": [
+            *[
+                (x, compute_interruption_best_acc(interruption_length=20, window_size=x))
+                for x in [2**i for i in range(9)]
+            ]
+        ],
+        "Interruption_30": [
+            *[
+                (x, compute_interruption_best_acc(interruption_length=30, window_size=x))
+                for x in [2**i for i in range(9)]
+            ]
         ],
     }
     return baseline_data.get(data_name, [])
@@ -859,3 +883,20 @@ def persist_state_mining(
         logger.info("Saved state mining info to %s", state_mining_path)
     except Exception:
         logger.exception("Failed to write state mining file %s", run_results_dir / "state_mining.json")
+
+
+def compute_interruption_best_acc(interruption_length: int, window_size: int) -> float:
+    """Compute the best achievable accuracy for the Interruption dataset."""
+    accuracy = (interruption_length - 3) / interruption_length
+
+    addon_1 = 1 if window_size >= interruption_length + 1 else 0
+
+    addon_2 = 2 * max(0, interruption_length + 1 - min(3, window_size)) / (interruption_length - 1)
+
+    accuracy += (addon_1 + addon_2) / interruption_length
+
+    return float(accuracy * 100.0)
+
+
+if __name__ == "__main__":
+    print(baseline_curve("Interruption_10"))  # noqa: T201
