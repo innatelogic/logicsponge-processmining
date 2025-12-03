@@ -974,25 +974,22 @@ for iteration in range(N_ITERATIONS):
 
     # LSTM + Transformer + RL Evaluation
     # Persist per-iteration state-mining info (NGram top-3 visit rates)
-    try:
-        state_mining_path = run_results_dir / "state_mining.json"
-        if state_mining_path.exists():
-            try:
-                with state_mining_path.open("r") as _f:
-                    existing = json.load(_f)
-            except Exception:  # noqa: BLE001
-                existing = {}
-        else:
-            existing = {}
+    # try:
+    #     state_mining_path = run_results_dir / "state_mining.json"
+    #     if state_mining_path.exists():
+    #         with state_mining_path.open("r") as _f:
+    #             existing = json.load(_f)
+    #     else:
+    #         existing = {}
 
-        existing[f"iteration_{iteration+1}"] = state_mining_iteration
+    #     existing[f"iteration_{iteration+1}"] = state_mining_iteration
 
-        with state_mining_path.open("w") as _f:
-            json.dump(existing, _f, indent=2)
+    #     with state_mining_path.open("w") as _f:
+    #         json.dump(existing, _f, indent=2)
 
-        logger.info("Saved state mining info to %s", state_mining_path)
-    except Exception:
-        logger.exception("Failed to write state mining file %s", run_results_dir / "state_mining.json")
+    #     logger.info("Saved state mining info to %s", state_mining_path)
+    # except Exception:
+    #     logger.exception("Failed to write state mining file %s", run_results_dir / "state_mining.json")
 
     # LSTM + Transformer + RL Evaluation
     if ML_TRAINING:
