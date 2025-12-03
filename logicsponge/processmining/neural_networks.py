@@ -11,6 +11,8 @@ import torch.utils.data
 from torch import nn
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
+import os
+import bisect
 
 from logicsponge.processmining.types import ActivityName, Event
 
@@ -1112,33 +1114,49 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
     # and train on the prefix dataset (one next-token target per prefix). This
     # avoids rebuilding prefixes every epoch and mirrors prefix-style evaluation.
     if window_size is not None:
-        prefixes: list[torch.Tensor] = []
-        targets: list[int] = []
+        # Build an on-the-fly PrefixDataset instead of materializing all prefixes
+        # in Python lists (saves memory for large datasets).
+        seq_counts: list[int] = []
+        total_prefixes = 0
         for i in range(train_sequences.shape[0]):
             seq = train_sequences[i]
             valid_len = int((seq != 0).sum().item())
-            if valid_len < 1:
-                continue
-            for k in range(1, valid_len):
-                prefix = seq[:k].clone()
-                if prefix.numel() > window_size:
-                    prefix = prefix[-window_size:]
-                prefixes.append(prefix)
-                targets.append(int(seq[k].item()))
+            n_pref = max(0, valid_len - 1)
+            seq_counts.append(n_pref)
+            total_prefixes += n_pref
 
-        if not prefixes:
+        if total_prefixes == 0:
             return model
 
-        class PrefixDataset(torch.utils.data.Dataset):
-            def __init__(self, xs: list[torch.Tensor], ys: list[int]) -> None:
-                self.xs = xs
-                self.ys = ys
+        # cumulative counts to map global idx -> (sequence_idx, local_prefix_idx)
+        cumulative: list[int] = []
+        running = 0
+        for c in seq_counts:
+            running += c
+            cumulative.append(running)
+
+        class PrefixDatasetOnTheFly(torch.utils.data.Dataset):
+            def __init__(self, sequences: torch.Tensor, cumulative_counts: list[int], window_size: int) -> None:
+                self.sequences = sequences
+                self.cumulative = cumulative_counts
+                self.window_size = window_size
 
             def __len__(self) -> int:
-                return len(self.xs)
+                return self.cumulative[-1] if self.cumulative else 0
 
             def __getitem__(self, idx: int) -> tuple[torch.Tensor, int]:
-                return self.xs[idx], self.ys[idx]
+                # locate sequence index via bisect
+                seq_idx = bisect.bisect_right(self.cumulative, idx)
+                prev_total = self.cumulative[seq_idx - 1] if seq_idx > 0 else 0
+                local_idx = idx - prev_total  # 0-based within this sequence
+                k = local_idx + 1  # prefix length (prefixes correspond to k=1..valid_len-1)
+
+                seq = self.sequences[seq_idx]
+                prefix = seq[:k].clone()
+                if prefix.numel() > self.window_size:
+                    prefix = prefix[-self.window_size:]
+                target = int(seq[k].item())
+                return prefix, target
 
         def _collate_prefix(batch: list[tuple[torch.Tensor, int]]) -> tuple[torch.Tensor, torch.Tensor]:
             xs = [b[0] for b in batch]
@@ -1147,13 +1165,26 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
             x_pad = _left_pad_stack(xs, target_len=window_size)
             return x_pad, ys
 
-        dataset = PrefixDataset(prefixes, targets)
+        dataset = PrefixDatasetOnTheFly(train_sequences, cumulative, window_size)
+        # performance: use multiple workers where possible and pin memory on CUDA
+        num_workers = min(4, (os.cpu_count() or 1))
+        pin_memory = False
+        if model_device is not None and isinstance(model_device, torch.device) and getattr(model_device, "type", None) == "cuda":
+            pin_memory = True
+
         dataloader = torch.utils.data.DataLoader(
-            dataset, batch_size=batch_size, shuffle=True, collate_fn=_collate_prefix
+            dataset, batch_size=batch_size, shuffle=True, collate_fn=_collate_prefix, num_workers=num_workers, pin_memory=pin_memory
         )
     else:
         dataset = torch.utils.data.TensorDataset(train_sequences)  # Create dataset
-        dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)  # Create dataloader
+        # performance: use multiple workers where possible and pin memory on CUDA
+        num_workers = min(4, (os.cpu_count() or 1))
+        pin_memory = False
+        if model_device is not None and isinstance(model_device, torch.device) and getattr(model_device, "type", None) == "cuda":
+            pin_memory = True
+        dataloader = torch.utils.data.DataLoader(
+            dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_memory
+        )  # Create dataloader
 
     best_val_accuracy = 0.0
     best_model_state = None
