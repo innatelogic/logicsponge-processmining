@@ -1,4 +1,5 @@
 logicsponge
+-e .
 
 aalpy
 dash_cytoscape
@@ -15,3 +16,6 @@ numpy
 sortedcontainers
 
 torch
+seaborn
+tabulate
+
