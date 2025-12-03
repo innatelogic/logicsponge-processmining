@@ -548,7 +548,7 @@ class LSTMModel(nn.Module):
                     c2 = c2.to(self.device)
                 hidden = ((h1, c1), (h2, c2))
             # If combined (h_all, c_all) from multi-layer LSTM, split into two
-            elif len(hidden) == 2 and isinstance(hidden[0], torch.Tensor) and hidden[0].dim() == 3:
+            elif len(hidden) == 2 and isinstance(hidden[0], torch.Tensor) and hidden[0].dim() == 3: # type: ignore
                 h_all, c_all = hidden
                 # split first dim into two single-layer tensors
                 h1 = h_all[0:1].to(self.device) # type: ignore  # noqa: PGH003
@@ -1110,6 +1110,7 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
 
     Returns the trained model.
     """
+    model_device = getattr(model, "device", None)  # Get model's device once (robust)
     # Build dataloader. If window_size is set we precompute ALL prefixes once
     # and train on the prefix dataset (one next-token target per prefix). This
     # avoids rebuilding prefixes every epoch and mirrors prefix-style evaluation.
@@ -1189,7 +1190,6 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
     best_val_accuracy = 0.0
     best_model_state = None
     patience_counter = 0
-    model_device = getattr(model, "device", None)  # Get model's device once (robust)
 
     for epoch in range(epochs):
         model.train()

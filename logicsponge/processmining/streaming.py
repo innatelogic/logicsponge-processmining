@@ -39,7 +39,24 @@ class IteratorStreamer(ls.SourceTerm):
 
     def generate(self) -> Iterator[DataItem]:
         """Generate data items from the iterator."""
-        return self.data_iterator
+        for item in self.data_iterator:
+            # Normalize to DataItem instances. Many data sources yield dicts or
+            # pandas.Series; ensure the flow_backend always receives DataItem.
+            if isinstance(item, DataItem):
+                yield item
+            elif isinstance(item, dict):
+                yield DataItem(item)
+            else:
+                # Try common conversion (pandas.Series has to_dict)
+                try:
+                    d = item.to_dict()  # type: ignore[attr-defined]
+                    if isinstance(d, dict):
+                        yield DataItem(d)
+                        continue
+                except Exception:
+                    pass
+                # Fallback: wrap non-dict value into a single-key DataItem
+                yield DataItem({"value": item})
 
 class AddStartSymbol(ls.FunctionTerm):
     """
