@@ -419,6 +419,19 @@ else:
     data_name, dataset, dataset_test_opt = resolve_dataset_from_args(_args)
 dataset_test = dataset_test_opt if dataset_test_opt is not None else dataset
 
+# Fraction of dataset to use (1.0 == full dataset). This value comes from the
+# shared CLI parser (`--data_prop`) and allows quick experiments on a subset
+# by keeping the first `data_prop` fraction of sequences.
+data_prop = getattr(_args, "data_prop", 1.0)
+try:
+    data_prop = float(data_prop)
+except ValueError:
+    logger.exception("Invalid --data_prop value %r; defaulting to 1.0", data_prop)
+    data_prop = 1.0
+if not (0.0 < data_prop <= 1.0):
+    logger.warning("--data_prop should be in (0,1]; got %s. Using 1.0 instead.", data_prop)
+    data_prop = 1.0
+
 RUN_ID = time.strftime("%Y-%m-%d_%H-%M", time.localtime()) + f"_{data_name}"
 stats_to_log = []
 
@@ -486,9 +499,31 @@ torch.backends.cudnn.benchmark = False
 
 nn_processor = PreprocessData()
 data = transform_to_seqs(dataset)
+# If requested, keep only the first `data_prop` fraction of the dataset (by
+# sequences). This is done after `transform_to_seqs` since that groups events
+# into sequences and makes slicing straightforward.
+if data_prop < 1.0:
+    total_cases = len(data)
+    keep = max(1, int(total_cases * data_prop))
+    logger.info(
+        "Applying data_prop=%.3f: keeping %d/%d sequences for dataset '%s'", data_prop, keep, total_cases, data_name
+    )
+    data = data[:keep]
+
 n_activities, max_seq_length = data_statistics(data)
 
 data_test = transform_to_seqs(dataset_test)
+if data_prop < 1.0 and data_test is not None:
+    total_cases_test = len(data_test)
+    keep_test = max(1, int(total_cases_test * data_prop))
+    logger.info(
+        "Applying data_prop=%.3f: keeping %d/%d sequences for test dataset '%s'",
+        data_prop,
+        keep_test,
+        total_cases_test,
+        data_name,
+    )
+    data_test = data_test[:keep_test]
 
 # ============================================================
 # Should at least be n_activities + 2 (for START and STOP)

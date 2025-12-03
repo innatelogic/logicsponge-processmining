@@ -721,6 +721,13 @@ def build_cli_parser() -> argparse.ArgumentParser:
         default=None,
         help="Dataset name to use (e.g. 'Sepsis_Cases', 'Helpdesk', 'BPI_Challenge_2013').",
     )
+    parser.add_argument(
+        "--data_prop",
+        dest="data_prop",
+        type=float,
+        default=1.0,
+        help="Fraction of the dataset to use (float in (0,1], default 1.0)."
+    )
     return parser
 
 
