@@ -930,10 +930,6 @@ all_attributes = [
 
 streamer = IteratorStreamer(data_iterator=dataset)
 
-# streamer = SynInfiniteStreamer(max_prefix_length=10)
-# streamer = InfiniteDiscriminerSource()
-# streamer = CustomStreamer(sequence = SELECTED_PATTERN)
-
 def start_filter(item: DataItem) -> bool:
     """Filter function to check if the activity is not the start symbol."""
     return item["activity"] != start_symbol
@@ -1121,11 +1117,6 @@ if RL_TRAINING and ML_TRAINING:
                 )
                 * Evaluation(RL_BASELINE_LINEAR_NAME)
             )
-
-# `set_history_bound` is a method on DataStream. The source term `streamer`
-# exposes its output DataStream as `_output` (see SourceTerm in logicsponge).
-# Call the method on that DataStream instance.
-streamer._output.set_history_bound(ls.NumberBound(1))  # noqa: SLF001
 
 # Assemble the full sponge
 sponge = (

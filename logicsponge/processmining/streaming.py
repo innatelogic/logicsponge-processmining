@@ -5,7 +5,7 @@ import logging
 import random
 import time
 import typing
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
@@ -37,196 +37,54 @@ class IteratorStreamer(ls.SourceTerm):
         super().__init__(*args, **kwargs)
         self.data_iterator = data_iterator
 
-    def run(self) -> None:
-        """Run the IteratorStreamer."""
-        while True:
-            for event in self.data_iterator:
-                case_id = event["case_id"]
-                activity = event["activity"]
-                timestamp = event["timestamp"]
-
-                out = DataItem(
-                    {
-                        "case_id": case_id,
-                        "activity": activity,
-                        "timestamp": timestamp,
-                    }
-                )
-                self.output(out)
-
-            # repeatedly sleep if done
-            time.sleep(10)
-
-class SynInfiniteStreamer(ls.SourceTerm):
-    """For streaming synthetic infinite data."""
-
-    def __init__(self, *args: dict, max_prefix_length: int = 5, **kwargs: dict) -> None:
-        """Create an IteratorStreamer."""
-        super().__init__(*args, **kwargs)
-        self.max_prefix_length = max_prefix_length
-
-
-    def run(self) -> None:
-        """Run the IteratorStreamer."""
-        while True:
-            prefix_length = random.randint(1, self.max_prefix_length)
-            for i in range(prefix_length, 1, -1):
-                case_id = f"case_{0}"
-                activity = f"act_{i}"
-                timestamp = pd.Timestamp.now()
-
-                out = DataItem(
-                    {
-                        "case_id": case_id,
-                        "activity": activity,
-                        "timestamp": timestamp,
-                    }
-                )
-                self.output(out)
-            # repeatedly sleep if done
-            time.sleep(0.1)
-
-
-
-
-class CustomStreamer(ls.SourceTerm):
-    """For streaming synthetic infinite data."""
-
-    def __init__(self, *args: dict, sequence: list[int], **kwargs: dict) -> None:
-        """Create an IteratorStreamer."""
-        super().__init__(*args, **kwargs)
-        self.sequence = sequence
-
-    def run(self) -> None:
-        """Run the IteratorStreamer."""
-        while True:
-            for i in self.sequence:
-                out = DataItem(
-                    {
-                        "case_id": "case_0",
-                        "activity": f"act_{i}",
-                        "timestamp": pd.Timestamp.now(),
-                    }
-                )
-                self.output(out)
-
-                time.sleep(0.01)
-
-class InfiniteDiscriminerSource(ls.SourceTerm):
-    """For streaming synthetic infinite data."""
-
-    def __init__(self, *args: dict, **kwargs: dict) -> None:
-        """Create an IteratorStreamer."""
-        super().__init__(*args, **kwargs)
-
-
-    def run(self) -> None:
-        """Run the IteratorStreamer."""
-        while True:
-            marker01 = random.choice([0, 1])
-
-            out = DataItem(
-                {
-                    "case_id": "case_23",
-                    "activity": f"act_{marker01}",
-                    "timestamp": pd.Timestamp.now(),
-                }
-            )
-            self.output(out)
-
-            out = DataItem(
-                {
-                    "case_id": "case_23",
-                    "activity": f"act_{marker01}",
-                    "timestamp": pd.Timestamp.now(),
-                }
-            )
-            self.output(out)
-
-            out = DataItem(
-                {
-                    "case_id": "case_23",
-                    "activity": f"act_{(marker01+1)%2}",
-                    "timestamp": pd.Timestamp.now(),
-                }
-            )
-            self.output(out)
-
-            time.sleep(0.2)
-
-
-
-            marker012 = random.choice([0, 1, 2])
-
-            out = DataItem(
-                {
-                    "case_id": "case_34",
-                    "activity": f"act_{marker012}",
-                    "timestamp": pd.Timestamp.now(),
-                }
-            )
-            self.output(out)
-
-            out = DataItem(
-                {
-                    "case_id": "case_34",
-                    "activity": f"act_{marker012}",
-                    "timestamp": pd.Timestamp.now(),
-                }
-            )
-            self.output(out)
-
-            remaining012 = [i for i in [0, 1, 2] if i != marker012]
-            random012 = random.choice(remaining012)
-            last012 = next(i for i in remaining012 if i != random012)
-
-            out = DataItem(
-                {
-                    "case_id": "case_34",
-                    "activity": f"act_{random012}",
-                    "timestamp": pd.Timestamp.now(),
-                }
-            )
-            self.output(out)
-
-            out = DataItem(
-                {
-                    "case_id": "case_34",
-                    "activity": f"act_{last012}",
-                    "timestamp": pd.Timestamp.now(),
-                }
-            )
-            self.output(out)
-
-            time.sleep(0.1)
-
+    def generate(self) -> Iterator[DataItem]:
+        """Generate data items from the iterator."""
+        return self.data_iterator
 
 class AddStartSymbol(ls.FunctionTerm):
-    """For streaming from list."""
+    """
+    For streaming from list.
+
+    Emits a start symbol before the first event of each case. Because `f()` is
+    only allowed to return a single `DataItem` (or `None`), this term keeps a
+    tiny internal buffer to hold the original event when it needs to emit the
+    start symbol first.
+    """
 
     def __init__(self, *args: dict, start_symbol: ActivityName, **kwargs: dict) -> None:
         """Initialize AddStartSymbol."""
         super().__init__(*args, **kwargs)
         self.case_ids = set()
         self.start_symbol = start_symbol
+        self._buffer: deque[DataItem] = deque()
 
-    def run(self, ds_view: ls.DataStreamView) -> None:
-        """Run the AddStartSymbol function."""
-        while True:
-            ds_view.next()
-            item = ds_view[-1]
-            case_id = item["case_id"]
+    def f(self, di: DataItem) -> DataItem | None:
+        """Return at most one DataItem. Use internal buffer to emit start symbol before event."""
+        # If we have a pending item from a previous call, emit it now and
+        # process the current item into the buffer for the following calls.
+        if self._buffer:
+            to_emit = self._buffer.popleft()
+            case_id = di["case_id"]
             if case_id not in self.case_ids:
-                out = DataItem(
-                    {
-                        "case_id": case_id,
-                        "activity": self.start_symbol,
-                        "timestamp": None,
-                    }
-                )
-                self.output(out)
+                start = DataItem({"case_id": case_id, "activity": self.start_symbol, "timestamp": None})
+                # ensure the start symbol is emitted before the original di
+                self._buffer.append(start)
+                self._buffer.append(di)
                 self.case_ids.add(case_id)
-            self.output(item)
+            else:
+                self._buffer.append(di)
+            return to_emit
+
+        # No pending item: decide what to emit for the current di
+        case_id = di["case_id"]
+        if case_id not in self.case_ids:
+            start = DataItem({"case_id": case_id, "activity": self.start_symbol, "timestamp": None})
+            # buffer the original so it follows the start symbol
+            self._buffer.append(di)
+            self.case_ids.add(case_id)
+            return start
+
+        return di
 
 
 class DataPreparation(ls.FunctionTerm):
@@ -238,7 +96,7 @@ class DataPreparation(ls.FunctionTerm):
         self.case_keys = case_keys
         self.activity_keys = activity_keys
 
-    def f(self, item: DataItem) -> DataItem:
+    def f(self, di: DataItem) -> DataItem:
         """
         Process the input DataItem to output a new DataItem containing only case and activity keys.
 
@@ -247,7 +105,7 @@ class DataPreparation(ls.FunctionTerm):
         """
         # Construct the new DataItem with case_id and activity values
         return DataItem(
-            {"case_id": handle_keys(self.case_keys, item), "activity": handle_keys(self.activity_keys, item)}  # type: ignore # noqa: PGH003
+            {"case_id": handle_keys(self.case_keys, di), "activity": handle_keys(self.activity_keys, di)}  # type: ignore # noqa: PGH003
         )
 
 
@@ -265,69 +123,58 @@ class StreamingActivityPredictor(ls.FunctionTerm):
         # self.case_ids = set()
         self.last_timestamps = {}  # records last timestamps
 
-    def run(self, ds_view: ls.DataStreamView) -> None:
-        """Run the StreamingActivityPredictor."""
-        while True:
-            ds_view.next()
-            item = ds_view[-1]
-            case_id = item["case_id"]
+    def f(self, di: DataItem) -> DataItem:
+        """Process a single DataItem: compute prediction, update model, and return enriched DataItem."""
+        case_id = di["case_id"]
 
-            start_time = time.time()
-            metrics = self.strategy.case_metrics(case_id)
-            prediction = metrics_prediction(metrics, self.strategy.config)
-            predict_latency = time.time() - start_time  # time taken to compute prediction
+        start_time = time.time()
+        metrics = self.strategy.case_metrics(case_id)
+        prediction = metrics_prediction(metrics, self.strategy.config)
+        predict_latency = time.time() - start_time  # time taken to compute prediction
 
-            # pause_time = time.time()
-            # likelihood = self.strategy.state_act_likelihood(metrics["state_id"], item["activity"])
-            # start_time += time.time() - pause_time  # Adjust start time to account for the pause
+        start_time_training = time.time()
+        event: Event = {
+            "case_id": di["case_id"],
+            "activity": di["activity"],
+            "timestamp": di.get("timestamp"),
+        }
 
-            # prediction = self.strategy.case_predictions.get(item["case_id"], None)
+        self.strategy.update(event)
+        training_latency = time.time() - start_time_training  # time taken to update the model
 
-            start_time_training = time.time()
-            event: Event = {
-                "case_id": item["case_id"],
-                "activity": item["activity"],
-                "timestamp": item["timestamp"],
+        end_time = time.time()
+        latency = (end_time - start_time) * 1000  # latency in milliseconds (ms)
+
+        if (
+            prediction
+            and di.get("timestamp")
+            and self.last_timestamps.get(di["case_id"], None)
+            and di["activity"] in (prediction.get("predicted_delays") or {})
+        ):
+            predicted_delay = prediction["predicted_delays"][di["activity"]]
+            actual_delay = di["timestamp"] - self.last_timestamps[di["case_id"]]
+            delay_error = abs(predicted_delay - actual_delay)
+        else:
+            actual_delay = None
+            delay_error = None
+            predicted_delay = None
+
+        self.last_timestamps[di["case_id"]] = di.get("timestamp")
+
+        return DataItem(
+            {
+                "case_id": di["case_id"],
+                "activity": di["activity"],  # actual activity
+                "prediction": prediction,  # containing predicted activity
+                "likelihood": 0.0,
+                "latency": latency,
+                "predict_latency": predict_latency * 1_000_000,
+                "train_latency": training_latency * 1_000_000,
+                "delay_error": delay_error,
+                "actual_delay": actual_delay,
+                "predicted_delay": predicted_delay,
             }
-
-            self.strategy.update(event)
-            training_latency = time.time() - start_time_training  # time taken to update the model
-
-            end_time = time.time()
-            latency = (end_time - start_time) * 1000  # latency in milliseconds (ms)
-
-            if (
-                prediction
-                and item["timestamp"]
-                and self.last_timestamps.get(item["case_id"], None)
-                and item["case_id"] in self.last_timestamps
-                and item["activity"] in prediction["predicted_delays"]
-            ):
-                predicted_delay = prediction["predicted_delays"][item["activity"]]
-                actual_delay = item["timestamp"] - self.last_timestamps[item["case_id"]]
-                delay_error = abs(predicted_delay - actual_delay)
-            else:
-                actual_delay = None
-                delay_error = None
-                predicted_delay = None
-
-            self.last_timestamps[item["case_id"]] = item["timestamp"]
-
-            out = DataItem(
-                {
-                    "case_id": item["case_id"],
-                    "activity": item["activity"],  # actual activity
-                    "prediction": prediction,  # containing predicted activity
-                    "likelihood": 0.0,
-                    "latency": latency,
-                    "predict_latency": predict_latency * 1_000_000,
-                    "train_latency": training_latency * 1_000_000,
-                    "delay_error": delay_error,
-                    "actual_delay": actual_delay,
-                    "predicted_delay": predicted_delay,
-                }
-            )
-            self.output(out)
+        )
 
 
 class Evaluation(ls.FunctionTerm):
@@ -358,36 +205,36 @@ class Evaluation(ls.FunctionTerm):
         self.sequence_lengths: dict[int, int] = {}
         # self.perplexities: dict[int, float] = {}
 
-    def f(self, item: DataItem) -> DataItem:
-        if item["case_id"] not in self.sequence_lengths:
-            self.sequence_lengths[item["case_id"]] = 0
-            self.likelihoods[item["case_id"]] = 0.0
+    def f(self, di: DataItem) -> DataItem:
+        """Process incoming DataItem and update evaluation metrics."""
+        if di["case_id"] not in self.sequence_lengths:
+            self.sequence_lengths[di["case_id"]] = 0
+            self.likelihoods[di["case_id"]] = 0.0
 
-        self.likelihoods[item["case_id"]] *= item["likelihood"]
-        self.sequence_lengths[item["case_id"]] += 1
+        self.likelihoods[di["case_id"]] *= di["likelihood"]
+        self.sequence_lengths[di["case_id"]] += 1
 
         # # Compute perplexity
-        # normalized_likelihood = self.likelihoods[item["case_id"]] ** (1 / self.sequence_lengths[item["case_id"]])
-        # self.perplexities[item["case_id"]] = compute_seq_perplexity(normalized_likelihood, log_likelihood=False)
+        # normalized_likelihood = self.likelihoods[di["case_id"]] ** (1 / self.sequence_lengths[di["case_id"]])
+        # self.perplexities[di["case_id"]] = compute_seq_perplexity(normalized_likelihood, log_likelihood=False)
 
         # perplexity_stats = compute_perplexity_stats(list(self.perplexities.values()))
 
-        self.latency_sum += item["latency"]
-        self.latency_max = max(item["latency"], self.latency_max)
+        self.latency_sum += di["latency"]
+        self.latency_max = max(di["latency"], self.latency_max)
 
-        self.predict_latency_sum += item["predict_latency"]
-        self.train_latency_sum += item["train_latency"]
-
-        if item["prediction"] is None:
+        self.predict_latency_sum += di["predict_latency"]
+        self.train_latency_sum += di["train_latency"]
+        if di["prediction"] is None:
             self.missing_predictions += 1
         else:
             if (
-                (self.top_activities and item["activity"] in item["prediction"]["top_k_activities"])
-                or item["activity"] == item["prediction"]["activity"]
+                (self.top_activities and di["activity"] in di["prediction"]["top_k_activities"])
+                or di["activity"] == di["prediction"]["activity"]
             ):
                 self.correct_predictions += 1
 
-            if item["activity"] in item["prediction"]["top_k_activities"]:
+            if di["activity"] in di["prediction"]["top_k_activities"]:
                 self.top_k_correct_preds += 1
 
         self.total_predictions += 1
@@ -422,9 +269,9 @@ class Evaluation(ls.FunctionTerm):
         # )
         # #########
 
-        actual_delay = item["actual_delay"]
-        delay_error = item["delay_error"]
-        predicted_delay = item["predicted_delay"]
+        actual_delay = di["actual_delay"]
+        delay_error = di["delay_error"]
+        predicted_delay = di["predicted_delay"]
 
         if actual_delay is not None and delay_error is not None:
             self.delay_count += 1
@@ -452,7 +299,7 @@ class Evaluation(ls.FunctionTerm):
 
         return DataItem(
             {
-                "prediction": item["prediction"],
+                "prediction": di["prediction"],
                 "correct_predictions": self.correct_predictions,
                 "total_predictions": self.total_predictions,
                 "missing_predictions": self.missing_predictions,
@@ -516,8 +363,8 @@ def eval_to_table(data: dict | ls.DataItem) -> pd.DataFrame:
 class PrintEval(ls.FunctionTerm):
     """Add to table and show the table."""
 
-    def f(self, item: ls.DataItem) -> None:
-        table = eval_to_table(item)
+    def f(self, di: ls.DataItem) -> None:
+        table = eval_to_table(di)
         logger.info(table)
 
 
@@ -530,7 +377,7 @@ class CSVStatsWriter(ls.FunctionTerm):
     optionally adding a batch index from the DataItem.
     """
 
-    def __init__(
+    def __init__(  # noqa: D417
             self, *args: dict,
             csv_path: Path, append: bool = True, batch_index_col_name: str = "batch_index",
             **kwargs: dict
@@ -550,15 +397,15 @@ class CSVStatsWriter(ls.FunctionTerm):
         self.append = append
         self.batch_index_col_name = batch_index_col_name
 
-    def f(self, item: ls.DataItem) -> ls.DataItem:
+    def f(self, di: ls.DataItem) -> ls.DataItem:
         """Process incoming DataItem, generate DataFrame, and write stats to CSV."""
         # Generate DataFrame using eval_to_table (assuming eval_to_table is accessible)
         # This function is defined in the same file, so it should be accessible.
-        df_to_save = eval_to_table(item)
+        df_to_save = eval_to_table(di)
 
         if not isinstance(df_to_save, pd.DataFrame) or df_to_save.empty:
             # logger.info("DataFrame from eval_to_table is empty or not a DataFrame. Nothing to write to CSV.")
-            return item  # Return original item if no DataFrame to save
+            return di  # Return original di if no DataFrame to save
 
         # Prepare records from DataFrame
         records_to_write = df_to_save.to_dict("records")
@@ -567,7 +414,7 @@ class CSVStatsWriter(ls.FunctionTerm):
         final_fieldnames = df_to_save.columns.tolist()
 
         # Add batch index from the original DataItem if present
-        batch_idx = item.get("index")  # 'index' is typically added by ls.AddIndex
+        batch_idx = di.get("index")  # 'index' is typically added by ls.AddIndex
 
         if batch_idx is not None:
             # Add batch index column name to fieldnames if not already there (e.g., from df_to_save)
@@ -579,7 +426,7 @@ class CSVStatsWriter(ls.FunctionTerm):
                 record[self.batch_index_col_name] = batch_idx
 
         if not records_to_write:  # Should be caught by df_to_save.empty check
-            return item
+            return di
 
         # Determine file mode and if header needs to be written
         file_exists = self.csv_path.is_file()
@@ -613,7 +460,7 @@ class CSVStatsWriter(ls.FunctionTerm):
             )
 
         # Return the original DataItem, allowing it to continue in the pipeline
-        return item
+        return di
 
 
 class PredictionCSVWriter(ls.FunctionTerm):
@@ -630,18 +477,21 @@ class PredictionCSVWriter(ls.FunctionTerm):
     - correct: 1 if predicted == actual else 0 (only when predicted available)
     """
 
-    def __init__(self, *args, csv_path: Path, model_name: str, append: bool = True, **kwargs):
+    def __init__(
+            self, *args, csv_path: Path, model_name: str, append: bool = True, **kwargs
+        ) -> None:
+        """Initialize the PredictionCSVWriter."""
         super().__init__(*args, **kwargs)
         self.csv_path = csv_path
         self.model_name = model_name
         self.append = append
         self._step_counter = 0
 
-    def f(self, item: DataItem) -> DataItem:
+    def f(self, di: DataItem) -> DataItem:
         self._step_counter += 1
 
-        actual = item.get("activity")
-        prediction = item.get("prediction")
+        actual = di.get("activity")
+        prediction = di.get("prediction")
         predicted_act = None
         top_k = None
         correct = None
@@ -655,8 +505,8 @@ class PredictionCSVWriter(ls.FunctionTerm):
 
         row = {
             "step": self._step_counter,
-            "case_id": item.get("case_id"),
-            "timestamp": item.get("timestamp"),
+            "case_id": di.get("case_id"),
+            "timestamp": di.get("timestamp"),
             "actual": actual,
             "predicted": predicted_act,
             "top_k": top_k,
@@ -673,7 +523,7 @@ class PredictionCSVWriter(ls.FunctionTerm):
                 writer.writeheader()
             writer.writerow(row)
 
-        return item
+        return di
 
 
 class ActualCSVWriter(ls.FunctionTerm):
@@ -691,14 +541,14 @@ class ActualCSVWriter(ls.FunctionTerm):
         self.append = append
         self._step_counter = 0
 
-    def f(self, item: DataItem) -> DataItem:
+    def f(self, di: DataItem) -> DataItem:
         """Process incoming DataItem and write actual activity to CSV."""
         self._step_counter += 1
         row = {
             "step": self._step_counter,
-            "case_id": item.get("case_id"),
-            "timestamp": item.get("timestamp"),
-            "actual": item.get("activity"),
+            "case_id": di.get("case_id"),
+            "timestamp": di.get("timestamp"),
+            "actual": di.get("activity"),
         }
 
         self.csv_path.parent.mkdir(parents=True, exist_ok=True)
@@ -709,7 +559,7 @@ class ActualCSVWriter(ls.FunctionTerm):
                 writer.writeheader()
             writer.writerow(row)
 
-        return item
+        return di
 
 
 class StreamAlteration(ls.FunctionTerm):
@@ -725,9 +575,9 @@ class StreamAlteration(ls.FunctionTerm):
 
     Behavior
     - switch: let A1 and A2 be the two most frequent activities observed since alteration_start; swap A1<->A2.
-    - insert: insert a new activity named 'A_new' BEFORE the arriving item.
-    - split: if arriving item is A1, emit it and then insert a new activity 'A1_post' AFTER it.
-    - delete: if arriving item is A1, drop it; otherwise pass through.
+    - insert: insert a new activity named 'A_new' BEFORE the arriving di.
+    - split: if arriving di is A1, emit it and then insert a new activity 'A1_post' AFTER it.
+    - delete: if arriving di is A1, drop it; otherwise pass through.
 
     Notes
     -----
@@ -774,6 +624,7 @@ class StreamAlteration(ls.FunctionTerm):
         self._last_logged_top: tuple[str | None, str | None] | None = None
         # total number of data items actually altered (switch/insert/split/delete)
         self._altered_count = 0
+        self._buffer: deque[DataItem] = deque()
 
         logger.info(
             "StreamAlteration initialized: type=%s rate=%.3f start=%d transition=%d",
@@ -831,155 +682,162 @@ class StreamAlteration(ls.FunctionTerm):
                 )
                 self._last_logged_top = current_top
 
-    def run(self, ds_view: ls.DataStreamView) -> None:
-        """Run the stream alteration process."""
-        while True:
-            ds_view.next()
-            item = ds_view[-1]
-            self._step_counter += 1
+    def f(self, di: DataItem) -> DataItem | None:
+        """
+        Process a single DataItem and return at most one DataItem (or None).
 
-            # Log first step at or after alteration_start
-            if (not self._started_logged) and self._step_counter >= self.alteration_start:
-                logger.info(
-                    "StreamAlteration started at step=%d (type=%s, transition=%d, rate=%.3f)",
-                    self._step_counter,
-                    self.alteration_type,
-                    self.transition,
-                    self.rate,
-                )
-                self._started_logged = True
+        Internally uses a small buffer to hold the next item(s) when an
+        alteration requires emitting more than one logical item for a single
+        incoming event (e.g. insert/split semantics).
+        """
+        self._step_counter += 1
 
-            # Update frequencies with the current observed activity (since alteration_start)
-            act = item.get("activity")
-            if isinstance(act, str):
-                self._update_frequencies(act)
+        # Log first step at or after alteration_start
+        if (not self._started_logged) and self._step_counter >= self.alteration_start:
+            logger.info(
+                "StreamAlteration started at step=%d (type=%s, transition=%d, rate=%.3f)",
+                self._step_counter,
+                self.alteration_type,
+                self.transition,
+                self.rate,
+            )
+            self._started_logged = True
 
-            # Decide whether to apply alteration for this event
+        act = di.get("activity")
+        if isinstance(act, str):
+            self._update_frequencies(act)
+
+        def _buffer_current(item: DataItem) -> None:
+            """Decide alteration for `item` and append resulting logical outputs to buffer."""
+            # If the alteration should not apply, queue the original item
             if not self._should_apply():
-                # pass-through
-                self.output(item)
-                logger.debug(
-                    "StreamAlteration pass-through at step=%d case_id=%s activity=%s (no alteration applied)",
-                    self._step_counter,
-                    item.get("case_id"),
-                    act,
-                )
-                continue
+                self._buffer.append(item)
+                return
 
-            # Apply alteration based on the selected type
+            # Apply alteration by appending to buffer rather than emitting
             if self.alteration_type == "switch":
                 a1, a2 = self._top_a1, self._top_a2
-                if a1 is not None and a2 is not None and isinstance(act, str):
-                    if act == a1:
-                        logger.debug(
-                            "StreamAlteration switch applied step=%d case_id=%s from=%s to=%s",
-                            self._step_counter,
-                            item.get("case_id"),
-                            a1,
-                            a2,
-                        )
-                        self.output(DataItem({**item, "activity": a2}))
-                        # count and log alteration
+                if a1 is not None and a2 is not None and isinstance(item.get("activity"), str):
+                    if item.get("activity") == a1:
+                        self._buffer.append(DataItem({**item, "activity": a2}))
                         self._altered_count += 1
                         logger.info(
                             "StreamAlteration total_altered=%d (switch at step=%d)",
                             self._altered_count, self._step_counter
                         )
-                        continue
-                    if act == a2:
-                        logger.debug(
-                            "StreamAlteration switch applied step=%d case_id=%s from=%s to=%s",
-                            self._step_counter,
-                            item.get("case_id"),
-                            a2,
-                            a1,
-                        )
-                        self.output(DataItem({**item, "activity": a1}))
-                        # count and log alteration
+                        return
+                    if item.get("activity") == a2:
+                        self._buffer.append(DataItem({**item, "activity": a1}))
                         self._altered_count += 1
                         logger.info(
                             "StreamAlteration total_altered=%d (switch at step=%d)",
                             self._altered_count, self._step_counter
                         )
-                        continue
-                # if no top-2 yet or activity is different, pass-through
-                self.output(item)
+                        return
+                # fallback to no-op
+                self._buffer.append(item)
 
             elif self.alteration_type == "insert":
-                # Insert before current item
-                try:
-                    pre = DataItem({
-                        "case_id": item.get("case_id"),
-                        "activity": "A_new",
-                        "timestamp": None,
-                    })
-                    logger.debug(
-                        "StreamAlteration insert applied step=%d case_id=%s inserted=%s before=%s",
-                        self._step_counter,
-                        item.get("case_id"),
-                        pre.get("activity"),
-                        act,
-                    )
-                    self.output(pre)
-                    # count and log alteration
-                    self._altered_count += 1
-                    logger.info(
-                        "StreamAlteration total_altered=%d (insert at step=%d)", self._altered_count, self._step_counter
-                    )
-                except Exception:
-                    # If anything goes wrong, fall back to no-pre insert
-                    logger.exception("StreamAlteration: failed to create pre-insert event; skipping insert")
-                self.output(item)
+                pre = DataItem({"case_id": item.get("case_id"), "activity": "A_new", "timestamp": None})
+                self._buffer.append(pre)
+                self._buffer.append(item)
+                self._altered_count += 1
+                logger.info(
+                    "StreamAlteration total_altered=%d (insert at step=%d)", self._altered_count, self._step_counter
+                )
 
             elif self.alteration_type == "split":
                 a1 = self._top_a1
-                if a1 is not None and isinstance(act, str) and act == a1:
-                    # emit original, then post item
-                    self.output(item)
-                    post = DataItem({
-                        "case_id": item.get("case_id"),
-                        "activity": f"{a1}_post",
-                        "timestamp": None,
-                    })
-                    logger.info(
-                        "StreamAlteration split applied step=%d case_id=%s original=%s inserted=%s",
-                        self._step_counter,
-                        item.get("case_id"),
-                        act,
-                        post.get("activity"),
-                    )
-                    self.output(post)
-                    # count and log alteration
+                if a1 is not None and isinstance(item.get("activity"), str) and item.get("activity") == a1:
+                    post = DataItem({"case_id": item.get("case_id"), "activity": f"{a1}_post", "timestamp": None})
+                    self._buffer.append(item)
+                    self._buffer.append(post)
                     self._altered_count += 1
                     logger.info(
-                        "StreamAlteration total_altered=%d (split at step=%d)",
-                        self._altered_count, self._step_counter
+                        "StreamAlteration total_altered=%d (split at step=%d)", self._altered_count, self._step_counter
                     )
                 else:
-                    self.output(item)
+                    self._buffer.append(item)
 
             elif self.alteration_type == "delete":
                 a1 = self._top_a1
-                if a1 is not None and isinstance(act, str) and act == a1:
-                    # drop the event
-                    logger.info(
-                        "StreamAlteration delete applied step=%d case_id=%s activity=%s dropped",
-                        self._step_counter,
-                        item.get("case_id"),
-                        act,
-                    )
-                    # count and log alteration
+                if a1 is not None and isinstance(item.get("activity"), str) and item.get("activity") == a1:
                     self._altered_count += 1
                     logger.info(
-                        "StreamAlteration total_altered=%d (delete at step=%d)",
-                        self._altered_count, self._step_counter
+                        "StreamAlteration total_altered=%d (delete at step=%d)", self._altered_count, self._step_counter
                     )
-                    continue
-                self.output(item)
+                    # do not append anything -> effectively drop
+                    return
+                self._buffer.append(item)
 
             else:
-                # Unknown type (shouldn't happen due to validation)
-                self.output(item)
+                self._buffer.append(item)
+
+        # If there is a pending item to emit (from previous processing), emit it
+        # and process the current incoming item into the buffer for later.
+        if self._buffer:
+            to_emit = self._buffer.popleft()
+            _buffer_current(di)
+            return to_emit
+
+        # No pending items: decide what to emit now (may also buffer follow-ups)
+        # If alteration does not apply, just return the item
+        if not self._should_apply():
+            return di
+
+        # Alteration should apply and buffer is empty -> we can emit one item now
+        if self.alteration_type == "switch":
+            a1, a2 = self._top_a1, self._top_a2
+            if a1 is not None and a2 is not None and isinstance(act, str):
+                if act == a1:
+                    self._altered_count += 1
+                    logger.info(
+                        "StreamAlteration total_altered=%d (switch at step=%d)", self._altered_count, self._step_counter
+                    )
+                    return DataItem({**di, "activity": a2})
+                if act == a2:
+                    self._altered_count += 1
+                    logger.info(
+                        "StreamAlteration total_altered=%d (switch at step=%d)", self._altered_count, self._step_counter
+                    )
+                    return DataItem({**di, "activity": a1})
+            return di
+
+        if self.alteration_type == "insert":
+            pre = DataItem({"case_id": di.get("case_id"), "activity": "A_new", "timestamp": None})
+            # buffer original so it follows the inserted pre
+            self._buffer.append(di)
+            self._altered_count += 1
+            logger.info(
+                "StreamAlteration total_altered=%d (insert at step=%d)", self._altered_count, self._step_counter
+            )
+            return pre
+
+        if self.alteration_type == "split":
+            a1 = self._top_a1
+            if a1 is not None and isinstance(act, str) and act == a1:
+                post = DataItem({"case_id": di.get("case_id"), "activity": f"{a1}_post", "timestamp": None})
+                # current original emitted now, post emitted later
+                self._buffer.append(post)
+                self._altered_count += 1
+                logger.info(
+                    "StreamAlteration total_altered=%d (split at step=%d)", self._altered_count, self._step_counter
+                )
+                return di
+            return di
+
+        if self.alteration_type == "delete":
+            a1 = self._top_a1
+            if a1 is not None and isinstance(act, str) and act == a1:
+                self._altered_count += 1
+                logger.info(
+                    "StreamAlteration total_altered=%d (delete at step=%d)", self._altered_count, self._step_counter
+                )
+                return None
+            return di
+
+        # Fallback
+        return di
 
 
 class StreamingComparisonComputer(ls.FunctionTerm):
@@ -1043,12 +901,12 @@ class StreamingComparisonComputer(ls.FunctionTerm):
                 mem[m] = [s]
         return mem
 
-    def f(self, item: DataItem) -> DataItem:
-        """Enrich item with streaming comparison metrics computed from CSVs."""
+    def f(self, di: DataItem) -> DataItem:
+        """Enrich di with streaming comparison metrics computed from CSVs."""
         mem = self._build_memory()
         model_keys = [k for k in mem if k != "actual"]
         if (not mem) or ("actual" not in mem) or (not model_keys):
-            return item
+            return di
 
         ref = self.reference_model
         if (ref is None) or (ref not in model_keys):
@@ -1107,13 +965,13 @@ class StreamingComparisonComputer(ls.FunctionTerm):
 
         # Every 1000 steps, generate PNG heatmaps from the saved matrices
         try:
-            idx = item.get("index")
+            idx = di.get("index")
             if isinstance(idx, int) and idx % 1000 == 0 and self.csv_dir.is_dir():
                 results_dir = self.csv_dir.parent
                 save_all_comparison_heatmaps(results_dir, self.run_id, snapshot_idx=idx)
         except (OSError, ValueError, RuntimeError, TypeError) as exc:
             logger.debug("StreamingComparisonComputer: failed to save heatmap snapshot: %s", exc)
 
-        # Merge enriched metrics into the item for PrintEval downstream
-        merged = {**item, **enriched}
+        # Merge enriched metrics into the di for PrintEval downstream
+        merged = {**di, **enriched}
         return DataItem(merged)
