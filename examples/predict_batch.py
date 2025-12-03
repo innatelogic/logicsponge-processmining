@@ -29,7 +29,6 @@ logging.basicConfig(
 
 from logicsponge.processmining.algorithms_and_structures import (
     BayesianClassifier,
-    NGram,
 )
 from logicsponge.processmining.batch_helpers import (
     baseline_curve,
@@ -358,7 +357,7 @@ def process_rl_model(
     return metrics, eval_pp, eval_time, prediction_vector, train_time
 
 
-ML_TRAINING = False
+ML_TRAINING = True
 NN_TRAINING = True
 ALERGIA_TRAINING = False
 SHOW_DELAYS = False
@@ -874,25 +873,28 @@ for iteration in range(N_ITERATIONS):
             per_state_stats=per_state_stats,
         )
 
-        # If this strategy is an NGram model collect its top-3 visited states and visit rates, as well as its automaton
-        try:
-            if "ngram" in strategy_name and isinstance(strategy, BasicMiner) and isinstance(strategy.algorithm, NGram):
-                logger.info("Collecting state mining info for %s...", strategy_name)
-                try:
-                    top3 = strategy.algorithm.top_three_visit_rates()
-                except Exception:
-                    logger.exception("Failed to compute top3 visit rates for %s", strategy_name)
-                    top3 = []
-                state_mining_iteration[strategy_name] = top3
+        # # If this strategy is an NGram model collect top-3 visited states and visit rates, as well as its automaton
+        # try:
+        #     if (
+        #          "ngram" in strategy_name and isinstance(strategy, BasicMiner)
+        #           and isinstance(strategy.algorithm, NGram)
+        #     ):
+        #         logger.info("Collecting state mining info for %s...", strategy_name)
+        #         try:
+        #             top3 = strategy.algorithm.top_three_visit_rates()
+        #         except Exception:
+        #             logger.exception("Failed to compute top3 visit rates for %s", strategy_name)
+        #             top3 = []
+        #         state_mining_iteration[strategy_name] = top3
 
-                automaton_path = models_dir / f"{strategy_name}_automaton_iter{iteration+1}.dot"
-                automaton = strategy.algorithm.export_automaton(automaton_path)
+        #         automaton_path = models_dir / f"{strategy_name}_automaton_iter{iteration+1}.dot"
+        #         automaton = strategy.algorithm.export_automaton(automaton_path)
 
-        except Exception:  # noqa: BLE001
-            # defensive: if isinstance check or top3 extraction fails, continue
-            logger.warning(
-                "Non-critical: could not collect state mining info for strategy %s", strategy_name, exc_info=True
-            )
+        # except Exception:
+        #     # defensive: if isinstance check or top3 extraction fails, continue
+        #     logger.warning(
+        #         "Non-critical: could not collect state mining info for strategy %s", strategy_name, exc_info=True
+        #     )
 
         # Release miner memory (we removed the reference from the container by popping)
         try:
