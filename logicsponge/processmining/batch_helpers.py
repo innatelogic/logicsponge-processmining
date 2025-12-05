@@ -768,36 +768,41 @@ def baseline_curve(data_name: str) -> list[tuple[int, float]]:
             (1, float(2/3 * 100)),
             (2, float(2/3 * 100)),
             (3, 100.0),
-            (256, 100.0),
-        ],
+            *[(x, 100.0) for x in range(4, 9)],
+            *[(x, 100.0) for x in [2**(3+i) for i in range(6)]]        ],
         "Synthetic11100": [
             (1, 60.0),
             (2, 80.0),
             (3, 100.0),
-            (256, 100.0),
+            *[(x, 100.0) for x in range(4, 9)],
+            *[(x, 100.0) for x in [2**(3+i) for i in range(6)]]
         ],
         "Random_Decision_win2": [
             (1, 50.0),
             (2, float(2/3 * 100)),
             (3, float(2/3 * 100)),
             (4, float(5/6 * 100)),
-            (256, float(5/6 * 100)),
+            *[(x, float(5/6 * 100)) for x in range(5, 9)],
+            *[(x, float(5/6 * 100)) for x in [2**(3+i) for i in range(6)]]
         ],
         "x1x0": [
             (1, 50.0),
-            (2, float(7/12 * 100)),
+            (2, float(5/8 * 100)), ##
             (3, float(13/16 * 100)),
             (4, float(13/16 * 100)),
             (5, float(7/8 * 100)),
-            (256, float(7/8 * 100)),
+            *[(x, float(7/8 * 100)) for x in range(6, 9)],
+            *[(x, float(7/8 * 100)) for x in [2**(3+i) for i in range(6)]]
         ],
         "x10x01": [
-            (1, float(7/12 * 100)),
-            (2, float(7/12 * 100)),
+            (1, float(2/3 * 100)), ##
+            (2, float(2/3 * 100)), ##
             (3, float(5/6 * 100)),
             (4, float(5/6 * 100)),
             (5, float(7/8 * 100)),
-            (6, float(11/12 * 100)),
+            # (6, float(11/12 * 100)),
+            (6, float(7/8 * 100)),
+            (7, float(11/12 * 100)),
             *[(x, float(11/12 * 100)) for x in [2**(3+i) for i in range(6)]],
         ],
         "Interruption_5": [
