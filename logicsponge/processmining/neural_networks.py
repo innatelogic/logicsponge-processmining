@@ -1,7 +1,9 @@
 """The NN architectures."""
 
+import bisect
 import copy
 import logging
+import os
 import time
 
 import numpy as np
@@ -11,8 +13,6 @@ import torch.utils.data
 from torch import nn
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
-import os
-import bisect
 
 from logicsponge.processmining.types import ActivityName, Event
 
@@ -548,7 +548,7 @@ class LSTMModel(nn.Module):
                     c2 = c2.to(self.device)
                 hidden = ((h1, c1), (h2, c2))
             # If combined (h_all, c_all) from multi-layer LSTM, split into two
-            elif len(hidden) == 2 and isinstance(hidden[0], torch.Tensor) and hidden[0].dim() == 3: # type: ignore
+            elif len(hidden) == 2 and isinstance(hidden[0], torch.Tensor) and hidden[0].dim() == 3: # type: ignore  # noqa: PGH003
                 h_all, c_all = hidden
                 # split first dim into two single-layer tensors
                 h1 = h_all[0:1].to(self.device) # type: ignore  # noqa: PGH003
@@ -1168,20 +1168,27 @@ def train_rnn(  # noqa: C901, PLR0912, PLR0913, PLR0915
 
         dataset = PrefixDatasetOnTheFly(train_sequences, cumulative, window_size)
         # performance: use multiple workers where possible and pin memory on CUDA
-        num_workers = min(4, (os.cpu_count() or 1))
+        num_workers = 0 # min(4, (os.cpu_count() or 1))
         pin_memory = False
-        if model_device is not None and isinstance(model_device, torch.device) and getattr(model_device, "type", None) == "cuda":
+        if (
+            model_device is not None and isinstance(model_device, torch.device)
+            and getattr(model_device, "type", None) == "cuda"
+        ):
             pin_memory = True
 
         dataloader = torch.utils.data.DataLoader(
-            dataset, batch_size=batch_size, shuffle=True, collate_fn=_collate_prefix, num_workers=num_workers, pin_memory=pin_memory
+            dataset, batch_size=batch_size, shuffle=True, collate_fn=_collate_prefix,
+            num_workers=num_workers, pin_memory=pin_memory
         )
     else:
         dataset = torch.utils.data.TensorDataset(train_sequences)  # Create dataset
         # performance: use multiple workers where possible and pin memory on CUDA
-        num_workers = min(4, (os.cpu_count() or 1))
+        num_workers = 0 # min(4, (os.cpu_count() or 1))
         pin_memory = False
-        if model_device is not None and isinstance(model_device, torch.device) and getattr(model_device, "type", None) == "cuda":
+        if (
+            model_device is not None and isinstance(model_device, torch.device)
+            and getattr(model_device, "type", None) == "cuda"
+        ):
             pin_memory = True
         dataloader = torch.utils.data.DataLoader(
             dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_memory

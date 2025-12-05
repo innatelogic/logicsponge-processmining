@@ -20,7 +20,7 @@ import torch
 from tabulate import tabulate
 
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
-from logicsponge.processmining.miners import BasicMiner, Fallback, HardVoting, SoftVoting
+from logicsponge.processmining.miners import AdaptiveVoting, BasicMiner, Fallback, HardVoting, SoftVoting
 from logicsponge.processmining.utils import (
     RED_TO_GREEN_CMAP,
     compare_models_comparison,
@@ -359,13 +359,15 @@ def prefix_evaluate_rnn(  # noqa: C901, PLR0912, PLR0913
     return stats, perplexities, eval_time, prediction_vector
 
 
-def build_strategies(
+def build_strategies(  # noqa: PLR0913
     *,
     config: dict[str, Any],
     test_set_transformed: list[list[Any]],
     ngram_names: list[str],
     voting_ngrams: list[tuple[int, ...]],
-) -> dict[str, tuple[BasicMiner | Fallback | HardVoting | SoftVoting, list[list[Any]]]]:
+    adaptive_ngram: list[tuple[int, ...]],
+    select_best_args: list[str],
+) -> dict[str, tuple[BasicMiner | Fallback | HardVoting | SoftVoting | AdaptiveVoting, list[list[Any]]]]:
     """
     Construct the strategies dict exactly as in predict_batch without NN/RL/Bayesian variants.
 
@@ -377,6 +379,7 @@ def build_strategies(
       - soft voting variants for each grams in voting_ngrams:
           'soft voting {grams}' (plain NGram windows)
           'soft voting {grams}*' (NGram with min_total_visits=10)
+      - 'adaptive {grams} {select_best_arg}' for each grams in adaptive_ngram and select_best_arg in select_best_args
     """
     # Base miners
     fpt = BasicMiner(algorithm=FrequencyPrefixTree(), config=config)
@@ -442,8 +445,24 @@ def build_strategies(
         soft_voting_plain.append((grams, SoftVoting(models=models_plain, config=config)))
         soft_voting_star.append((grams, SoftVoting(models=models_star)))
 
+    # Adaptive voting variants
+    adaptive_voting = []
+    for grams in adaptive_ngram:
+        for select_best_arg in select_best_args:
+            models_adaptive = [
+                BasicMiner(algorithm=NGram(window_length=gram))
+                for gram in grams
+            ]
+            adaptive_model = AdaptiveVoting(
+                models=models_adaptive,
+                select_best=select_best_arg,
+                config=config,
+            )
+            strategy_name = f"adaptive {grams} {select_best_arg}"
+            adaptive_voting.append((strategy_name, adaptive_model))
+
     # Build final strategies mapping
-    strategies: dict[str, tuple[BasicMiner | Fallback | HardVoting | SoftVoting, list[list[Any]]]] = {
+    strategies: dict[str, tuple[BasicMiner | Fallback | HardVoting | SoftVoting | AdaptiveVoting, list[list[Any]]]] = {
         "fpt": (fpt, test_set_transformed),
         "bag": (bag, test_set_transformed),
         **{
@@ -454,6 +473,7 @@ def build_strategies(
         "hard voting": (hard_voting, test_set_transformed),
         **{f"soft voting {grams}": (sv, test_set_transformed) for grams, sv in soft_voting_plain},
         **{f"soft voting {grams}*": (sv, test_set_transformed) for grams, sv in soft_voting_star},
+        **{name: (model, test_set_transformed) for name, model in adaptive_voting},
     }
 
     return strategies

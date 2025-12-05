@@ -23,7 +23,7 @@ from tqdm import tqdm
 
 # ruff: noqa: E402
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(message)s",
 )
 
@@ -49,7 +49,7 @@ from logicsponge.processmining.data_utils import (
     split_sequence_data,
     transform_to_seqs,
 )
-from logicsponge.processmining.miners import BasicMiner
+from logicsponge.processmining.miners import AdaptiveVoting, BasicMiner
 from logicsponge.processmining.neural_networks import (
     LSTMModel,
     PreprocessData,
@@ -245,6 +245,8 @@ VOTING_NGRAMS = [(2, 3, 5, 8), (2, 3, 4, 5)]
 #[(2, 3, 4), (2, 3, 5, 8), (2, 3, 4, 5)]
 # # (2, 3, 5, 6), (2, 3, 5, 7), (2, 3, 4, 7)
 
+ADAPTIVE_NGRAM = [(2, 4, 6, 8, 12, 16, 24, 32)]
+
 SELECT_BEST_ARGS = ["prob"]  # ["acc", "prob", "prob x acc"]
 
 WINDOW_RANGE = [1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 48, 64, 96, 128, 192, 256]  # 8, 9, 10, 12, 14, 16]
@@ -357,7 +359,7 @@ def process_rl_model(
     return metrics, eval_pp, eval_time, prediction_vector, train_time
 
 
-ML_TRAINING = True
+ML_TRAINING = False
 NN_TRAINING = True
 ALERGIA_TRAINING = False
 SHOW_DELAYS = False
@@ -623,6 +625,7 @@ all_metrics: dict = {
         # ],
         *[f"soft voting {grams}" for grams in VOTING_NGRAMS],
         *[f"soft voting {grams}*" for grams in VOTING_NGRAMS],
+        *[f"adaptive {grams} {select_best_arg}" for select_best_arg in SELECT_BEST_ARGS for grams in ADAPTIVE_NGRAM],
         "alergia",
     "LSTM",
     "transformer",
@@ -764,6 +767,8 @@ for iteration in range(N_ITERATIONS):
         test_set_transformed=test_set_transformed,
         ngram_names=NGRAM_NAMES,
         voting_ngrams=VOTING_NGRAMS,
+        adaptive_ngram=ADAPTIVE_NGRAM,
+        select_best_args=SELECT_BEST_ARGS,
     )
 
     # Bayesian classifier models (not part of strategies dict, but trained separately)
@@ -787,6 +792,9 @@ for iteration in range(N_ITERATIONS):
         strategy_name, (strategy, test_data) = strategies.popitem()
         if "alergia" in strategy_name or "bayesian" in strategy_name:
             continue
+        if isinstance(strategy, AdaptiveVoting):
+            strategy.offline_training = True
+            logger.info("AdaptiveVoting offline training enabled for %s", strategy_name)
 
         # ============================================================
         # Training loop
@@ -806,6 +814,10 @@ for iteration in range(N_ITERATIONS):
 
         msg = f"Evaluating {strategy_name}..."
         logger.info(msg)
+
+        if isinstance(strategy, AdaptiveVoting):
+            strategy.offline_training = False
+            logger.info("AdaptiveVoting offline training disabled for %s", strategy_name)
 
         evaluation_time, prediction_vector = strategy.evaluate(
             test_data,

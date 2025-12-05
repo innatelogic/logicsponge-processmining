@@ -968,6 +968,7 @@ class AdaptiveVoting(MultiMiner):
 
     total_predictions: int
     correct_predictions: list[int]
+    offline_training: bool = False
 
     def __init__(self, *args: dict[str, Any], select_best: str = "acc", **kwargs: Any) -> None:  # noqa: ANN401
         """Initialize the AdaptiveVoting class."""
@@ -987,13 +988,27 @@ class AdaptiveVoting(MultiMiner):
         case_id = event["case_id"]
         activity = event["activity"]
 
-        self.total_predictions += 1
+        if not self.offline_training:
+            # Increment total and log before updating per-model counters
+            prev_total = self.total_predictions
+            self.total_predictions += 1
+            logger.debug("AdaptiveVoting.update: total_predictions %d -> %d", prev_total, self.total_predictions)
 
         for i, model in enumerate(self.models):
             prediction = probs_prediction(model.case_metrics(case_id)["probs"], config=self.config)
-            if prediction is not None and prediction["activity"] == activity:
+            if not self.offline_training and prediction is not None and prediction["activity"] == activity:
+                prev = self.correct_predictions[i]
                 self.correct_predictions[i] += 1
+                logger.debug(
+                    "AdaptiveVoting.update: model %d predicted %s, actual %s, correct_predictions %d -> %d",
+                    i,
+                    prediction.get("activity"),
+                    activity,
+                    prev,
+                    self.correct_predictions[i],
+                )
 
+            # still update the underlying model
             model.update(event)
 
         self.modified_cases = set()
@@ -1081,6 +1096,164 @@ class AdaptiveVoting(MultiMiner):
             predicted_delays=self.voting_delays(delays_list),
             # likelihoods=best_model_metrics["likelihoods"]
         )
+
+    def evaluate(  # noqa: C901, PLR0912, PLR0915
+        self,
+        data: list[list[Event]],
+        mode: str = "incremental",  # noqa: ARG002
+        *,
+        log_likelihood: bool = False,
+        compute_perplexity: bool = False,
+        debug: bool = False,  # noqa: ARG002
+    ) -> tuple[float, list[ActivityName]]:
+        """
+        Override evaluate to update per-model accuracy counters during batch evaluation.
+
+        After each prediction this method queries every base model for its
+        predicted top activity and increments `self.correct_predictions` for the
+        models that predicted the real next activity. `self.total_predictions`
+        is incremented accordingly so `get_accuracies()` reflects evaluation-time
+        performance as the evaluation proceeds.
+        """
+        perplexities: list[float] = []
+
+        eval_start_time = time.time()
+        pause_time = 0.0
+
+        predicted_vector: list[ActivityName] = []
+
+        for sequence in tqdm(data, desc="Processing sequences"):
+            pause_start_time = time.time()
+
+            logger.debug(">>>>> Start Evaluating Sequence <<<<<")
+            event_sequence = ""
+            predicted_sequence = ""
+            for event in sequence:
+                event_sequence += event["activity"].__str__()
+            logger.debug(
+                "Event sequence: %s",
+                event_sequence.replace(self.config["stop_symbol"].__str__(), "S"),
+            )
+
+            pause_time += time.time() - pause_start_time
+
+            current_state = self.initial_state
+            metrics = empty_metrics()
+            likelihood = 0.0 if (log_likelihood or not compute_perplexity) else 1.0
+
+            for i in range(len(sequence)):
+                if current_state is None:
+                    self.stats["empty_predictions"] += 1
+                    self.stats["total_predictions"] += 1
+
+                event = sequence[i]
+                actual_next_activity = event.get("activity")
+
+                # Prediction for incremental mode (step by step)
+                metrics = self.state_metrics(current_state)
+                prediction = metrics_prediction(metrics, config=self.config)
+                predicted_sequence += prediction["activity"].__str__() if prediction else "-"
+
+                # Collect predicted activity (skip empty predictions) in order
+                predicted_vector.append(
+                    prediction["activity"] if prediction is not None else DEFAULT_CONFIG["empty_symbol"]
+                )
+
+                # Update adaptive-selection counters: ask each base model for its
+                # prediction at the same model-specific state and update correctness.
+                prev_total = self.total_predictions
+                self.total_predictions += 1
+                logger.debug("AdaptiveVoting.evaluate: total_predictions %d -> %d", prev_total, self.total_predictions)
+
+                if current_state is not None and isinstance(current_state, tuple):
+                    for idx, (model, model_state) in enumerate(
+                        zip(self.models, current_state, strict=True)
+                    ):
+                        m_metrics = model.state_metrics(model_state)
+                        m_pred = metrics_prediction(m_metrics, config=self.config)
+                        if m_pred is not None and m_pred.get("activity") == actual_next_activity:
+                            prev = self.correct_predictions[idx]
+                            self.correct_predictions[idx] += 1
+                            logger.debug(
+                                "AdaptiveVoting.evaluate: model %d predicted %s, actual %s, correct_predictions %d -> %d",
+                                idx,
+                                m_pred.get("activity"),
+                                actual_next_activity,
+                                prev,
+                                self.correct_predictions[idx],
+                            )
+
+                else:
+                    # Fall back to case_metrics when composed state is not available
+                    for idx, model in enumerate(self.models):
+                        m_metrics = model.case_metrics(event.get("case_id"))
+                        m_pred = metrics_prediction(m_metrics, config=self.config)
+                        if m_pred is not None and m_pred.get("activity") == actual_next_activity:
+                            prev = self.correct_predictions[idx]
+                            self.correct_predictions[idx] += 1
+                            logger.debug(
+                                "AdaptiveVoting.evaluate: model %d (case_metrics) predicted %s, actual %s, correct_predictions %d -> %d",
+                                idx,
+                                m_pred.get("activity"),
+                                actual_next_activity,
+                                prev,
+                                self.correct_predictions[idx],
+                            )
+
+
+                pause_start_time = time.time()
+
+                if compute_perplexity:
+                    logger.debug("      [Before] Likelihood: %s", likelihood)
+                    if log_likelihood:
+                        likelihood += math.log(self.state_act_likelihood(current_state, actual_next_activity))
+                    else:
+                        likelihood *= self.state_act_likelihood(current_state, actual_next_activity)
+                    logger.debug("      [After] Likelihood: %s", likelihood)
+
+                logger.debug("State: %s", current_state)
+                logger.debug("Actual next activity: %s", actual_next_activity)
+                logger.debug("Prediction: %s", prediction)
+
+                logger.debug("Metrics: %s", metrics)
+
+                # Update shared statistics
+                self.update_stats(event, prediction, current_state) # type: ignore  # noqa: PGH003
+
+                pause_time += time.time() - pause_start_time
+
+                if i < len(sequence) - 1:
+                    current_state = self.next_state(current_state, actual_next_activity)
+                    logger.debug("Next state: %s", current_state)
+
+            if compute_perplexity:
+                if log_likelihood:
+                    normalized_likelihood = likelihood / len(sequence) if len(sequence) > 0 else likelihood
+                else:
+                    normalized_likelihood = likelihood ** (1 / len(sequence)) if len(sequence) > 0 else likelihood
+
+                seq_perplexity = compute_seq_perplexity(normalized_likelihood, log_likelihood=log_likelihood)
+            else:
+                seq_perplexity = float("nan")
+
+            perplexities.append(seq_perplexity if compute_perplexity else likelihood)
+
+            logger.debug(
+                "Pred. sequence: %s",
+                predicted_sequence.replace(self.config["stop_symbol"].__str__(), "S"),
+            )
+            logger.debug("Sequence likelihood: %s", likelihood)
+            logger.debug("Sequence perplexity: %s", seq_perplexity)
+            logger.debug("===== End Evaluating Sequence =====")
+
+        perplexity_stats = compute_perplexity_stats(perplexities)
+        logger.debug("Perplexity stats: %s", perplexity_stats)
+
+        for key, value in perplexity_stats.items():
+            self.stats[key] = value
+
+        elapsed = time.time() - eval_start_time - pause_time
+        return elapsed, predicted_vector
 
     def case_metrics(self, case_id: CaseId) -> Metrics:
         """Return the probability distribution from the model with the best accuracy so far."""
