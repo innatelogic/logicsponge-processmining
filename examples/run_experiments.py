@@ -6,12 +6,13 @@ interpreter and a path relative to this file. That makes it robust when
 executed from a different current working directory or on a server.
 """
 
+import argparse
 import subprocess
 import sys
 from pathlib import Path
 
 
-def run_experiments(datasets: list[str]) -> None:
+def run_experiments(datasets: list[str], data_prop: float) -> None:
     """
     Run predict_batch.py for each dataset in order.
 
@@ -24,8 +25,8 @@ def run_experiments(datasets: list[str]) -> None:
 
     for ds in datasets:
         print(f"\n=== Running experiment on dataset: {ds} ===")
-        result = subprocess.run(
-            [sys.executable, str(predict_script), "--data", ds],
+        result = subprocess.run(  # noqa: S603
+            [sys.executable, str(predict_script), "--data", ds, "--data_prop", str(data_prop)],
             capture_output=True,
             text=True,
             check=False,
@@ -66,4 +67,14 @@ if __name__ == "__main__":
 
     dataset_list = synthetic_datasets + real_life_datasets
 
-    run_experiments(dataset_list)
+    # parse argument --data_prop if provided
+    parser = argparse.ArgumentParser(description="Run batch experiments on multiple datasets.")
+    parser.add_argument(
+        "--data_prop",
+        type=float,
+        default=1.0,
+        help="Proportion of data to use for training (default: 1.0)",
+    )
+    args = parser.parse_args()
+
+    run_experiments(dataset_list, data_prop=args.data_prop)
