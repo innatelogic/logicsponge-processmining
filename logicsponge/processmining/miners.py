@@ -345,7 +345,25 @@ class StreamingMiner(ABC):
                 # ============================================================
                 # Update statistics based on the prediction
                 # -----------------------------------------
-                self.update_stats(event, prediction, current_state)
+                self.update_stats(event, prediction, current_state) # type: ignore  # noqa: PGH003
+                # Record model usage for ensemble/miner if applicable (batch mode)
+                if isinstance(self, MultiMiner):
+                    # Build per-model metrics from the composed current_state
+                    if isinstance(current_state, tuple):
+                        metrics_list = [
+                            model.state_metrics(ms) if hasattr(model, "state_metrics") else empty_metrics()
+                            for model, ms in zip(self.models, current_state, strict=True)
+                        ]
+                    else:
+                        metrics_list = [model.state_metrics(current_state) for model in self.models]
+
+                    ensemble_activity = prediction["activity"] if prediction is not None else None
+                    self.record_model_event(
+                        actual_activity=actual_next_activity,
+                        ensemble_prediction=ensemble_activity,
+                        metrics_list=metrics_list,
+                    )
+
                 # ============================================================
 
                 pause_time += time.time() - pause_start_time
@@ -551,6 +569,28 @@ class MultiMiner(StreamingMiner, ABC):
 
         self.delay_weights = delay_weights
 
+        # Model usage statistics:
+        # - `model_usage_counts`: number of times each model contributed to the
+        #    ensemble-selected prediction (i.e., model's top prediction matched
+        #    the ensemble prediction).
+        # - `model_correct_usage_counts`: how many of those contributed predictions
+        #    were correct (ensemble prediction matched the actual next activity).
+        # - `model_usage_events`: number of prediction events observed (only
+        #    incremented if at least one model matched the ensemble prediction).
+        self.model_usage_counts: list[int] = [0] * num_models
+        self.model_correct_usage_counts: list[int] = [0] * num_models
+        self.model_usage_events: int = 0
+        # Also track per-model absolute prediction counts (when model produced any top prediction)
+        # and absolute correct counts (model_top == actual) so we can compare to standalone accuracy.
+        self.model_prediction_counts: list[int] = [0] * num_models
+        self.model_prediction_correct_counts: list[int] = [0] * num_models
+        # Mirror into tracked stats for visibility when possible
+        self.stats["model_usage_counts"] = [0] * num_models
+        self.stats["model_correct_usage_counts"] = [0] * num_models
+        self.stats["model_usage_events"] = 0
+        self.stats["model_prediction_counts"] = [0] * num_models
+        self.stats["model_prediction_correct_counts"] = [0] * num_models
+
     def get_modified_cases(self) -> set[CaseId]:
         """Retrieve, recursively, cases that have potentially been modified and whose prediction needs to be updated."""
         modified_cases = set()
@@ -606,6 +646,120 @@ class MultiMiner(StreamingMiner, ABC):
         """Return the state of the algorithm based on the case ID."""
         # Get the state from each model
         return tuple([model.get_state_from_case(case_id) for model in self.models])
+
+    def record_model_event(
+        self,
+        actual_activity: ActivityName | None,
+        ensemble_prediction: ActivityName | None,
+        metrics_list: list[Metrics] | None = None,
+    ) -> None:
+        """
+        Record model usage for a single evaluated prediction event.
+
+        Args:
+            actual_activity: the true next activity (or None if unknown).
+            ensemble_prediction: the activity predicted by the ensemble for this event.
+            metrics_list: optional list of per-model `Metrics`; if omitted the
+                method will call `state_metrics` on each model using
+                `initial_state` (or `None`).
+
+        Behavior:
+        - For each model, determine its top predicted activity (via
+          `metrics_prediction`). If the model's top predicted activity equals
+          `ensemble_prediction`, increment that model's `model_usage_counts`.
+        - If additionally `actual_activity` equals `ensemble_prediction`, then
+          increment `model_correct_usage_counts` for those models as well.
+        - `model_usage_events` is incremented by 1 if at least one model
+          matched the ensemble prediction for this event.
+
+        """
+        # Build metrics_list if not provided
+        if metrics_list is None:
+            if self.initial_state is None:
+                metrics_list = [model.state_metrics(None) for model in self.models]
+            elif isinstance(self.initial_state, tuple):
+                metrics_list = [
+                    model.state_metrics(s) if hasattr(model, "state_metrics") else empty_metrics()
+                    for model, s in zip(self.models, self.initial_state, strict=True)
+                ]
+            else:
+                metrics_list = [model.state_metrics(self.initial_state) for model in self.models]
+
+        matched_any = False
+        is_correct = actual_activity is not None and ensemble_prediction is not None and (
+            actual_activity == ensemble_prediction
+        )
+
+        for i, metrics in enumerate(metrics_list):
+            model_pred = metrics_prediction(metrics, config=self.config)
+
+
+            # Only consider models that offer a top prediction
+            if model_pred is None:
+                continue
+
+            model_activity = model_pred.get("activity")
+            if model_activity is None:
+                continue
+
+            # Count that the model produced a prediction at all
+            self.model_prediction_counts[i] += 1
+            # Was the model's top prediction correct (w.r.t. actual)?
+            if actual_activity is not None and model_activity == actual_activity:
+                self.model_prediction_correct_counts[i] += 1
+
+            if ensemble_prediction is not None and model_activity == ensemble_prediction:
+                self.model_usage_counts[i] += 1
+                if is_correct:
+                    self.model_correct_usage_counts[i] += 1
+                matched_any = True
+
+        if matched_any:
+            self.model_usage_events += 1
+
+        # Mirror into tracked stats (if available)
+        self.stats["model_usage_counts"] = list(self.model_usage_counts)
+        self.stats["model_correct_usage_counts"] = list(self.model_correct_usage_counts)
+        self.stats["model_usage_events"] = int(self.model_usage_events)
+        self.stats["model_prediction_counts"] = list(self.model_prediction_counts)
+        self.stats["model_prediction_correct_counts"] = list(self.model_prediction_correct_counts)
+
+
+    def get_model_usage_stats(self) -> dict:
+        """
+        Return model usage statistics.
+
+        Returns a dictionary containing:
+        - `counts`: raw counts per model (how many times that model produced a top prediction)
+        - `total_events`: number of recorded prediction events
+        - `proportions`: percentage per model relative to `total_events` (0-100)
+
+        Note: Because multiple models can be counted for the same event, the sum
+        of `proportions` can exceed 100% (up to `100% * num_models`).
+        """
+        counts = list(self.model_usage_counts)
+        correct_counts = list(getattr(self, "model_correct_usage_counts", [0] * len(counts)))
+        total = int(self.model_usage_events)
+        proportions = [((c / total) * 100.0 if total > 0 else 0.0) for c in counts]
+        correct_proportions = [((c / total) * 100.0 if total > 0 else 0.0) for c in correct_counts]
+        accuracies_when_used = [((correct_counts[i] / counts[i]) if counts[i] > 0 else 0.0) for i in range(len(counts))]
+
+        # Absolute per-model prediction counts (standalone view)
+        pred_counts = list(getattr(self, "model_prediction_counts", [0] * len(counts)))
+        pred_correct = list(getattr(self, "model_prediction_correct_counts", [0] * len(counts)))
+        pred_accuracy_pct = [((pred_correct[i] / pred_counts[i]) * 100.0 if pred_counts[i] > 0 else 0.0) for i in range(len(counts))]
+
+        return {
+            "counts": counts,
+            "correct_counts": correct_counts,
+            "total_evexnts": total,
+            "proportions": proportions,
+            "correct_proportions": correct_proportions,
+            "accuracies_when_used": accuracies_when_used,
+            "prediction_counts": pred_counts,
+            "prediction_correct_counts": pred_correct,
+            "prediction_accuracy_pct": pred_accuracy_pct,
+        }
 
     def update(self, event: Event) -> None:
         """Update the algorithm with the new event."""
@@ -945,7 +1099,80 @@ class SoftVoting(MultiMiner):
         )
 
 
-class AdaptiveVoting(MultiMiner):
+class LiveMultiMiner(MultiMiner):
+    """
+    MultiMiner that tracks live accuracies for each sub-model.
+
+    Implements common `update` logic used by ensemble miners that need to
+    maintain per-model accuracy counters during streaming updates.
+    """
+
+    total_predictions: int
+    correct_predictions: list[int]
+    offline_training: bool = False
+
+    def __init__(self, *args: dict[str, Any], **kwargs: Any) -> None:  # noqa: ANN401
+        """Initialize the LiveMultiMiner class."""
+        super().__init__(*args, **kwargs)
+        self.total_predictions = 0
+        self.correct_predictions = [0] * len(self.models)
+
+    def update(self, event: Event) -> None:
+        """
+        Update underlying models and track per-model accuracies.
+
+        - Increments `total_predictions` once per call (unless `offline_training`).
+        - For each model, obtains `case_metrics` and checks the top prediction
+          against the actual activity; increments `correct_predictions` when
+          appropriate.
+        - Always calls the underlying model's `update` and aggregates
+          `modified_cases`.
+        """
+        case_id = event["case_id"]
+        activity = event["activity"]
+
+        if not self.offline_training:
+            prev_total = self.total_predictions
+            self.total_predictions += 1
+            logger.debug("LiveMultiMiner.update: total_predictions %d -> %d", prev_total, self.total_predictions)
+
+        # # Prepare per-model metrics and ensemble prediction (pre-update)
+        # metrics_list = [model.case_metrics(case_id) for model in self.models]
+        # ensemble_metrics = self.case_metrics(case_id)
+        # ensemble_pred = probs_prediction(ensemble_metrics["probs"], config=self.config)
+        # ensemble_activity = ensemble_pred.get("activity") if ensemble_pred is not None else None
+
+        # if not self.offline_training:
+        #     # Record model usage event (compares model predictions with ensemble prediction)
+        #     self.record_model_event(
+        #         actual_activity=activity, ensemble_prediction=ensemble_activity, metrics_list=metrics_list
+        #     )
+
+
+        for i, model in enumerate(self.models):
+            pred = probs_prediction(model.case_metrics(case_id)["probs"], config=self.config)
+            if not self.offline_training and pred is not None and pred.get("activity") == activity:
+                prev = self.correct_predictions[i]
+                self.correct_predictions[i] += 1
+                logger.debug(
+                    "LiveMultiMiner.update: model %d predicted %s, actual %s, correct_predictions %d -> %d",
+                    i,
+                    pred.get("activity"),
+                    activity,
+                    prev,
+                    self.correct_predictions[i],
+                )
+
+            # update underlying model
+            model.update(event)
+
+        # update modified cases
+        self.modified_cases = set()
+        for model in self.models:
+            self.modified_cases.update(model.get_modified_cases())
+
+
+class AdaptiveVoting(LiveMultiMiner):
     """
     Selects the best model for each prediction.
 
@@ -983,37 +1210,6 @@ class AdaptiveVoting(MultiMiner):
             msg = f"select_best must be in {accepted_options}. Provided: {self.select_best}"
             raise ValueError(msg)
 
-    def update(self, event: Event) -> None:
-        """Overwritten to account for keeping track of accuracies in streaming mode."""
-        case_id = event["case_id"]
-        activity = event["activity"]
-
-        if not self.offline_training:
-            # Increment total and log before updating per-model counters
-            prev_total = self.total_predictions
-            self.total_predictions += 1
-            logger.debug("AdaptiveVoting.update: total_predictions %d -> %d", prev_total, self.total_predictions)
-
-        for i, model in enumerate(self.models):
-            prediction = probs_prediction(model.case_metrics(case_id)["probs"], config=self.config)
-            if not self.offline_training and prediction is not None and prediction["activity"] == activity:
-                prev = self.correct_predictions[i]
-                self.correct_predictions[i] += 1
-                logger.debug(
-                    "AdaptiveVoting.update: model %d predicted %s, actual %s, correct_predictions %d -> %d",
-                    i,
-                    prediction.get("activity"),
-                    activity,
-                    prev,
-                    self.correct_predictions[i],
-                )
-
-            # still update the underlying model
-            model.update(event)
-
-        self.modified_cases = set()
-        for model in self.models:
-            self.modified_cases.update(model.get_modified_cases())
 
     def get_accuracies(self) -> list[float]:
         """Return the accuracy of each model as a list of floats."""
@@ -1175,7 +1371,8 @@ class AdaptiveVoting(MultiMiner):
                             prev = self.correct_predictions[idx]
                             self.correct_predictions[idx] += 1
                             logger.debug(
-                                "AdaptiveVoting.evaluate: model %d predicted %s, actual %s, correct_predictions %d -> %d",
+                                "AdaptiveVoting.evaluate: model %d predicted %s, actual %s, "
+                                "correct_predictions %d -> %d",
                                 idx,
                                 m_pred.get("activity"),
                                 actual_next_activity,
@@ -1192,7 +1389,8 @@ class AdaptiveVoting(MultiMiner):
                             prev = self.correct_predictions[idx]
                             self.correct_predictions[idx] += 1
                             logger.debug(
-                                "AdaptiveVoting.evaluate: model %d (case_metrics) predicted %s, actual %s, correct_predictions %d -> %d",
+                                "AdaptiveVoting.evaluate: model %d (case_metrics) predicted %s, "
+                                "actual %s, correct_predictions %d -> %d",
                                 idx,
                                 m_pred.get("activity"),
                                 actual_next_activity,
@@ -1219,6 +1417,22 @@ class AdaptiveVoting(MultiMiner):
 
                 # Update shared statistics
                 self.update_stats(event, prediction, current_state) # type: ignore  # noqa: PGH003
+
+                # Record model usage for ensemble/miner if applicable
+                if isinstance(current_state, tuple):
+                    metrics_list = [
+                        model.state_metrics(ms) if hasattr(model, "state_metrics") else empty_metrics()
+                        for model, ms in zip(self.models, current_state, strict=True)
+                    ]
+                else:
+                    metrics_list = [model.state_metrics(current_state) for model in self.models]
+                ensemble_activity = prediction["activity"] if prediction is not None else None
+                self.record_model_event(
+                    actual_activity=actual_next_activity,
+                    ensemble_prediction=ensemble_activity,
+                    metrics_list=metrics_list,
+                )
+
 
                 pause_time += time.time() - pause_start_time
 
@@ -1293,6 +1507,307 @@ class AdaptiveVoting(MultiMiner):
             predicted_delays=self.voting_delays(delays_list),
             # likelihoods=best_model_metrics["likelihoods"]
         )
+
+
+class Promotion(LiveMultiMiner):
+    """
+    Progressive selection of ordered models.
+
+    Models are ordered and the miner starts using the first model by default.
+    Promotion is based on vote-counts: when the next model outperforms the
+    current model on a sufficient number of predictions (``min_votes``), and
+    the cumulative accuracy difference exceeds ``threshold``, the miner will
+    promote to the next model. Promotions can continue progressively.
+    """
+
+    total_predictions: int
+    correct_predictions: list[int]
+    offline_training: bool = False
+
+    def __init__(
+        self,
+        *args: dict[str, Any],
+        threshold: float = 0.003,
+        min_votes: int = 20,
+        **kwargs: Any,  # noqa: ANN401
+    ) -> None:
+        """Initialize the Promotion class."""
+        super().__init__(*args, **kwargs)
+
+        self.threshold = float(threshold)
+        self.min_votes = int(min_votes)
+
+        # selection state
+        self.current_index = 0
+
+        # keep totals as well (for compatibility / diagnostics)
+        self.total_predictions = 0
+        self.correct_predictions = [0] * len(self.models)
+
+        # counters to record how many times the next model outperformed the current
+        # for each adjacent pair (index i tracks votes for promoting i -> i+1)
+        self.promotion_votes: list[int] = [0] * max(0, len(self.models) - 1)
+
+    def case_metrics(self, case_id: str | tuple[str, ...]) -> Metrics:
+        """Return the metrics from the currently selected model."""
+        return self.models[self.current_index].case_metrics(case_id)
+
+    def _try_promote(self) -> None:
+        """
+        Promote current_index progressively while next model outperforms it.
+
+        Promotion uses per-prediction vote counts for the immediate next
+        candidate model. When the count of votes for promoting from the
+        current model to the next reaches ``min_votes`` and the cumulative
+        accuracy difference exceeds ``threshold``, a promotion is triggered.
+        """
+        num_models = len(self.models)
+        promoted = False
+        # Only consider promoting the current index to the immediate next model
+        while self.current_index + 1 < num_models:
+            cur = self.current_index
+            nxt = cur + 1
+
+            # compute cumulative accuracies
+            cur_acc = self.correct_predictions[cur] / self.total_predictions if self.total_predictions > 0 else 0.0
+            nxt_acc = self.correct_predictions[nxt] / self.total_predictions if self.total_predictions > 0 else 0.0
+
+            # Check if votes for this pair reached the threshold count and the
+            # cumulative accuracy difference exceeds the relative threshold.
+            votes = self.promotion_votes[cur] if cur < len(self.promotion_votes) else 0
+            if votes >= self.min_votes and (nxt_acc - cur_acc) > self.threshold:
+                logger.info(
+                    "Promoting model %d -> %d (votes %d, acc %.4f -> %.4f, threshold %.4f)",
+                    cur,
+                    nxt,
+                    votes,
+                    cur_acc,
+                    nxt_acc,
+                    self.threshold,
+                )
+                self.current_index = nxt
+                promoted = True
+                # reset votes for the promoted boundary (not needed further)
+                if cur < len(self.promotion_votes):
+                    self.promotion_votes[cur] = 0
+                # continue loop to see if further promotion is immediately possible
+            else:
+                break
+
+        if promoted:
+            logger.debug("Promotion current_index now %d", self.current_index)
+
+    def state_act_likelihood(self, state: ComposedState | None, next_activity: ActivityName) -> float:
+        """Return the likelihood of the sequence based on the currently selected model."""
+        if state is None:
+            return 0.0
+
+        # if composed state, pick corresponding substate for current model
+        model_state = state[self.current_index] if isinstance(state, tuple) else state
+
+        model = self.models[self.current_index]
+        if hasattr(model, "state_act_likelihood"):
+            return model.state_act_likelihood(model_state, next_activity)
+        return 0.0
+
+    def state_metrics(self, state: ComposedState | None) -> Metrics:
+        """Return the metrics from the currently selected model."""
+        if state is None:
+            return empty_metrics()
+
+        # pick metrics from currently selected model
+        model = self.models[self.current_index]
+        model_state = state[self.current_index] if isinstance(state, tuple) else state
+        model_metrics = model.state_metrics(model_state)
+
+        delays_list = [m.state_metrics(ms)["predicted_delays"] for m, ms in zip(self.models, state, strict=True)]
+
+        return Metrics(
+            state_id=state,
+            probs=model_metrics["probs"],
+            predicted_delays=self.voting_delays(delays_list),
+        )
+
+    def evaluate(  # noqa: C901, PLR0912, PLR0915
+        self,
+        data: list[list[Event]],
+        mode: str = "incremental",  # noqa: ARG002
+        *,
+        log_likelihood: bool = False,
+        compute_perplexity: bool = False,
+        debug: bool = False,  # noqa: ARG002
+    ) -> tuple[float, list[ActivityName]]:
+        """Evaluate while updating promotion votes and per-model correctness for each model."""
+        perplexities: list[float] = []
+
+        eval_start_time = time.time()
+        pause_time = 0.0
+
+        predicted_vector: list[ActivityName] = []
+
+        for sequence in tqdm(data, desc="Processing sequences"):
+            pause_start_time = time.time()
+
+            logger.debug(">>>>> Start Evaluating Sequence <<<<<")
+            event_sequence = ""
+            predicted_sequence = ""
+            for event in sequence:
+                event_sequence += event["activity"].__str__()
+            logger.debug(
+                "Event sequence: %s",
+                event_sequence.replace(self.config["stop_symbol"].__str__(), "S"),
+            )
+
+            pause_time += time.time() - pause_start_time
+
+            current_state = self.initial_state
+            metrics = empty_metrics()
+            likelihood = 0.0 if (log_likelihood or not compute_perplexity) else 1.0
+
+            for i in range(len(sequence)):
+                if current_state is None:
+                    self.stats["empty_predictions"] += 1
+                    self.stats["total_predictions"] += 1
+
+                event = sequence[i]
+                actual_next_activity = event.get("activity")
+
+                # Prediction for incremental mode (step by step)
+                metrics = self.state_metrics(current_state)
+                prediction = metrics_prediction(metrics, config=self.config)
+                predicted_sequence += prediction["activity"].__str__() if prediction else "-"
+
+                predicted_vector.append(
+                    prediction["activity"] if prediction is not None else DEFAULT_CONFIG["empty_symbol"]
+                )
+
+                # Update counters for this prediction (promotion votes + totals)
+                prev_total = self.total_predictions
+                self.total_predictions += 1
+                logger.debug("Promotion.evaluate: total_predictions %d -> %d", prev_total, self.total_predictions)
+
+                # Determine correctness per model for this time step
+                correctness: list[int] = []
+                if current_state is not None and isinstance(current_state, tuple):
+                    for idx, (model, model_state) in enumerate(zip(self.models, current_state, strict=True)):
+                        m_metrics = model.state_metrics(model_state)
+                        m_pred = metrics_prediction(m_metrics, config=self.config)
+                        correct = 1 if (m_pred is not None and m_pred.get("activity") == actual_next_activity) else 0
+                        correctness.append(correct)
+                        if correct:
+                            prev = self.correct_predictions[idx]
+                            self.correct_predictions[idx] += 1
+                            logger.debug(
+                                "Promotion.evaluate: model %d predicted %s, actual %s, correct_predictions %d -> %d",
+                                idx,
+                                m_pred.get("activity") if m_pred is not None else None,
+                                actual_next_activity,
+                                prev,
+                                self.correct_predictions[idx],
+                            )
+                else:
+                    for idx, model in enumerate(self.models):
+                        m_metrics = model.case_metrics(event.get("case_id"))
+                        m_pred = metrics_prediction(m_metrics, config=self.config)
+                        correct = 1 if (m_pred is not None and m_pred.get("activity") == actual_next_activity) else 0
+                        correctness.append(correct)
+                        if correct:
+                            prev = self.correct_predictions[idx]
+                            self.correct_predictions[idx] += 1
+                            logger.debug(
+                                "Promotion.evaluate: model %d (case_metrics) predicted %s, actual %s, "
+                                "correct_predictions %d -> %d",
+                                idx,
+                                m_pred.get("activity") if m_pred is not None else None,
+                                actual_next_activity,
+                                prev,
+                                self.correct_predictions[idx],
+                            )
+
+                # Update promotion votes for the current boundary only (cur -> cur+1)
+                cur = self.current_index
+                nxt = cur + 1
+                if nxt < len(self.models):
+                    cur_correct = correctness[cur] if cur < len(correctness) else 0
+                    nxt_correct = correctness[nxt] if nxt < len(correctness) else 0
+                    # increment when next correct and current incorrect; decrement when opposite
+                    if nxt_correct > cur_correct:
+                        self.promotion_votes[cur] = self.promotion_votes[cur] + 1
+                    elif cur_correct > nxt_correct:
+                        # penalize contrary evidence but don't go below zero
+                        self.promotion_votes[cur] = max(0, self.promotion_votes[cur] - 1)
+
+                # after updating votes, potentially promote
+                self._try_promote()
+
+                pause_start_time = time.time()
+
+                if compute_perplexity:
+                    logger.debug("      [Before] Likelihood: %s", likelihood)
+                    if log_likelihood:
+                        likelihood += math.log(self.state_act_likelihood(current_state, actual_next_activity))
+                    else:
+                        likelihood *= self.state_act_likelihood(current_state, actual_next_activity)
+                    logger.debug("      [After] Likelihood: %s", likelihood)
+
+                logger.debug("State: %s", current_state)
+                logger.debug("Actual next activity: %s", actual_next_activity)
+                logger.debug("Prediction: %s", prediction)
+
+                logger.debug("Metrics: %s", metrics)
+
+                # Update shared statistics
+                self.update_stats(event, prediction, current_state) # type: ignore  # noqa: PGH003
+
+                # Record model usage for ensemble/miner if applicable
+                if isinstance(current_state, tuple):
+                    metrics_list = [
+                        model.state_metrics(ms) if hasattr(model, "state_metrics") else empty_metrics()
+                        for model, ms in zip(self.models, current_state, strict=True)
+                    ]
+                else:
+                    metrics_list = [model.state_metrics(current_state) for model in self.models]
+                ensemble_activity = prediction["activity"] if prediction is not None else None
+                self.record_model_event(
+                    actual_activity=actual_next_activity,
+                    ensemble_prediction=ensemble_activity,
+                    metrics_list=metrics_list,
+                )
+
+                pause_time += time.time() - pause_start_time
+
+                if i < len(sequence) - 1:
+                    current_state = self.next_state(current_state, actual_next_activity)
+                    logger.debug("Next state: %s", current_state)
+
+            if compute_perplexity:
+                if log_likelihood:
+                    normalized_likelihood = likelihood / len(sequence) if len(sequence) > 0 else likelihood
+                else:
+                    normalized_likelihood = likelihood ** (1 / len(sequence)) if len(sequence) > 0 else likelihood
+
+                seq_perplexity = compute_seq_perplexity(normalized_likelihood, log_likelihood=log_likelihood)
+            else:
+                seq_perplexity = float("nan")
+
+            perplexities.append(seq_perplexity if compute_perplexity else likelihood)
+
+            logger.debug(
+                "Pred. sequence: %s",
+                predicted_sequence.replace(self.config["stop_symbol"].__str__(), "S"),
+            )
+            logger.debug("Sequence likelihood: %s", likelihood)
+            logger.debug("Sequence perplexity: %s", seq_perplexity)
+            logger.debug("===== End Evaluating Sequence =====")
+
+        perplexity_stats = compute_perplexity_stats(perplexities)
+        logger.debug("Perplexity stats: %s", perplexity_stats)
+
+        for key, value in perplexity_stats.items():
+            self.stats[key] = value
+
+        elapsed = time.time() - eval_start_time - pause_time
+        return elapsed, predicted_vector
 
 
 # ============================================================

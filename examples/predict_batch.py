@@ -23,7 +23,7 @@ from tqdm import tqdm
 
 # ruff: noqa: E402
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(message)s",
 )
 
@@ -49,7 +49,7 @@ from logicsponge.processmining.data_utils import (
     split_sequence_data,
     transform_to_seqs,
 )
-from logicsponge.processmining.miners import AdaptiveVoting, BasicMiner
+from logicsponge.processmining.miners import AdaptiveVoting, BasicMiner, Promotion
 from logicsponge.processmining.neural_networks import (
     LSTMModel,
     PreprocessData,
@@ -245,7 +245,7 @@ VOTING_NGRAMS = [(2, 3, 5, 8), (2, 3, 4, 5)]
 #[(2, 3, 4), (2, 3, 5, 8), (2, 3, 4, 5)]
 # # (2, 3, 5, 6), (2, 3, 5, 7), (2, 3, 4, 7)
 
-ADAPTIVE_NGRAM = [(2, 4, 6, 8, 12, 16, 24, 32)]
+ADAPTIVE_NGRAM = [*VOTING_NGRAMS, (2, 4, 6, 8, 12, 16, 24, 32)]
 
 SELECT_BEST_ARGS = ["prob"]  # ["acc", "prob", "prob x acc"]
 
@@ -626,6 +626,7 @@ all_metrics: dict = {
         *[f"soft voting {grams}" for grams in VOTING_NGRAMS],
         *[f"soft voting {grams}*" for grams in VOTING_NGRAMS],
         *[f"adaptive {grams} {select_best_arg}" for select_best_arg in SELECT_BEST_ARGS for grams in ADAPTIVE_NGRAM],
+        *[f"promotion {grams} {select_best_arg}" for select_best_arg in SELECT_BEST_ARGS for grams in ADAPTIVE_NGRAM],
         "alergia",
     "LSTM",
     "transformer",
@@ -792,7 +793,7 @@ for iteration in range(N_ITERATIONS):
         strategy_name, (strategy, test_data) = strategies.popitem()
         if "alergia" in strategy_name or "bayesian" in strategy_name:
             continue
-        if isinstance(strategy, AdaptiveVoting):
+        if isinstance(strategy, (AdaptiveVoting, Promotion)):
             strategy.offline_training = True
             logger.info("AdaptiveVoting offline training enabled for %s", strategy_name)
 
@@ -815,7 +816,7 @@ for iteration in range(N_ITERATIONS):
         msg = f"Evaluating {strategy_name}..."
         logger.info(msg)
 
-        if isinstance(strategy, AdaptiveVoting):
+        if isinstance(strategy, (AdaptiveVoting, Promotion)):
             strategy.offline_training = False
             logger.info("AdaptiveVoting offline training disabled for %s", strategy_name)
 
@@ -919,6 +920,65 @@ for iteration in range(N_ITERATIONS):
             num_delay_predictions=delay_count,
             per_state_stats=per_state_stats,
         )
+
+        # ----------------- model usage CSV (per-strategy aggregated) -----------------
+        # If the strategy exposes usage statistics (MultiMiner), record them in
+        # a single CSV inside the run-specific results folder. We append rows so
+        # that multiple iterations accumulate in the same CSV.
+        try:
+            if hasattr(strategy, "get_model_usage_stats"):
+                usage = strategy.get_model_usage_stats() # type: ignore
+                counts = usage.get("counts", [])
+                correct_counts = usage.get("correct_counts", [0] * len(counts))
+                proportions = usage.get("proportions", [0.0] * len(counts))
+                correct_proportions = usage.get("correct_proportions", [0.0] * len(counts))
+                accuracies_when_used = usage.get("accuracies_when_used", [0.0] * len(counts))
+                total_events = usage.get("total_events", 0)
+
+                usage_csv_path = run_results_dir / f"{RUN_ID}_model_usage.csv"
+                write_header = not usage_csv_path.exists()
+
+                import csv
+
+                with usage_csv_path.open("a", newline="") as csvfile:
+                    writer = csv.writer(csvfile)
+                    if write_header:
+                        writer.writerow([
+                            "run_id",
+                            "iteration",
+                            "strategy",
+                            "model_index",
+                            "count",
+                            "correct_count",
+                            "total_events",
+                            "proportion_pct",
+                            "correct_proportion_pct",
+                            "accuracy_when_used",
+                            "model_prediction_count",
+                            "model_prediction_correct_count",
+                            "model_prediction_accuracy_pct",
+                        ])
+
+                    for idx, c in enumerate(counts):
+                        writer.writerow(
+                            [
+                                RUN_ID,
+                                iteration + 1,
+                                strategy_name,
+                                idx,
+                                int(c),
+                                int(correct_counts[idx]) if idx < len(correct_counts) else 0,
+                                int(total_events),
+                                float(proportions[idx]) if idx < len(proportions) else 0.0,
+                                float(correct_proportions[idx]) if idx < len(correct_proportions) else 0.0,
+                                float(accuracies_when_used[idx]) if idx < len(accuracies_when_used) else 0.0,
+                                int(usage.get("prediction_counts", [0]*len(counts))[idx]) if idx < len(counts) else 0,
+                                int(usage.get("prediction_correct_counts", [0]*len(counts))[idx]) if idx < len(counts) else 0,
+                                float(usage.get("prediction_accuracy_pct", [0.0]*len(counts))[idx]) if idx < len(counts) else 0.0,
+                            ]
+                        )
+        except Exception:
+            logger.exception("Failed to record model usage for %s", strategy_name)
 
         # # If this strategy is an NGram model collect top-3 visited states and visit rates, as well as its automaton
         # try:
