@@ -359,7 +359,7 @@ def process_rl_model(
     return metrics, eval_pp, eval_time, prediction_vector, train_time
 
 
-ML_TRAINING = False
+ML_TRAINING = True
 NN_TRAINING = True
 ALERGIA_TRAINING = False
 SHOW_DELAYS = False
@@ -927,7 +927,7 @@ for iteration in range(N_ITERATIONS):
         # that multiple iterations accumulate in the same CSV.
         try:
             if hasattr(strategy, "get_model_usage_stats"):
-                usage = strategy.get_model_usage_stats() # type: ignore
+                usage = strategy.get_model_usage_stats() # type: ignore  # noqa: PGH003
                 counts = usage.get("counts", [])
                 correct_counts = usage.get("correct_counts", [0] * len(counts))
                 proportions = usage.get("proportions", [0.0] * len(counts))
@@ -973,8 +973,10 @@ for iteration in range(N_ITERATIONS):
                                 float(correct_proportions[idx]) if idx < len(correct_proportions) else 0.0,
                                 float(accuracies_when_used[idx]) if idx < len(accuracies_when_used) else 0.0,
                                 int(usage.get("prediction_counts", [0]*len(counts))[idx]) if idx < len(counts) else 0,
-                                int(usage.get("prediction_correct_counts", [0]*len(counts))[idx]) if idx < len(counts) else 0,
-                                float(usage.get("prediction_accuracy_pct", [0.0]*len(counts))[idx]) if idx < len(counts) else 0.0,
+                                int(usage.get("prediction_correct_counts", [0]*len(counts))[idx])
+                                if idx < len(counts) else 0,
+                                float(usage.get("prediction_accuracy_pct", [0.0]*len(counts))[idx])
+                                if idx < len(counts) else 0.0,
                             ]
                         )
         except Exception:
