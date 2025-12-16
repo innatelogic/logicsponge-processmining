@@ -473,7 +473,8 @@ def build_strategies(  # noqa: PLR0913
                 models=models_adaptive,
                 config=config,
             )
-            strategy_name = f"promotions {grams} {select_best_arg}"
+            # Use singular 'promotion' to match elsewhere in the codebase
+            strategy_name = f"promotion {grams} {select_best_arg}"
             promotion.append((strategy_name, adaptive_model))
 
     # Build final strategies mapping
