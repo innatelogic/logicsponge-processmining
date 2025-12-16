@@ -11,21 +11,21 @@
     "gamma": 0.99
   },
   "lstm": {
-    "vocab_size": 24,
-    "embedding_dim": 24,
+    "vocab_size": 10,
+    "embedding_dim": 10,
     "hidden_dim": 128,
-    "output_dim": 24
+    "output_dim": 10
   },
   "transformer": {
-    "vocab_size": 24,
-    "embedding_dim": 24,
+    "vocab_size": 10,
+    "embedding_dim": 10,
     "hidden_dim": 128,
-    "output_dim": 24
+    "output_dim": 10
   },
   "qlearning": {
-    "vocab_size": 24,
-    "embedding_dim": 24,
+    "vocab_size": 10,
+    "embedding_dim": 10,
     "hidden_dim": 128,
-    "output_dim": 24
+    "output_dim": 10
   }
 }
