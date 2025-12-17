@@ -49,15 +49,15 @@ if __name__ == "__main__":
         "x1x0",
         "x10x01",
         "Random_Decision_win2",
-        "Random_Decision_win3",
-        "Interruption_5",
-        "Interruption_10",
-        "Interruption_20",
+        # "Random_Decision_win3",
+        # "Interruption_5",
+        # "Interruption_10",
+        # "Interruption_20",
     ]
 
     real_life_datasets = [
         "Sepsis_Cases",
-        "Helpdesk",
+        # "Helpdesk",
         "BPI_Challenge_2012",
         "BPI_Challenge_2013",
         # "BPI_Challenge_2014",
