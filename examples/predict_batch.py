@@ -249,7 +249,7 @@ ADAPTIVE_NGRAM = [*VOTING_NGRAMS, (2, 4, 6, 8, 12, 16, 24, 32)]
 
 SELECT_BEST_ARGS = ["prob"]  # ["acc", "prob", "prob x acc"]
 
-WINDOW_RANGE = [1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 48, 64, 96, 128, 192, 256]  # 8, 9, 10, 12, 14, 16]
+WINDOW_RANGE = [2, 4, 8, 16, 32] #[1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 48, 64, 96, 128, 192, 256]  # 8, 9, 10, 12, 14, 16]
 
 NN_WINDOW_RANGE = [*WINDOW_RANGE] # [1, 2, 3, 4, 5, 6, 7, 8]
 
@@ -359,7 +359,7 @@ def process_rl_model(
     return metrics, eval_pp, eval_time, prediction_vector, train_time
 
 
-ML_TRAINING = True
+ML_TRAINING = False
 NN_TRAINING = True
 ALERGIA_TRAINING = False
 SHOW_DELAYS = False
