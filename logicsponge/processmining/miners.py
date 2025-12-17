@@ -647,7 +647,7 @@ class MultiMiner(StreamingMiner, ABC):
         # Get the state from each model
         return tuple([model.get_state_from_case(case_id) for model in self.models])
 
-    def record_model_event(
+    def record_model_event(  # noqa: C901
         self,
         actual_activity: ActivityName | None,
         ensemble_prediction: ActivityName | None,
@@ -747,7 +747,9 @@ class MultiMiner(StreamingMiner, ABC):
         # Absolute per-model prediction counts (standalone view)
         pred_counts = list(getattr(self, "model_prediction_counts", [0] * len(counts)))
         pred_correct = list(getattr(self, "model_prediction_correct_counts", [0] * len(counts)))
-        pred_accuracy_pct = [((pred_correct[i] / pred_counts[i]) * 100.0 if pred_counts[i] > 0 else 0.0) for i in range(len(counts))]
+        pred_accuracy_pct = [
+            ((pred_correct[i] / pred_counts[i]) * 100.0 if pred_counts[i] > 0 else 0.0) for i in range(len(counts))
+        ]
 
         return {
             "counts": counts,
@@ -1509,7 +1511,7 @@ class AdaptiveVoting(LiveMultiMiner):
         )
 
 
-class Promotion(LiveMultiMiner):
+class Promotion(MultiMiner):
     """
     Progressive selection of ordered models.
 
@@ -1518,10 +1520,11 @@ class Promotion(LiveMultiMiner):
     current model on a sufficient number of predictions (``min_votes``), and
     the cumulative accuracy difference exceeds ``threshold``, the miner will
     promote to the next model. Promotions can continue progressively.
+
+    Only tracks and evaluates two models at a time: current and next candidate.
+    All other models remain inactive to optimize resource usage.
     """
 
-    total_predictions: int
-    correct_predictions: list[int]
     offline_training: bool = False
 
     def __init__(
@@ -1540,13 +1543,13 @@ class Promotion(LiveMultiMiner):
         # selection state
         self.current_index = 0
 
-        # keep totals as well (for compatibility / diagnostics)
+        # Only track accuracy for active models (current and next)
         self.total_predictions = 0
-        self.correct_predictions = [0] * len(self.models)
+        self.current_correct = 0  # accuracy counter for current model
+        self.next_correct = 0  # accuracy counter for next model
 
-        # counters to record how many times the next model outperformed the current
-        # for each adjacent pair (index i tracks votes for promoting i -> i+1)
-        self.promotion_votes: list[int] = [0] * max(0, len(self.models) - 1)
+        # vote counter for promoting current -> next
+        self.promotion_votes = 0
 
     def case_metrics(self, case_id: str | tuple[str, ...]) -> Metrics:
         """Return the metrics from the currently selected model."""
@@ -1560,6 +1563,8 @@ class Promotion(LiveMultiMiner):
         candidate model. When the count of votes for promoting from the
         current model to the next reaches ``min_votes`` and the cumulative
         accuracy difference exceeds ``threshold``, a promotion is triggered.
+
+        Upon promotion, accuracy counters are reset so new active models start fresh.
         """
         num_models = len(self.models)
         promoted = False
@@ -1568,28 +1573,31 @@ class Promotion(LiveMultiMiner):
             cur = self.current_index
             nxt = cur + 1
 
-            # compute cumulative accuracies
-            cur_acc = self.correct_predictions[cur] / self.total_predictions if self.total_predictions > 0 else 0.0
-            nxt_acc = self.correct_predictions[nxt] / self.total_predictions if self.total_predictions > 0 else 0.0
+            # compute cumulative accuracies for active models only
+            cur_acc = self.current_correct / self.total_predictions if self.total_predictions > 0 else 0.0
+            nxt_acc = self.next_correct / self.total_predictions if self.total_predictions > 0 else 0.0
 
-            # Check if votes for this pair reached the threshold count and the
-            # cumulative accuracy difference exceeds the relative threshold.
-            votes = self.promotion_votes[cur] if cur < len(self.promotion_votes) else 0
-            if votes >= self.min_votes and (nxt_acc - cur_acc) > self.threshold:
+            # Check if votes reached threshold count and accuracy difference exceeds threshold
+            if self.promotion_votes >= self.min_votes and (nxt_acc - cur_acc) > self.threshold:
                 logger.info(
                     "Promoting model %d -> %d (votes %d, acc %.4f -> %.4f, threshold %.4f)",
                     cur,
                     nxt,
-                    votes,
+                    self.promotion_votes,
                     cur_acc,
                     nxt_acc,
                     self.threshold,
                 )
                 self.current_index = nxt
                 promoted = True
-                # reset votes for the promoted boundary (not needed further)
-                if cur < len(self.promotion_votes):
-                    self.promotion_votes[cur] = 0
+
+                # Reset accuracy counters for new active pair
+                self.total_predictions = 0
+                self.current_correct = 0
+                self.next_correct = 0
+                self.promotion_votes = 0
+
+                logger.info("Accuracy counters reset after promotion to model %d", self.current_index)
                 # continue loop to see if further promotion is immediately possible
             else:
                 break
@@ -1686,56 +1694,108 @@ class Promotion(LiveMultiMiner):
                 self.total_predictions += 1
                 logger.debug("Promotion.evaluate: total_predictions %d -> %d", prev_total, self.total_predictions)
 
-                # Determine correctness per model for this time step
-                correctness: list[int] = []
-                if current_state is not None and isinstance(current_state, tuple):
-                    for idx, (model, model_state) in enumerate(zip(self.models, current_state, strict=True)):
-                        m_metrics = model.state_metrics(model_state)
-                        m_pred = metrics_prediction(m_metrics, config=self.config)
-                        correct = 1 if (m_pred is not None and m_pred.get("activity") == actual_next_activity) else 0
-                        correctness.append(correct)
-                        if correct:
-                            prev = self.correct_predictions[idx]
-                            self.correct_predictions[idx] += 1
-                            logger.debug(
-                                "Promotion.evaluate: model %d predicted %s, actual %s, correct_predictions %d -> %d",
-                                idx,
-                                m_pred.get("activity") if m_pred is not None else None,
-                                actual_next_activity,
-                                prev,
-                                self.correct_predictions[idx],
-                            )
-                else:
-                    for idx, model in enumerate(self.models):
-                        m_metrics = model.case_metrics(event.get("case_id"))
-                        m_pred = metrics_prediction(m_metrics, config=self.config)
-                        correct = 1 if (m_pred is not None and m_pred.get("activity") == actual_next_activity) else 0
-                        correctness.append(correct)
-                        if correct:
-                            prev = self.correct_predictions[idx]
-                            self.correct_predictions[idx] += 1
-                            logger.debug(
-                                "Promotion.evaluate: model %d (case_metrics) predicted %s, actual %s, "
-                                "correct_predictions %d -> %d",
-                                idx,
-                                m_pred.get("activity") if m_pred is not None else None,
-                                actual_next_activity,
-                                prev,
-                                self.correct_predictions[idx],
-                            )
-
-                # Update promotion votes for the current boundary only (cur -> cur+1)
+                # Determine correctness for ACTIVE models only (current and next)
                 cur = self.current_index
                 nxt = cur + 1
+
+                cur_correct = 0
+                nxt_correct = 0
+
+                if current_state is not None and isinstance(current_state, tuple):
+                    # Evaluate current model
+                    cur_model = self.models[cur]
+                    cur_state = current_state[cur]
+                    cur_metrics = cur_model.state_metrics(cur_state)
+                    cur_pred = metrics_prediction(cur_metrics, config=self.config)
+                    cur_correct = (
+                        1 if (cur_pred is not None and cur_pred.get("activity") == actual_next_activity) else 0
+                    )
+
+                    if cur_correct:
+                        prev = self.current_correct
+                        self.current_correct += 1
+                        logger.debug(
+                            "Promotion.evaluate: current model %d predicted %s, actual %s, current_correct %d -> %d",
+                            cur,
+                            cur_pred.get("activity") if cur_pred is not None else None,
+                            actual_next_activity,
+                            prev,
+                            self.current_correct,
+                        )
+
+                    # Evaluate next model only if it exists
+                    if nxt < len(self.models):
+                        nxt_model = self.models[nxt]
+                        nxt_state = current_state[nxt]
+                        nxt_metrics = nxt_model.state_metrics(nxt_state)
+                        nxt_pred = metrics_prediction(nxt_metrics, config=self.config)
+                        nxt_correct = (
+                            1 if (nxt_pred is not None and nxt_pred.get("activity") == actual_next_activity) else 0
+                        )
+
+                        if nxt_correct:
+                            prev = self.next_correct
+                            self.next_correct += 1
+                            logger.debug(
+                                "Promotion.evaluate: next model %d predicted %s, actual %s, next_correct %d -> %d",
+                                nxt,
+                                nxt_pred.get("activity") if nxt_pred is not None else None,
+                                actual_next_activity,
+                                prev,
+                                self.next_correct,
+                            )
+                else:
+                    # Evaluate current model using case_metrics
+                    cur_model = self.models[cur]
+                    cur_metrics = cur_model.case_metrics(event.get("case_id"))
+                    cur_pred = metrics_prediction(cur_metrics, config=self.config)
+                    cur_correct = (
+                        1 if (cur_pred is not None and cur_pred.get("activity") == actual_next_activity) else 0
+                    )
+
+                    if cur_correct:
+                        prev = self.current_correct
+                        self.current_correct += 1
+                        logger.debug(
+                            "Promotion.evaluate: current model %d (case_metrics) predicted %s, actual %s, "
+                            "current_correct %d -> %d",
+                            cur,
+                            cur_pred.get("activity") if cur_pred is not None else None,
+                            actual_next_activity,
+                            prev,
+                            self.current_correct,
+                        )
+
+                    # Evaluate next model only if it exists
+                    if nxt < len(self.models):
+                        nxt_model = self.models[nxt]
+                        nxt_metrics = nxt_model.case_metrics(event.get("case_id"))
+                        nxt_pred = metrics_prediction(nxt_metrics, config=self.config)
+                        nxt_correct = (
+                            1 if (nxt_pred is not None and nxt_pred.get("activity") == actual_next_activity) else 0
+                        )
+
+                        if nxt_correct:
+                            prev = self.next_correct
+                            self.next_correct += 1
+                            logger.debug(
+                                "Promotion.evaluate: next model %d (case_metrics) predicted %s, actual %s, "
+                                "next_correct %d -> %d",
+                                nxt,
+                                nxt_pred.get("activity") if nxt_pred is not None else None,
+                                actual_next_activity,
+                                prev,
+                                self.next_correct,
+                            )
+
+                # Update promotion votes based on active models only
                 if nxt < len(self.models):
-                    cur_correct = correctness[cur] if cur < len(correctness) else 0
-                    nxt_correct = correctness[nxt] if nxt < len(correctness) else 0
                     # increment when next correct and current incorrect; decrement when opposite
                     if nxt_correct > cur_correct:
-                        self.promotion_votes[cur] = self.promotion_votes[cur] + 1
+                        self.promotion_votes = self.promotion_votes + 1
                     elif cur_correct > nxt_correct:
                         # penalize contrary evidence but don't go below zero
-                        self.promotion_votes[cur] = max(0, self.promotion_votes[cur] - 1)
+                        self.promotion_votes = max(0, self.promotion_votes - 1)
 
                 # after updating votes, potentially promote
                 self._try_promote()
@@ -1759,14 +1819,42 @@ class Promotion(LiveMultiMiner):
                 # Update shared statistics
                 self.update_stats(event, prediction, current_state) # type: ignore  # noqa: PGH003
 
-                # Record model usage for ensemble/miner if applicable
+                # Record model usage only for active models
                 if isinstance(current_state, tuple):
-                    metrics_list = [
-                        model.state_metrics(ms) if hasattr(model, "state_metrics") else empty_metrics()
-                        for model, ms in zip(self.models, current_state, strict=True)
-                    ]
+                    # Only collect metrics for active models (current and next if exists)
+                    active_metrics = []
+                    cur = self.current_index
+                    nxt = cur + 1
+
+                    cur_model = self.models[cur]
+                    cur_state = current_state[cur]
+                    active_metrics.append(
+                        cur_model.state_metrics(cur_state) if hasattr(cur_model, "state_metrics") else empty_metrics()
+                    )
+
+                    if nxt < len(self.models):
+                        nxt_model = self.models[nxt]
+                        nxt_state = current_state[nxt]
+                        nxt_metrics = (
+                            nxt_model.state_metrics(nxt_state)
+                            if hasattr(nxt_model, "state_metrics")
+                            else empty_metrics()
+                        )
+                        active_metrics.append(nxt_metrics)
+
+                    metrics_list = active_metrics
                 else:
-                    metrics_list = [model.state_metrics(current_state) for model in self.models]
+                    # Only collect metrics for active models
+                    active_metrics = []
+                    cur = self.current_index
+                    nxt = cur + 1
+
+                    active_metrics.append(self.models[cur].state_metrics(current_state))
+                    if nxt < len(self.models):
+                        active_metrics.append(self.models[nxt].state_metrics(current_state))
+
+                    metrics_list = active_metrics
+
                 ensemble_activity = prediction["activity"] if prediction is not None else None
                 self.record_model_event(
                     actual_activity=actual_next_activity,
@@ -1808,6 +1896,78 @@ class Promotion(LiveMultiMiner):
 
         elapsed = time.time() - eval_start_time - pause_time
         return elapsed, predicted_vector
+
+    def update(self, event: Event) -> None:
+        """
+        Update only the active models (current and next candidate).
+
+        Inactive models are not updated to save computational resources.
+        Tracks accuracy for active models only.
+        """
+        case_id = event["case_id"]
+        activity = event["activity"]
+
+        cur = self.current_index
+        nxt = cur + 1
+
+        if not self.offline_training:
+            prev_total = self.total_predictions
+            self.total_predictions += 1
+            logger.debug("Promotion.update: total_predictions %d -> %d", prev_total, self.total_predictions)
+
+        # Update and track accuracy for current model
+        cur_model = self.models[cur]
+        pred = probs_prediction(cur_model.case_metrics(case_id)["probs"], config=self.config)
+        if not self.offline_training and pred is not None and pred.get("activity") == activity:
+            prev = self.current_correct
+            self.current_correct += 1
+            logger.debug(
+                "Promotion.update: current model %d predicted %s, actual %s, current_correct %d -> %d",
+                cur,
+                pred.get("activity"),
+                activity,
+                prev,
+                self.current_correct,
+            )
+        cur_model.update(event)
+
+        # Update and track accuracy for next model if it exists
+        if nxt < len(self.models):
+            nxt_model = self.models[nxt]
+            pred = probs_prediction(nxt_model.case_metrics(case_id)["probs"], config=self.config)
+            if not self.offline_training and pred is not None and pred.get("activity") == activity:
+                prev = self.next_correct
+                self.next_correct += 1
+                logger.debug(
+                    "Promotion.update: next model %d predicted %s, actual %s, next_correct %d -> %d",
+                    nxt,
+                    pred.get("activity"),
+                    activity,
+                    prev,
+                    self.next_correct,
+                )
+            nxt_model.update(event)
+
+            # Update promotion votes
+            cur_pred = probs_prediction(cur_model.case_metrics(case_id)["probs"], config=self.config)
+            nxt_pred = probs_prediction(nxt_model.case_metrics(case_id)["probs"], config=self.config)
+
+            cur_correct = 1 if (cur_pred is not None and cur_pred.get("activity") == activity) else 0
+            nxt_correct = 1 if (nxt_pred is not None and nxt_pred.get("activity") == activity) else 0
+
+            if nxt_correct > cur_correct:
+                self.promotion_votes = self.promotion_votes + 1
+            elif cur_correct > nxt_correct:
+                self.promotion_votes = max(0, self.promotion_votes - 1)
+
+            # Try to promote after update
+            self._try_promote()
+
+        # Update modified cases only from active models
+        self.modified_cases = set()
+        self.modified_cases.update(cur_model.get_modified_cases())
+        if nxt < len(self.models):
+            self.modified_cases.update(self.models[nxt].get_modified_cases())
 
 
 # ============================================================
