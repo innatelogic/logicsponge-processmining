@@ -1,3 +1,13 @@
+"""
+Generate accuracy-by-window-size plots from summary CSV files.
+
+Each *summary.csv file found under the specified root folder
+will produce a corresponding PNG plot next to it,
+and a copy will be placed on the user's Desktop.
+
+Usage: python summary_to_png.py results/final-fraction-025
+"""
+
 from __future__ import annotations
 
 import csv
@@ -12,6 +22,95 @@ import numpy as np
 from matplotlib import rcParams
 
 logger = logging.getLogger(__name__)
+
+
+def compute_interruption_best_acc(interruption_length: int, window_size: int) -> float:
+    """Compute the best achievable accuracy for the Interruption dataset."""
+    accuracy = (interruption_length - 3) / interruption_length
+
+    addon_1 = 1 if window_size >= interruption_length + 1 else 0
+
+    addon_2 = 2 * max(0, interruption_length + 1 - min(3, window_size)) / (interruption_length - 1)
+
+    accuracy += (addon_1 + addon_2) / interruption_length
+
+    return float(accuracy * 100.0)
+
+
+def baseline_curve(data_name: str) -> list[tuple[int, float]]:
+    """
+    Return a baseline accuracy-by-window curve for reference in plots.
+
+    Currently uses hardcoded values for known datasets.
+    """
+    baseline_data = {
+        "Synthetic111000": [
+            (1, float(2/3 * 100)),
+            (2, float(2/3 * 100)),
+            (3, 100.0),
+            *[(x, 100.0) for x in range(4, 9)],
+            *[(x, 100.0) for x in [2**(3+i) for i in range(6)]]
+        ],
+        "Synthetic11100": [
+            (1, 60.0),
+            (2, 80.0),
+            (3, 100.0),
+            *[(x, 100.0) for x in range(4, 9)],
+            *[(x, 100.0) for x in [2**(3+i) for i in range(6)]]
+        ],
+        "Random_Decision_win2": [
+            (1, 50.0),
+            (2, float(2/3 * 100)),
+            (3, float(2/3 * 100)),
+            (4, float(5/6 * 100)),
+            *[(x, float(5/6 * 100)) for x in range(5, 9)],
+            *[(x, float(5/6 * 100)) for x in [2**(3+i) for i in range(6)]]
+        ],
+        "x1x0": [
+            (1, 50.0),
+            (2, float(5/8 * 100)),
+            (3, float(13/16 * 100)),
+            (4, float(13/16 * 100)),
+            (5, float(7/8 * 100)),
+            *[(x, float(7/8 * 100)) for x in range(6, 9)],
+            *[(x, float(7/8 * 100)) for x in [2**(3+i) for i in range(6)]]
+        ],
+        "x10x01": [
+            (1, float(2/3 * 100)),
+            (2, float(2/3 * 100)),
+            (3, float(5/6 * 100)),
+            (4, float(5/6 * 100)),
+            (5, float(7/8 * 100)),
+            (6, float(7/8 * 100)),
+            (7, float(11/12 * 100)),
+            *[(x, float(11/12 * 100)) for x in [2**(3+i) for i in range(6)]],
+        ],
+        "Interruption_5": [
+            *[
+                (x, compute_interruption_best_acc(interruption_length=5, window_size=x))
+                for x in [2**i for i in range(9)]
+            ]
+        ],
+        "Interruption_10": [
+            *[
+                (x, compute_interruption_best_acc(interruption_length=10, window_size=x))
+                for x in [2**i for i in range(9)]
+            ]
+        ],
+        "Interruption_20": [
+            *[
+                (x, compute_interruption_best_acc(interruption_length=20, window_size=x))
+                for x in [2**i for i in range(9)]
+            ]
+        ],
+        "Interruption_30": [
+            *[
+                (x, compute_interruption_best_acc(interruption_length=30, window_size=x))
+                for x in [2**i for i in range(9)]
+            ]
+        ],
+    }
+    return baseline_data.get(data_name, [])
 
 
 # ----------------------------------------------------------------------
@@ -53,6 +152,20 @@ def plot_accuracy_by_window_from_csv(csv_path: Path, desktop_label: str | None =
 
     Output PNG is written next to the CSV.
     """
+    # Extract dataset name from CSV filename
+    # Expected format: YYYY-MM-DD_HH-MM_DatasetName_summary.csv
+    dataset_name = None
+    csv_stem = csv_path.stem
+    if "_summary" in csv_stem:
+        # Remove the "_summary" suffix and the date prefix
+        parts = csv_stem.replace("_summary", "").split("_")
+        # Skip date (YYYY-MM-DD) and time (HH-MM) parts, join the rest
+        if len(parts) >= 3:
+            dataset_name = "_".join(parts[2:])
+
+    # Get baseline curve for this dataset if available
+    baseline = baseline_curve(dataset_name) if dataset_name else []
+
     # family -> window_size -> list[accuracy]
     data: dict[str, dict[int, list[float]]] = {
         "ngram": defaultdict(list),
@@ -128,21 +241,47 @@ def plot_accuracy_by_window_from_csv(csv_path: Path, desktop_label: str | None =
     plt.plot(xs, transformer_vals, marker="s", label="Transformer")
     plt.plot(xs, lstm_vals, marker="^", label="LSTM")
 
+    # Plot baseline curve if available
+    baseline_xs = None
+    baseline_ys = None
+    if baseline:
+        baseline_sorted = sorted(baseline, key=lambda t: t[0])
+        baseline_xs = np.array([t[0] for t in baseline_sorted], dtype=float)
+        baseline_ys = np.array([t[1] for t in baseline_sorted], dtype=float)
+        plt.plot(
+            baseline_xs,
+            baseline_ys,
+            marker="D",
+            markersize=6,
+            markerfacecolor="none",
+            markeredgecolor="k",
+            color="k",
+            linestyle="--",
+            label="Theoretical Best",
+        )
+
     plt.xscale("log", base=2)
 
-    # Powers-of-two ticks
-    min_x = max(xs.min(), 1)
-    max_x = xs.max()
-    min_exp = math.floor(math.log2(min_x))
-    max_exp = math.ceil(math.log2(max_x))
-    ticks = [2**e for e in range(min_exp, max_exp + 1)]
-    plt.xticks(ticks, [str(t) for t in ticks])
+    # Powers-of-two ticks - consider baseline xs too when computing range
+    all_xs_for_ticks = np.concatenate([xs, baseline_xs]) if baseline_xs is not None and baseline_xs.size > 0 else xs
+
+    if all_xs_for_ticks.size > 0:
+        min_x = max(float(all_xs_for_ticks.min()), 1.0)
+        max_x = float(all_xs_for_ticks.max())
+        min_exp = math.floor(math.log2(min_x))
+        max_exp = math.ceil(math.log2(max_x))
+        ticks = [2**e for e in range(min_exp, max_exp + 1) if 2**e >= min_x and 2**e <= max_x]
+    else:
+        ticks = []
+
+    if ticks:
+        plt.xticks(ticks, [str(t) for t in ticks])
     plt.minorticks_off()
 
     plt.xlabel("Window size")
     plt.ylabel("Accuracy (%)")
     plt.ylim(0, 100)
-    plt.title("Model accuracy vs window size")
+    # plt.title("Model accuracy vs window size")
     plt.grid(axis="y", linestyle="--", alpha=0.3)
     plt.grid(axis="x", linestyle="--", alpha=0.3)
     plt.legend()
