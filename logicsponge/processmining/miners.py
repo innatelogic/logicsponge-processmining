@@ -1794,12 +1794,9 @@ class Promotion(MultiMiner):
 
                 # Update promotion votes based on active models only
                 if nxt < len(self.models):
-                    # increment when next correct and current incorrect; decrement when opposite
+                    # increment when next correct and current incorrect; do NOT decrement
                     if nxt_correct > cur_correct:
                         self.promotion_votes = self.promotion_votes + 1
-                    elif cur_correct > nxt_correct:
-                        # penalize contrary evidence but don't go below zero
-                        self.promotion_votes = max(0, self.promotion_votes - 1)
 
                 # after updating votes, potentially promote
                 self._try_promote()
@@ -1923,51 +1920,53 @@ class Promotion(MultiMiner):
         logger.debug("Promotion.update: total_predictions %d -> %d", prev_total, self.total_predictions)
 
         # Update and track accuracy for current model
+        # Access models
         cur_model = self.models[cur]
-        cur_model.update(event)
+        nxt_model = self.models[nxt] if nxt < len(self.models) else None
 
-        pred = probs_prediction(cur_model.case_metrics(case_id)["probs"], config=self.config)
-        if pred is not None and pred.get("activity") == activity:
+        # Compute predictions BEFORE updating models to keep evaluation symmetric
+        cur_pred = probs_prediction(cur_model.case_metrics(case_id)["probs"], config=self.config)
+        nxt_pred = (
+            probs_prediction(nxt_model.case_metrics(case_id)["probs"], config=self.config) if nxt_model else None
+        )
+
+        # Update and track accuracy counters based on pre-update predictions
+        if cur_pred is not None and cur_pred.get("activity") == activity:
             prev = self.current_correct
             self.current_correct += 1
             logger.debug(
                 "Promotion.update: current model %d predicted %s, actual %s, current_correct %d -> %d",
                 cur,
-                pred.get("activity"),
+                cur_pred.get("activity"),
                 activity,
                 prev,
                 self.current_correct,
             )
 
+        if nxt_model is not None and not self.offline_update and nxt_pred is not None and nxt_pred.get("activity") == activity:
+            prev = self.next_correct
+            self.next_correct += 1
+            logger.debug(
+                "Promotion.update: next model %d predicted %s, actual %s, next_correct %d -> %d",
+                nxt,
+                nxt_pred.get("activity"),
+                activity,
+                prev,
+                self.next_correct,
+            )
 
-        # Update and track accuracy for next model if it exists
-        if nxt < len(self.models):
-            nxt_model = self.models[nxt]
-            pred = probs_prediction(nxt_model.case_metrics(case_id)["probs"], config=self.config)
-            if not self.offline_update and pred is not None and pred.get("activity") == activity:
-                prev = self.next_correct
-                self.next_correct += 1
-                logger.debug(
-                    "Promotion.update: next model %d predicted %s, actual %s, next_correct %d -> %d",
-                    nxt,
-                    pred.get("activity"),
-                    activity,
-                    prev,
-                    self.next_correct,
-                )
+        # Now update active models (cur first, then next)
+        cur_model.update(event)
+        if nxt_model is not None:
             nxt_model.update(event)
 
-            # Update promotion votes
-            cur_pred = probs_prediction(cur_model.case_metrics(case_id)["probs"], config=self.config)
-            nxt_pred = probs_prediction(nxt_model.case_metrics(case_id)["probs"], config=self.config)
+        # Update promotion votes using the same pre-update predictions
+        cur_correct = 1 if (cur_pred is not None and cur_pred.get("activity") == activity) else 0
+        nxt_correct = 1 if (nxt_pred is not None and nxt_pred.get("activity") == activity) else 0
 
-            cur_correct = 1 if (cur_pred is not None and cur_pred.get("activity") == activity) else 0
-            nxt_correct = 1 if (nxt_pred is not None and nxt_pred.get("activity") == activity) else 0
-
+        if nxt_model is not None:
             if nxt_correct > cur_correct:
                 self.promotion_votes = self.promotion_votes + 1
-            elif cur_correct > nxt_correct:
-                self.promotion_votes = max(0, self.promotion_votes - 1)
 
             # Try to promote after update
             self._try_promote()
