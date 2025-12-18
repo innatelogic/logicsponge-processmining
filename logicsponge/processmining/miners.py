@@ -1111,7 +1111,7 @@ class LiveMultiMiner(MultiMiner):
 
     total_predictions: int
     correct_predictions: list[int]
-    offline_training: bool = False
+    offline_update: bool = False
 
     def __init__(self, *args: dict[str, Any], **kwargs: Any) -> None:  # noqa: ANN401
         """Initialize the LiveMultiMiner class."""
@@ -1123,17 +1123,21 @@ class LiveMultiMiner(MultiMiner):
         """
         Update underlying models and track per-model accuracies.
 
-        - Increments `total_predictions` once per call (unless `offline_training`).
+        - Increments `total_predictions` once per call (unless `offline_update`).
         - For each model, obtains `case_metrics` and checks the top prediction
           against the actual activity; increments `correct_predictions` when
           appropriate.
         - Always calls the underlying model's `update` and aggregates
           `modified_cases`.
         """
+        if self.offline_update:
+            super().update(event)
+            return
+
         case_id = event["case_id"]
         activity = event["activity"]
 
-        if not self.offline_training:
+        if not self.offline_update:
             prev_total = self.total_predictions
             self.total_predictions += 1
             logger.debug("LiveMultiMiner.update: total_predictions %d -> %d", prev_total, self.total_predictions)
@@ -1144,7 +1148,7 @@ class LiveMultiMiner(MultiMiner):
         # ensemble_pred = probs_prediction(ensemble_metrics["probs"], config=self.config)
         # ensemble_activity = ensemble_pred.get("activity") if ensemble_pred is not None else None
 
-        # if not self.offline_training:
+        # if not self.offline_update:
         #     # Record model usage event (compares model predictions with ensemble prediction)
         #     self.record_model_event(
         #         actual_activity=activity, ensemble_prediction=ensemble_activity, metrics_list=metrics_list
@@ -1153,7 +1157,7 @@ class LiveMultiMiner(MultiMiner):
 
         for i, model in enumerate(self.models):
             pred = probs_prediction(model.case_metrics(case_id)["probs"], config=self.config)
-            if not self.offline_training and pred is not None and pred.get("activity") == activity:
+            if not self.offline_update and pred is not None and pred.get("activity") == activity:
                 prev = self.correct_predictions[i]
                 self.correct_predictions[i] += 1
                 logger.debug(
@@ -1197,7 +1201,7 @@ class AdaptiveVoting(LiveMultiMiner):
 
     total_predictions: int
     correct_predictions: list[int]
-    offline_training: bool = False
+    offline_update: bool = False
 
     def __init__(self, *args: dict[str, Any], select_best: str = "acc", **kwargs: Any) -> None:  # noqa: ANN401
         """Initialize the AdaptiveVoting class."""
@@ -1525,7 +1529,7 @@ class Promotion(MultiMiner):
     All other models remain inactive to optimize resource usage.
     """
 
-    offline_training: bool = False
+    offline_update: bool = False
 
     def __init__(
         self,
@@ -1904,21 +1908,26 @@ class Promotion(MultiMiner):
         Inactive models are not updated to save computational resources.
         Tracks accuracy for active models only.
         """
+        if self.offline_update:
+            super().update(event)
+            return
+
         case_id = event["case_id"]
         activity = event["activity"]
 
         cur = self.current_index
         nxt = cur + 1
 
-        if not self.offline_training:
-            prev_total = self.total_predictions
-            self.total_predictions += 1
-            logger.debug("Promotion.update: total_predictions %d -> %d", prev_total, self.total_predictions)
+        prev_total = self.total_predictions
+        self.total_predictions += 1
+        logger.debug("Promotion.update: total_predictions %d -> %d", prev_total, self.total_predictions)
 
         # Update and track accuracy for current model
         cur_model = self.models[cur]
+        cur_model.update(event)
+
         pred = probs_prediction(cur_model.case_metrics(case_id)["probs"], config=self.config)
-        if not self.offline_training and pred is not None and pred.get("activity") == activity:
+        if pred is not None and pred.get("activity") == activity:
             prev = self.current_correct
             self.current_correct += 1
             logger.debug(
@@ -1929,13 +1938,13 @@ class Promotion(MultiMiner):
                 prev,
                 self.current_correct,
             )
-        cur_model.update(event)
+
 
         # Update and track accuracy for next model if it exists
         if nxt < len(self.models):
             nxt_model = self.models[nxt]
             pred = probs_prediction(nxt_model.case_metrics(case_id)["probs"], config=self.config)
-            if not self.offline_training and pred is not None and pred.get("activity") == activity:
+            if not self.offline_update and pred is not None and pred.get("activity") == activity:
                 prev = self.next_correct
                 self.next_correct += 1
                 logger.debug(

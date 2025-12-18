@@ -794,8 +794,8 @@ for iteration in range(N_ITERATIONS):
         if "alergia" in strategy_name or "bayesian" in strategy_name:
             continue
         if isinstance(strategy, (AdaptiveVoting, Promotion)):
-            strategy.offline_training = True
-            logger.info("AdaptiveVoting offline training enabled for %s", strategy_name)
+            strategy.offline_update = True
+            logger.info("AdaptiveVoting offline update enabled for %s", strategy_name)
 
         # ============================================================
         # Training loop
@@ -817,8 +817,8 @@ for iteration in range(N_ITERATIONS):
         logger.info(msg)
 
         if isinstance(strategy, (AdaptiveVoting, Promotion)):
-            strategy.offline_training = False
-            logger.info("AdaptiveVoting offline training disabled for %s", strategy_name)
+            strategy.offline_update = False
+            logger.info("AdaptiveVoting offline update disabled for %s", strategy_name)
 
         evaluation_time, prediction_vector = strategy.evaluate(
             test_data,

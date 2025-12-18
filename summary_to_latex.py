@@ -162,10 +162,10 @@ if __name__ == "__main__":
         "adaptive (2, 3, 5, 8) prob",
         "promotions (2, 3, 4, 5) prob",
         "promotions (2, 3, 5, 8) prob",
-        # "promotions (2, 4, 6, 8, 12, 16, 24, 32) prob",
+        "promotions (2, 4, 6, 8, 12, 16, 24, 32) prob",
         "promotion (2, 3, 4, 5) prob",
         "promotion (2, 3, 5, 8) prob",
-        # "promotion (2, 4, 6, 8, 12, 16, 24, 32) prob",
+        "promotion (2, 4, 6, 8, 12, 16, 24, 32) prob",
     ]
 
     model_name_map = {
@@ -176,10 +176,10 @@ if __name__ == "__main__":
     }
 
     # Patterns to match subfolders for aggregation
-    aggregation_patterns = ["synthetic111000", "synthetic11100", "random_decision_win2", "x1x0", "x10x01"]
-    # aggregation_patterns = [
-    #     "sepsis_cases", "bpi_challenge_2012", "bpi_challenge_2013", "bpi_challenge_2017", "bpi_challenge_2018"
-    # ]
+    # aggregation_patterns = ["synthetic111000", "synthetic11100", "random_decision_win2", "x1x0", "x10x01"]
+    aggregation_patterns = [
+        "sepsis_cases", "bpi_challenge_2012", "bpi_challenge_2013", "bpi_challenge_2017", "bpi_challenge_2018"
+    ]
 
     # Extract models from single CSV
     extract_models(
