@@ -1555,11 +1555,48 @@ class Promotion(MultiMiner):
         # vote counter for promoting current -> next
         self.promotion_votes = 0
 
+        # Initialize miner state as a pair: (current_model_state, next_model_state)
+        # Do not include inactive models' states.
+        nxt = self.current_index + 1
+        cur_state = self.models[self.current_index].initial_state
+        nxt_state = self.models[nxt].initial_state if nxt < len(self.models) else None
+        self.initial_state = (cur_state, nxt_state)
+
     def case_metrics(self, case_id: str | tuple[str, ...]) -> Metrics:
         """Return the metrics from the currently selected model."""
         return self.models[self.current_index].case_metrics(case_id)
 
-    def _try_promote(self) -> None:
+    def get_state_from_case(self, case_id: CaseId) -> ComposedState:
+        """Return the composed state for the active pair (current, next) for a given case."""
+        cur = self.current_index
+        nxt = cur + 1
+        cur_state = self.models[cur].get_state_from_case(case_id)
+        nxt_state = self.models[nxt].get_state_from_case(case_id) if nxt < len(self.models) else None
+        return (cur_state, nxt_state)
+
+    def get_state_info(self, state_id: ComposedState | None) -> ComposedState | None:
+        """Return the state information for the active pair only."""
+        if state_id is None:
+            return None
+        if not isinstance(state_id, tuple):
+            return None
+
+        cur = self.current_index
+        nxt = cur + 1
+
+        cur_info = (
+            self.models[cur].get_state_info(state_id[0])
+            if hasattr(self.models[cur], "get_state_info")
+            else None
+        )
+        nxt_info = (
+            self.models[nxt].get_state_info(state_id[1])
+            if nxt < len(self.models) and hasattr(self.models[nxt], "get_state_info")
+            else None
+        )
+        return (cur_info, nxt_info)
+
+    def _try_promote(self) -> bool:
         """
         Promote current_index progressively while next model outperforms it.
 
@@ -1601,6 +1638,12 @@ class Promotion(MultiMiner):
                 self.next_correct = 0
                 self.promotion_votes = 0
 
+                # Update the miner initial_state to represent the newly active pair
+                new_nxt = self.current_index + 1
+                cur_state = self.models[self.current_index].initial_state
+                nxt_state = self.models[new_nxt].initial_state if new_nxt < len(self.models) else None
+                self.initial_state = (cur_state, nxt_state)
+
                 logger.info("Accuracy counters reset after promotion to model %d", self.current_index)
                 # continue loop to see if further promotion is immediately possible
             else:
@@ -1608,14 +1651,14 @@ class Promotion(MultiMiner):
 
         if promoted:
             logger.debug("Promotion current_index now %d", self.current_index)
+        return promoted
 
     def state_act_likelihood(self, state: ComposedState | None, next_activity: ActivityName) -> float:
         """Return the likelihood of the sequence based on the currently selected model."""
         if state is None:
             return 0.0
-
-        # if composed state, pick corresponding substate for current model
-        model_state = state[self.current_index] if isinstance(state, tuple) else state
+        # state is a 2-tuple (current_state, next_state)
+        model_state = state[0] if isinstance(state, tuple) else state
 
         model = self.models[self.current_index]
         if hasattr(model, "state_act_likelihood"):
@@ -1626,13 +1669,20 @@ class Promotion(MultiMiner):
         """Return the metrics from the currently selected model."""
         if state is None:
             return empty_metrics()
-
-        # pick metrics from currently selected model
+        # pick metrics from currently selected model using active-pair convention
         model = self.models[self.current_index]
-        model_state = state[self.current_index] if isinstance(state, tuple) else state
+        model_state = state[0] if isinstance(state, tuple) else state
         model_metrics = model.state_metrics(model_state)
 
-        delays_list = [m.state_metrics(ms)["predicted_delays"] for m, ms in zip(self.models, state, strict=True)]
+        # Only collect predicted delays from the active models (current and next)
+        delays_list: list[ActivityDelays] = []
+        delays_list.append(model_metrics.get("predicted_delays", {}))
+
+        if isinstance(state, tuple) and state[1] is not None and (self.current_index + 1) < len(self.models):
+            nxt_model = self.models[self.current_index + 1]
+            nxt_state = state[1]
+            nxt_metrics = nxt_model.state_metrics(nxt_state)
+            delays_list.append(nxt_metrics.get("predicted_delays", {}))
 
         return Metrics(
             state_id=state,
@@ -1708,7 +1758,8 @@ class Promotion(MultiMiner):
                 if current_state is not None and isinstance(current_state, tuple):
                     # Evaluate current model
                     cur_model = self.models[cur]
-                    cur_state = current_state[cur]
+                    # active pair convention: state[0] is current model state
+                    cur_state = current_state[0]
                     cur_metrics = cur_model.state_metrics(cur_state)
                     cur_pred = metrics_prediction(cur_metrics, config=self.config)
                     cur_correct = (
@@ -1730,7 +1781,8 @@ class Promotion(MultiMiner):
                     # Evaluate next model only if it exists
                     if nxt < len(self.models):
                         nxt_model = self.models[nxt]
-                        nxt_state = current_state[nxt]
+                        # active pair convention: state[1] is next model state
+                        nxt_state = current_state[1]
                         nxt_metrics = nxt_model.state_metrics(nxt_state)
                         nxt_pred = metrics_prediction(nxt_metrics, config=self.config)
                         nxt_correct = (
@@ -1793,13 +1845,17 @@ class Promotion(MultiMiner):
                             )
 
                 # Update promotion votes based on active models only
-                if nxt < len(self.models):
-                    # increment when next correct and current incorrect; do NOT decrement
-                    if nxt_correct > cur_correct:
-                        self.promotion_votes = self.promotion_votes + 1
+                if nxt < len(self.models) and nxt_correct > cur_correct:
+                    self.promotion_votes = self.promotion_votes + 1
 
                 # after updating votes, potentially promote
-                self._try_promote()
+                promoted = self._try_promote()
+                if promoted:
+                    # Rebuild the local current_state to reflect the newly active pair
+                    # Use the current case id to get per-model states (inactive models' states
+                    # are only retrieved upon activation).
+                    case_id = event.get("case_id")
+                    current_state = self.get_state_from_case(case_id)
 
                 pause_start_time = time.time()
 
@@ -1828,14 +1884,16 @@ class Promotion(MultiMiner):
                     nxt = cur + 1
 
                     cur_model = self.models[cur]
-                    cur_state = current_state[cur]
+                    # active pair convention: current state is state[0]
+                    cur_state = current_state[0]
                     active_metrics.append(
                         cur_model.state_metrics(cur_state) if hasattr(cur_model, "state_metrics") else empty_metrics()
                     )
 
                     if nxt < len(self.models):
                         nxt_model = self.models[nxt]
-                        nxt_state = current_state[nxt]
+                        # active pair convention: next state is state[1]
+                        nxt_state = current_state[1]
                         nxt_metrics = (
                             nxt_model.state_metrics(nxt_state)
                             if hasattr(nxt_model, "state_metrics")
@@ -1943,7 +2001,11 @@ class Promotion(MultiMiner):
                 self.current_correct,
             )
 
-        if nxt_model is not None and not self.offline_update and nxt_pred is not None and nxt_pred.get("activity") == activity:
+        if (
+            nxt_model is not None
+            and not self.offline_update and nxt_pred is not None
+            and nxt_pred.get("activity") == activity
+        ):
             prev = self.next_correct
             self.next_correct += 1
             logger.debug(
@@ -1969,7 +2031,7 @@ class Promotion(MultiMiner):
                 self.promotion_votes = self.promotion_votes + 1
 
             # Try to promote after update
-            self._try_promote()
+            _ = self._try_promote()
 
         # Update modified cases only from active models
         self.modified_cases = set()
