@@ -57,16 +57,17 @@ if __name__ == "__main__":
 
     real_life_datasets = [
         "Sepsis_Cases",
-        # "Helpdesk",
+        "Helpdesk",
         "BPI_Challenge_2012",
         "BPI_Challenge_2013",
-        # "BPI_Challenge_2014",
+        "BPI_Challenge_2014",
         "BPI_Challenge_2017",
         "BPI_Challenge_2018",
-        # "BPI_Challenge_2019",
+        "BPI_Challenge_2019",
     ]
 
-    dataset_list = synthetic_datasets + real_life_datasets
+    # dataset_list = synthetic_datasets + real_life_datasets
+    dataset_list =  real_life_datasets
 
     # parse argument --data_prop if provided
     parser = argparse.ArgumentParser(description="Run batch experiments on multiple datasets.")
