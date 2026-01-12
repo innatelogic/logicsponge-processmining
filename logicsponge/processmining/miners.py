@@ -1687,8 +1687,39 @@ class Promotion(MultiMiner):
         return Metrics(
             state_id=state,
             probs=model_metrics["probs"],
-            predicted_delays=self.voting_delays(delays_list),
+            predicted_delays=delays_list[0],  # only return current model delays
         )
+
+    def next_state(self, current_state: ComposedState | None, activity: ActivityName) -> ComposedState | None:
+        """
+        Docstring for next_state
+        
+        :param self: Description
+        :param current_state: Description
+        :type current_state: ComposedState | None
+        :param activity: Description
+        :type activity: ActivityName
+        :return: Description
+        :rtype: Any | None
+        """
+        if current_state is None:
+            return None
+
+        cur = self.current_index
+        nxt = cur + 1
+
+        cur_model = self.models[cur]
+        cur_state = current_state[0] if isinstance(current_state, tuple) else current_state
+        next_cur_state = cur_model.next_state(cur_state, activity)
+
+        if nxt < len(self.models):
+            nxt_model = self.models[nxt]
+            nxt_state = current_state[1] if isinstance(current_state, tuple) else None
+            next_nxt_state = nxt_model.next_state(nxt_state, activity) if nxt_state is not None else None
+        else:
+            next_nxt_state = None
+
+        return (next_cur_state, next_nxt_state)
 
     def evaluate(  # noqa: C901, PLR0912, PLR0915
         self,
