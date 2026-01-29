@@ -4,28 +4,35 @@
     "batch_size": 8,
     "epochs": 20
   },
+  "transf": {
+    "lr": 0.0006,
+    "batch_size": 8,
+    "epochs": 20
+  },
   "rl": {
     "lr": 0.001,
-    "batch_size": 64,
+    "batch_size": 8,
     "epochs": 20,
     "gamma": 0.99
   },
   "lstm": {
-    "vocab_size": 50,
-    "embedding_dim": 50,
-    "hidden_dim": 128,
-    "output_dim": 50
+    "vocab_size": 64,
+    "embedding_dim": 64,
+    "hidden_dim": 256
+  },
+  "gru": {
+    "vocab_size": 64,
+    "embedding_dim": 64,
+    "hidden_dim": 256
   },
   "transformer": {
-    "vocab_size": 50,
-    "embedding_dim": 50,
-    "hidden_dim": 128,
-    "output_dim": 50
+    "vocab_size": 64,
+    "embedding_dim": 64,
+    "hidden_dim": 256
   },
   "qlearning": {
-    "vocab_size": 50,
-    "embedding_dim": 50,
-    "hidden_dim": 128,
-    "output_dim": 50
+    "vocab_size": 64,
+    "embedding_dim": 64,
+    "hidden_dim": 256
   }
 }

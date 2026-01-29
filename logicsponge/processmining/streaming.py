@@ -543,6 +543,86 @@ class PredictionCSVWriter(ls.FunctionTerm):
         return di
 
 
+class ActiveModelTraceWriter(ls.FunctionTerm):
+    """
+    Write the active model index trace for ensemble strategies during streaming.
+
+    For strategies that track which sub-model was selected at each prediction
+    (e.g., AdaptiveVoting, Promotion), this writer appends one row per event
+    to a CSV file recording the active model index.
+
+    Columns:
+    - run_id: identifier for the run
+    - strategy: name of the strategy/model
+    - event_index: incremental counter (1-based)
+    - active_model_index: index of the model that was active/selected for this prediction
+    """
+
+    def __init__(
+        self, *args, csv_path: Path, strategy_name: str, run_id: str,
+        strategy: StreamingMiner, **kwargs
+    ) -> None:
+        """Initialize the ActiveModelTraceWriter."""
+        super().__init__(*args, **kwargs)
+        self.csv_path = csv_path
+        self.strategy_name = strategy_name
+        self.run_id = run_id
+        self.strategy = strategy
+        self._event_counter = 0
+        self._header_written = False
+
+    def f(self, di: DataItem) -> DataItem:
+        """Process incoming DataItem and write active model index to CSV."""
+        # Only write if the strategy exposes the tracking attribute
+        if not hasattr(self.strategy, "last_selected_model_index"):
+            # Debug: log once why we're not writing
+            if not hasattr(self, "_logged_no_attr"):
+                logger.debug(
+                    "ActiveModelTraceWriter: strategy %s does not have last_selected_model_index attribute",
+                    self.strategy_name
+                )
+                self._logged_no_attr = True
+            return di
+
+        # Get the model index that was selected for the prediction that just happened
+        # (the StreamingActivityPredictor calls case_metrics which sets last_selected_model_index)
+        active_idx = getattr(self.strategy, "last_selected_model_index", None)
+
+        # Only write if we have a valid model index (not None)
+        if active_idx is not None:
+            self._event_counter += 1
+
+            row = {
+                "run_id": self.run_id,
+                "strategy": self.strategy_name,
+                "event_index": self._event_counter,
+                "active_model_index": active_idx,
+            }
+
+            # Ensure parent directory exists
+            self.csv_path.parent.mkdir(parents=True, exist_ok=True)
+
+            try:
+                # Check if file exists and has content to decide whether to write header
+                file_exists = self.csv_path.exists() and self.csv_path.stat().st_size > 0
+                
+                with self.csv_path.open("a", newline="") as f:
+                    writer = csv.DictWriter(f, fieldnames=list(row.keys()))
+                    # Only write header if this is the first write overall (file is empty/new)
+                    if not file_exists and not self._header_written:
+                        writer.writeheader()
+                        logger.info(
+                            "ActiveModelTraceWriter: created trace file at %s",
+                            self.csv_path
+                        )
+                    self._header_written = True
+                    writer.writerow(row)
+            except Exception as e:
+                logger.exception("ActiveModelTraceWriter: failed to write row: %s", e)
+
+        return di
+
+
 class ActualCSVWriter(ls.FunctionTerm):
     """
     Write the baseline actual activities to a CSV file once per event.

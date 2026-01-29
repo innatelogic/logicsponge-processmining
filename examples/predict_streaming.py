@@ -5,6 +5,7 @@
 import gc
 import json
 import logging
+import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -25,12 +26,14 @@ from logicsponge.processmining.miners import (
     Fallback,
     HardVoting,
     NeuralNetworkMiner,
+    Promotion,
     RLMiner,
     SoftVoting,
     WindowedNeuralNetworkMiner,
 )
 from logicsponge.processmining.neural_networks import GRUModel, LSTMModel, QNetwork, TransformerModel
 from logicsponge.processmining.streaming import (
+    ActiveModelTraceWriter,
     ActualCSVWriter,
     AddStartSymbol,
     CSVStatsWriter,
@@ -112,6 +115,16 @@ stats_to_log = []
 # create a run-specific results directory: results/{RUN_ID}
 run_results_dir = Path(f"results/{RUN_ID}_streaming")
 run_results_dir.mkdir(parents=True, exist_ok=True)
+
+# Initialize live plot server if flag is enabled
+ENABLE_LIVE_PLOTS = getattr(_args, "live_plots", False)
+if ENABLE_LIVE_PLOTS:
+    try:
+        from logicsponge.processmining.live_plots import start_live_plot_server
+        active_model_trace_path = run_results_dir / f"{RUN_ID}_active_model_trace.csv"
+        start_live_plot_server(active_model_trace_path, port=5000)
+    except Exception as e:
+        logger.warning("Failed to start live plot server: %s", e)
 
 # stats and predictions live inside the run folder
 stats_file_path = run_results_dir / f"{RUN_ID}_stats_streaming.csv"
@@ -480,6 +493,49 @@ adaptive_voting = StreamingActivityPredictor(
         config=config,
     )
 )
+
+# Define ngram combinations and selection criteria for adaptive voting and promotion variants
+ADAPTIVE_NGRAM = SOFT_VOTING_NGRAMS  # Reuse the same gram combinations
+SELECT_BEST_ARGS = ["prob"]  # Selection criterion: "prob" for probability-based
+
+# Adaptive voting variants (with different model combinations and selection criteria)
+ADAPTIVE_VOTING_MODELS: dict[str, StreamingActivityPredictor] = {}
+for grams in ADAPTIVE_NGRAM:
+    for select_best_arg in SELECT_BEST_ARGS:
+        name = f"adaptive {grams} {select_best_arg}"
+        ADAPTIVE_VOTING_MODELS[name] = StreamingActivityPredictor(
+            strategy=AdaptiveVoting(
+                models=[
+                    BasicMiner(algorithm=Bag()),
+                    BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
+                    BasicMiner(algorithm=NGram(window_length=grams[0])),
+                    BasicMiner(algorithm=NGram(window_length=grams[1])),
+                    BasicMiner(algorithm=NGram(window_length=grams[2])),
+                    BasicMiner(algorithm=NGram(window_length=grams[3])),
+                ],
+                select_best=select_best_arg,
+                config=config,
+            )
+        )
+
+# Promotion variants (sequential model selection)
+PROMOTION_MODELS: dict[str, StreamingActivityPredictor] = {}
+for grams in ADAPTIVE_NGRAM:
+    for select_best_arg in SELECT_BEST_ARGS:
+        name = f"promotion {grams} {select_best_arg}"
+        PROMOTION_MODELS[name] = StreamingActivityPredictor(
+            strategy=Promotion(
+                models=[
+                    BasicMiner(algorithm=Bag()),
+                    BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
+                    BasicMiner(algorithm=NGram(window_length=grams[0])),
+                    BasicMiner(algorithm=NGram(window_length=grams[1])),
+                    BasicMiner(algorithm=NGram(window_length=grams[2])),
+                    BasicMiner(algorithm=NGram(window_length=grams[3])),
+                ],
+                config=config,
+            )
+        )
 
 # Initialize LSTMs/GRUs (base models without window constraint) using run_config
 nn_cfg = run_config.get("nn", {})
@@ -863,10 +919,11 @@ models = [
     "fallback_ngram8to_ooo",
     "complex_fallback",
     "hard_voting",
-    "adaptive_voting",
     "soft_voting",
     "soft_voting_star",
     *list(soft_voting_predictors.keys()),
+    *list(ADAPTIVE_VOTING_MODELS.keys()),
+    *list(PROMOTION_MODELS.keys()),
 ]
 
 if MODEL_SELECTOR.get("lstm", False):
@@ -979,6 +1036,40 @@ prediction_group = prediction_group | (
     )
     * Evaluation("hard_voting")
 )
+
+# Add adaptive voting variants with active model trace
+for strategy_name, predictor in ADAPTIVE_VOTING_MODELS.items():
+    prediction_group = prediction_group | (
+        predictor
+        * PredictionCSVWriter(
+            csv_path=predictions_dir / f"{strategy_name}.csv",
+            model_name=strategy_name,
+        )
+        * ActiveModelTraceWriter(
+            csv_path=run_results_dir / f"{RUN_ID}_active_model_trace.csv",
+            strategy_name=strategy_name,
+            run_id=RUN_ID,
+            strategy=predictor.strategy,
+        )
+        * Evaluation(strategy_name)
+    )
+
+# Add promotion variants with active model trace
+for strategy_name, predictor in PROMOTION_MODELS.items():
+    prediction_group = prediction_group | (
+        predictor
+        * PredictionCSVWriter(
+            csv_path=predictions_dir / f"{strategy_name}.csv",
+            model_name=strategy_name,
+        )
+        * ActiveModelTraceWriter(
+            csv_path=run_results_dir / f"{RUN_ID}_active_model_trace.csv",
+            strategy_name=strategy_name,
+            run_id=RUN_ID,
+            strategy=predictor.strategy,
+        )
+        * Evaluation(strategy_name)
+    )
 
 for name, predictor in soft_voting_predictors.items():
     prediction_group = prediction_group | (

@@ -728,6 +728,13 @@ def build_cli_parser() -> argparse.ArgumentParser:
         default=1.0,
         help="Fraction of the dataset to use (float in (0,1], default 1.0)."
     )
+    parser.add_argument(
+        "--live-plots",
+        dest="live_plots",
+        action="store_true",
+        default=False,
+        help="Enable live plot of active model trace in a web dashboard (accessible at http://localhost:5000).",
+    )
     return parser
 
 

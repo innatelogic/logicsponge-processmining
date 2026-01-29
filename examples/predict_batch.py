@@ -249,7 +249,7 @@ ADAPTIVE_NGRAM = [*VOTING_NGRAMS, (2, 4, 6, 8, 12, 16, 24, 32)]
 
 SELECT_BEST_ARGS = ["prob"]  # ["acc", "prob", "prob x acc"]
 
-WINDOW_RANGE = [2, 4, 8, 16, 32] #[1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 48, 64, 96, 128, 192, 256]  # 8, 9, 10, 12, 14, 16]
+WINDOW_RANGE = [2, 4, 8, 16, 32] #[1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 48, 64, 96, 128, 192, 256]
 
 NN_WINDOW_RANGE = [*WINDOW_RANGE] # [1, 2, 3, 4, 5, 6, 7, 8]
 
@@ -933,7 +933,8 @@ for iteration in range(N_ITERATIONS):
                 proportions = usage.get("proportions", [0.0] * len(counts))
                 correct_proportions = usage.get("correct_proportions", [0.0] * len(counts))
                 accuracies_when_used = usage.get("accuracies_when_used", [0.0] * len(counts))
-                total_events = usage.get("total_events", 0)
+                total_events = usage.get("total_events", usage.get("total_evexnts", 0))
+                active_model_trace = usage.get("active_model_trace") or []
 
                 usage_csv_path = run_results_dir / f"{RUN_ID}_model_usage.csv"
                 write_header = not usage_csv_path.exists()
@@ -979,6 +980,31 @@ for iteration in range(N_ITERATIONS):
                                 if idx < len(counts) else 0.0,
                             ]
                         )
+
+                # Persist per-event active model index trace (only for strategies that expose it)
+                if active_model_trace:
+                    trace_csv_path = run_results_dir / f"{RUN_ID}_active_model_trace.csv"
+                    write_trace_header = not trace_csv_path.exists()
+                    with trace_csv_path.open("a", newline="") as tracefile:
+                        trace_writer = csv.writer(tracefile)
+                        if write_trace_header:
+                            trace_writer.writerow([
+                                "run_id",
+                                "iteration",
+                                "strategy",
+                                "event_index",
+                                "active_model_index",
+                            ])
+                        for idx, model_idx in enumerate(active_model_trace):
+                            trace_writer.writerow(
+                                [
+                                    RUN_ID,
+                                    iteration + 1,
+                                    strategy_name,
+                                    idx,
+                                    model_idx,
+                                ]
+                            )
         except Exception:
             logger.exception("Failed to record model usage for %s", strategy_name)
 

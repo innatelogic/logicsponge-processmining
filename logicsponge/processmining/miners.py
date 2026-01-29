@@ -754,6 +754,8 @@ class MultiMiner(StreamingMiner, ABC):
         return {
             "counts": counts,
             "correct_counts": correct_counts,
+            "total_events": total,
+            # Backward compatibility: keep old misspelled key for any caller still using it
             "total_evexnts": total,
             "proportions": proportions,
             "correct_proportions": correct_proportions,
@@ -761,6 +763,8 @@ class MultiMiner(StreamingMiner, ABC):
             "prediction_counts": pred_counts,
             "prediction_correct_counts": pred_correct,
             "prediction_accuracy_pct": pred_accuracy_pct,
+            # Optional per-event trace of which model was active/selected when making predictions
+            "active_model_trace": getattr(self, "active_model_trace", None),
         }
 
     def update(self, event: Event) -> None:
@@ -1216,6 +1220,10 @@ class AdaptiveVoting(LiveMultiMiner):
             msg = f"select_best must be in {accepted_options}. Provided: {self.select_best}"
             raise ValueError(msg)
 
+        # Track which model was selected at each prediction during evaluation
+        self.active_model_trace: list[int] = []
+        self.last_selected_model_index: int | None = None
+
 
     def get_accuracies(self) -> list[float]:
         """Return the accuracy of each model as a list of floats."""
@@ -1276,16 +1284,19 @@ class AdaptiveVoting(LiveMultiMiner):
     def state_metrics(self, state: ComposedState | None) -> Metrics:
         """Return the probability distribution from the model with the best accuracy so far."""
         if state is None:
+            self.last_selected_model_index = None
             return empty_metrics()
 
         # Get the best model
         if self.select_best == "acc":
             best_model_index = self.select_best_model()
+            self.last_selected_model_index = best_model_index
             best_model = self.models[best_model_index]
             best_model_state = state[best_model_index]
             best_model_metrics = best_model.state_metrics(best_model_state)
         else:
-            best_model_metrics = self.get_best_model_metrics(state)[1]
+            best_model_index, best_model_metrics = self.get_best_model_metrics(state)
+            self.last_selected_model_index = best_model_index
 
         delays_list = [
             model.state_metrics(model_state)["predicted_delays"]
@@ -1324,6 +1335,9 @@ class AdaptiveVoting(LiveMultiMiner):
 
         predicted_vector: list[ActivityName] = []
 
+        # Reset trace for this evaluation run
+        self.active_model_trace = []
+
         for sequence in tqdm(data, desc="Processing sequences"):
             pause_start_time = time.time()
 
@@ -1355,6 +1369,10 @@ class AdaptiveVoting(LiveMultiMiner):
                 metrics = self.state_metrics(current_state)
                 prediction = metrics_prediction(metrics, config=self.config)
                 predicted_sequence += prediction["activity"].__str__() if prediction else "-"
+
+                # Record which model produced this prediction (or -1 when unknown)
+                selected_idx = self.last_selected_model_index
+                self.active_model_trace.append(selected_idx if isinstance(selected_idx, int) else -1)
 
                 # Collect predicted activity (skip empty predictions) in order
                 predicted_vector.append(
@@ -1480,12 +1498,14 @@ class AdaptiveVoting(LiveMultiMiner):
         state = self.get_state_from_case(case_id)
 
         # Get the best model
-        if self.select_best == "accuracy":
+        if self.select_best == "acc":
             best_model_index = self.select_best_model()
+            self.last_selected_model_index = best_model_index
             best_model = self.models[best_model_index]
             best_model_metrics = best_model.case_metrics(case_id)
         else:
-            best_model_metrics = self.get_best_model_metrics(state)[1]
+            best_model_index, best_model_metrics = self.get_best_model_metrics(state)
+            self.last_selected_model_index = best_model_index
 
         delays_list = [model.case_metrics(case_id)["predicted_delays"] for model in self.models]
 
@@ -1547,6 +1567,9 @@ class Promotion(MultiMiner):
         # selection state
         self.current_index = 0
 
+        # Track which model was active for each prediction during evaluation
+        self.active_model_trace: list[int] = []
+
         # Only track accuracy for active models (current and next)
         self.total_predictions = 0
         self.current_correct = 0  # accuracy counter for current model
@@ -1564,6 +1587,7 @@ class Promotion(MultiMiner):
 
     def case_metrics(self, case_id: str | tuple[str, ...]) -> Metrics:
         """Return the metrics from the currently selected model."""
+        self.last_selected_model_index = self.current_index
         return self.models[self.current_index].case_metrics(case_id)
 
     def get_state_from_case(self, case_id: CaseId) -> ComposedState:
@@ -1691,17 +1715,7 @@ class Promotion(MultiMiner):
         )
 
     def next_state(self, current_state: ComposedState | None, activity: ActivityName) -> ComposedState | None:
-        """
-        Docstring for next_state
-        
-        :param self: Description
-        :param current_state: Description
-        :type current_state: ComposedState | None
-        :param activity: Description
-        :type activity: ActivityName
-        :return: Description
-        :rtype: Any | None
-        """
+        """Return the next composed state for the active pair (current, next) after observing activity."""
         if current_state is None:
             return None
 
@@ -1738,6 +1752,9 @@ class Promotion(MultiMiner):
 
         predicted_vector: list[ActivityName] = []
 
+        # Reset trace for this evaluation run
+        self.active_model_trace = []
+
         for sequence in tqdm(data, desc="Processing sequences"):
             pause_start_time = time.time()
 
@@ -1773,6 +1790,9 @@ class Promotion(MultiMiner):
                 predicted_vector.append(
                     prediction["activity"] if prediction is not None else DEFAULT_CONFIG["empty_symbol"]
                 )
+
+                # Record active model index used for this prediction
+                self.active_model_trace.append(self.current_index)
 
                 # Update counters for this prediction (promotion votes + totals)
                 prev_total = self.total_predictions
@@ -1907,50 +1927,69 @@ class Promotion(MultiMiner):
                 # Update shared statistics
                 self.update_stats(event, prediction, current_state) # type: ignore  # noqa: PGH003
 
-                # Record model usage only for active models
-                if isinstance(current_state, tuple):
-                    # Only collect metrics for active models (current and next if exists)
-                    active_metrics = []
-                    cur = self.current_index
-                    nxt = cur + 1
+                # Record model usage for ALL models (but only use active ones for counting)
+                # Build a full metrics list indexed by model index
+                cur = self.current_index
+                nxt = cur + 1
 
+                all_metrics = [empty_metrics()] * len(self.models)
+                active_indices = []
+
+                if isinstance(current_state, tuple):
+                    # Current model metrics
                     cur_model = self.models[cur]
-                    # active pair convention: current state is state[0]
                     cur_state = current_state[0]
-                    active_metrics.append(
+                    all_metrics[cur] = (
                         cur_model.state_metrics(cur_state) if hasattr(cur_model, "state_metrics") else empty_metrics()
                     )
+                    active_indices.append(cur)
 
                     if nxt < len(self.models):
                         nxt_model = self.models[nxt]
-                        # active pair convention: next state is state[1]
                         nxt_state = current_state[1]
                         nxt_metrics = (
                             nxt_model.state_metrics(nxt_state)
                             if hasattr(nxt_model, "state_metrics")
                             else empty_metrics()
                         )
-                        active_metrics.append(nxt_metrics)
-
-                    metrics_list = active_metrics
+                        all_metrics[nxt] = nxt_metrics
+                        active_indices.append(nxt)
                 else:
-                    # Only collect metrics for active models
-                    active_metrics = []
-                    cur = self.current_index
-                    nxt = cur + 1
+                    # Using case metrics
+                    cur_model = self.models[cur]
+                    all_metrics[cur] = cur_model.state_metrics(current_state)
+                    active_indices.append(cur)
 
-                    active_metrics.append(self.models[cur].state_metrics(current_state))
                     if nxt < len(self.models):
-                        active_metrics.append(self.models[nxt].state_metrics(current_state))
-
-                    metrics_list = active_metrics
+                        nxt_model = self.models[nxt]
+                        all_metrics[nxt] = nxt_model.state_metrics(current_state)
+                        active_indices.append(nxt)
 
                 ensemble_activity = prediction["activity"] if prediction is not None else None
-                self.record_model_event(
-                    actual_activity=actual_next_activity,
-                    ensemble_prediction=ensemble_activity,
-                    metrics_list=metrics_list,
-                )
+
+                # Record model events with proper indexing
+                for model_idx, metrics in enumerate(all_metrics):
+                    if model_idx in active_indices and metrics != empty_metrics():
+                        # Only record for active models
+                        if model_idx not in self.stats["per_state_stats"]:
+                            self.stats["per_state_stats"][model_idx] = PerStateStats(model_idx) # type: ignore
+
+                        # Determine if this model's prediction was correct
+                        model_pred = metrics_prediction(metrics, config=self.config)
+                        model_activity = model_pred.get("activity") if model_pred is not None else None
+                        is_correct = model_activity == actual_next_activity if model_activity is not None else False
+
+                        # Track absolute prediction counts
+                        self.model_prediction_counts[model_idx] += 1
+                        if is_correct:
+                            self.model_prediction_correct_counts[model_idx] += 1
+
+                        # Check if this model matched the ensemble prediction
+                        if ensemble_activity is not None and model_activity == ensemble_activity:
+                            self.model_usage_counts[model_idx] += 1
+                            if is_correct:
+                                self.model_correct_usage_counts[model_idx] += 1
+                            self.model_usage_events += 1
 
                 pause_time += time.time() - pause_start_time
 
