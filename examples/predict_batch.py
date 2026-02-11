@@ -803,9 +803,9 @@ for iteration in range(N_ITERATIONS):
 
         for event in tqdm(train_set, desc="Processing events"):
             start_time = time.time()
-            strategy.update(event)
+            pause = strategy.update(event)
             end_time = time.time()
-            training_times[strategy_name] += end_time - start_time
+            training_times[strategy_name] += end_time - start_time - (pause or 0.0)
 
         training_times[strategy_name] *= float(SEC_TO_MICRO) / len(train_set)
 

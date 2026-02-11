@@ -6,6 +6,7 @@ including the BasicMiner, MultiMiner, HardVoting, SoftVoting, AdaptiveVoting,
 and Fallback classes.
 """
 
+import copy
 import itertools
 import logging
 import math
@@ -414,7 +415,7 @@ class StreamingMiner(ABC):
         """Recursively propagates the config to all nested models."""
 
     @abstractmethod
-    def update(self, event: Event) -> None:
+    def update(self, event: Event) -> float | None:
         """Update Strategy."""
 
     @abstractmethod
@@ -767,7 +768,7 @@ class MultiMiner(StreamingMiner, ABC):
             "active_model_trace": getattr(self, "active_model_trace", None),
         }
 
-    def update(self, event: Event) -> None:
+    def update(self, event: Event) -> float | None:
         """Update the algorithm with the new event."""
         self.modified_cases = set()
 
@@ -1569,6 +1570,7 @@ class Promotion(MultiMiner):
 
         # Track which model was active for each prediction during evaluation
         self.active_model_trace: list[int] = []
+        self.last_selected_model_index: int | None = None
 
         # Only track accuracy for active models (current and next)
         self.total_predictions = 0
@@ -1585,10 +1587,111 @@ class Promotion(MultiMiner):
         nxt_state = self.models[nxt].initial_state if nxt < len(self.models) else None
         self.initial_state = (cur_state, nxt_state)
 
+        # Initialize the first next candidate with data from current model
+        if nxt < len(self.models):
+            self._initialize_next_candidate_from_current()
+
+    def _initialize_next_candidate_from_current(self) -> None:
+        """
+        Initialize the next candidate model with data from the current model.
+
+        This method copies states, transitions, frequencies, and other relevant
+        data from the current model to the next candidate. It only works with
+        NGram models wrapped in BasicMiner.
+
+        The copying ensures that when a new model enters as the next candidate
+        after a promotion, it starts with the knowledge accumulated by the
+        previous candidate (which just became the current model).
+        """
+        current_idx = self.current_index
+        next_idx = current_idx + 1
+
+        if next_idx >= len(self.models):
+            return  # No next candidate to initialize
+
+        current_model = self.models[current_idx]
+        next_model = self.models[next_idx]
+
+        # Check if both models are BasicMiner instances wrapping NGram algorithms
+        if not (hasattr(current_model, "algorithm") and hasattr(next_model, "algorithm")):
+            return
+
+        current_algo = current_model.algorithm # type: ignore
+        next_algo = next_model.algorithm # type: ignore
+
+        # Check if both algorithms are NGram instances
+        if type(current_algo).__name__ != "NGram" or type(next_algo).__name__ != "NGram":
+            return
+
+        # Deep copy the relevant data structures from current to next
+        # 1. Copy state information
+        if hasattr(current_algo, "state_info"):
+            next_algo.state_info = copy.deepcopy(current_algo.state_info)
+
+        # 2. Copy transitions
+        if hasattr(current_algo, "transitions"):
+            next_algo.transitions = copy.deepcopy(current_algo.transitions)
+
+        # 3. Copy activities set
+        if hasattr(current_algo, "activities"):
+            next_algo.activities = copy.deepcopy(current_algo.activities)
+
+        # 4. Copy access strings (NGram-specific)
+        if hasattr(current_algo, "access_strings"):
+            next_algo.access_strings = copy.deepcopy(current_algo.access_strings)
+
+        # 5. Copy case information
+        if hasattr(current_algo, "case_info"):
+            next_algo.case_info = copy.deepcopy(current_algo.case_info)
+
+        # 6. Update initial_state reference
+        if hasattr(current_algo, "initial_state"):
+            next_algo.initial_state = current_algo.initial_state
+
+        logger.debug(
+            "Initialized next candidate model (index %d) with data from current model (index %d). "
+            "Copied %d states and %d transitions.",
+            next_idx,
+            current_idx,
+            len(next_algo.state_info) if hasattr(next_algo, "state_info") else 0,
+            len(next_algo.transitions) if hasattr(next_algo, "transitions") else 0,
+        )
+
     def case_metrics(self, case_id: str | tuple[str, ...]) -> Metrics:
-        """Return the metrics from the currently selected model."""
+        """Return the metrics from the currently selected model and track promotion votes."""
         self.last_selected_model_index = self.current_index
-        return self.models[self.current_index].case_metrics(case_id)
+
+        # Evaluate and track metrics for active models (current and next)
+        cur = self.current_index
+        nxt = cur + 1
+
+        cur_model = self.models[cur]
+        cur_metrics = cur_model.case_metrics(case_id)
+
+        # Only track votes if we have a next model to promote to
+        if nxt < len(self.models):
+            nxt_model = self.models[nxt]
+            nxt_metrics = nxt_model.case_metrics(case_id)
+
+            # Compare probability maxima: if next model has higher confidence, increment vote
+            cur_max_prob = max(cur_metrics["probs"].values()) if cur_metrics["probs"] else 0.0
+            nxt_max_prob = max(nxt_metrics["probs"].values()) if nxt_metrics["probs"] else 0.0
+
+            if nxt_max_prob > cur_max_prob:
+                self.promotion_votes += 1
+                logger.debug(
+                    "Promotion.case_metrics: next model %d has higher confidence (%.4f > %.4f), "
+                    "promotion_votes -> %d",
+                    nxt,
+                    nxt_max_prob,
+                    cur_max_prob,
+                    self.promotion_votes,
+                )
+
+            # Try to promote if conditions are met
+            _ = self._try_promote()
+
+        return cur_metrics
 
     def get_state_from_case(self, case_id: CaseId) -> ComposedState:
         """Return the composed state for the active pair (current, next) for a given case."""
@@ -1667,6 +1770,10 @@ class Promotion(MultiMiner):
                 cur_state = self.models[self.current_index].initial_state
                 nxt_state = self.models[new_nxt].initial_state if new_nxt < len(self.models) else None
                 self.initial_state = (cur_state, nxt_state)
+
+                # Initialize new next candidate (if exists) with data from newly promoted model
+                if new_nxt < len(self.models):
+                    self._initialize_next_candidate_from_current()
 
                 logger.info("Accuracy counters reset after promotion to model %d", self.current_index)
                 # continue loop to see if further promotion is immediately possible
@@ -1899,6 +2006,8 @@ class Promotion(MultiMiner):
                 if nxt < len(self.models) and nxt_correct > cur_correct:
                     self.promotion_votes = self.promotion_votes + 1
 
+                pause_start_time = time.time()
+
                 # after updating votes, potentially promote
                 promoted = self._try_promote()
                 if promoted:
@@ -1907,8 +2016,6 @@ class Promotion(MultiMiner):
                     # are only retrieved upon activation).
                     case_id = event.get("case_id")
                     current_state = self.get_state_from_case(case_id)
-
-                pause_start_time = time.time()
 
                 if compute_perplexity:
                     logger.debug("      [Before] Likelihood: %s", likelihood)
@@ -2026,7 +2133,7 @@ class Promotion(MultiMiner):
         elapsed = time.time() - eval_start_time - pause_time
         return elapsed, predicted_vector
 
-    def update(self, event: Event) -> None:
+    def update(self, event: Event) -> None | float:
         """
         Update only the active models (current and next candidate).
 
@@ -2096,18 +2203,23 @@ class Promotion(MultiMiner):
         cur_correct = 1 if (cur_pred is not None and cur_pred.get("activity") == activity) else 0
         nxt_correct = 1 if (nxt_pred is not None and nxt_pred.get("activity") == activity) else 0
 
+        pause_time = 0.0
         if nxt_model is not None:
+            pause_start_time = time.time()
             if nxt_correct > cur_correct:
                 self.promotion_votes = self.promotion_votes + 1
 
             # Try to promote after update
             _ = self._try_promote()
+            pause_time = time.time() - pause_start_time
 
         # Update modified cases only from active models
         self.modified_cases = set()
         self.modified_cases.update(cur_model.get_modified_cases())
         if nxt < len(self.models):
             self.modified_cases.update(self.models[nxt].get_modified_cases())
+
+        return pause_time
 
 
 # ============================================================
