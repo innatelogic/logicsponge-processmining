@@ -1658,38 +1658,13 @@ class Promotion(MultiMiner):
         )
 
     def case_metrics(self, case_id: str | tuple[str, ...]) -> Metrics:
-        """Return the metrics from the currently selected model and track promotion votes."""
+        """Return the metrics from the currently selected model."""
         self.last_selected_model_index = self.current_index
 
-        # Evaluate and track metrics for active models (current and next)
+        # Return metrics from the currently selected model only
         cur = self.current_index
-        nxt = cur + 1
-
         cur_model = self.models[cur]
         cur_metrics = cur_model.case_metrics(case_id)
-
-        # Only track votes if we have a next model to promote to
-        if nxt < len(self.models):
-            nxt_model = self.models[nxt]
-            nxt_metrics = nxt_model.case_metrics(case_id)
-
-            # Compare probability maxima: if next model has higher confidence, increment vote
-            cur_max_prob = max(cur_metrics["probs"].values()) if cur_metrics["probs"] else 0.0
-            nxt_max_prob = max(nxt_metrics["probs"].values()) if nxt_metrics["probs"] else 0.0
-
-            if nxt_max_prob > cur_max_prob:
-                self.promotion_votes += 1
-                logger.debug(
-                    "Promotion.case_metrics: next model %d has higher confidence (%.4f > %.4f), "
-                    "promotion_votes -> %d",
-                    nxt,
-                    nxt_max_prob,
-                    cur_max_prob,
-                    self.promotion_votes,
-                )
-
-            # Try to promote if conditions are met
-            _ = self._try_promote()
 
         return cur_metrics
 
@@ -2154,21 +2129,30 @@ class Promotion(MultiMiner):
         self.total_predictions += 1
         logger.debug("Promotion.update: total_predictions %d -> %d", prev_total, self.total_predictions)
 
-        # Update and track accuracy for current model
         # Access models
         cur_model = self.models[cur]
         nxt_model = self.models[nxt] if nxt < len(self.models) else None
 
-        # Compute predictions BEFORE updating models to keep evaluation symmetric
+        # Update active models (cur first, then next)
+        cur_model.update(event)
+        if nxt_model is not None:
+            nxt_model.update(event)
+
+        # After updating, check accuracy using post-update state
+        # Get predictions from updated models
         cur_pred = probs_prediction(cur_model.case_metrics(case_id)["probs"], config=self.config)
         nxt_pred = (
             probs_prediction(nxt_model.case_metrics(case_id)["probs"], config=self.config) if nxt_model else None
         )
 
-        # Update and track accuracy counters based on pre-update predictions
+        # Track accuracy counters based on post-update predictions
+        cur_correct = 0
+        nxt_correct = 0
+
         if cur_pred is not None and cur_pred.get("activity") == activity:
             prev = self.current_correct
             self.current_correct += 1
+            cur_correct = 1
             logger.debug(
                 "Promotion.update: current model %d predicted %s, actual %s, current_correct %d -> %d",
                 cur,
@@ -2185,6 +2169,7 @@ class Promotion(MultiMiner):
         ):
             prev = self.next_correct
             self.next_correct += 1
+            nxt_correct = 1
             logger.debug(
                 "Promotion.update: next model %d predicted %s, actual %s, next_correct %d -> %d",
                 nxt,
@@ -2194,15 +2179,7 @@ class Promotion(MultiMiner):
                 self.next_correct,
             )
 
-        # Now update active models (cur first, then next)
-        cur_model.update(event)
-        if nxt_model is not None:
-            nxt_model.update(event)
-
-        # Update promotion votes using the same pre-update predictions
-        cur_correct = 1 if (cur_pred is not None and cur_pred.get("activity") == activity) else 0
-        nxt_correct = 1 if (nxt_pred is not None and nxt_pred.get("activity") == activity) else 0
-
+        # Update promotion votes based on which model was more accurate
         pause_time = 0.0
         if nxt_model is not None:
             pause_start_time = time.time()
