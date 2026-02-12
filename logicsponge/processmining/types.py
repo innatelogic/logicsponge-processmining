@@ -1,7 +1,7 @@
 """Types for process mining."""
 
 from datetime import datetime, timedelta
-from typing import Any, TypedDict
+from typing import Any, Self, TypedDict
 
 # ============================================================
 # Types
@@ -15,7 +15,7 @@ class StateId(int):
 
     in_recovery: bool = False
 
-    def __new__(cls, value: int) -> "StateId":
+    def __new__(cls, value: int) -> Self:
         """Create a new StateId instance."""
         obj = int.__new__(cls, value)
         obj.in_recovery = False
