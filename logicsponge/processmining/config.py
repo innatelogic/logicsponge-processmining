@@ -16,7 +16,6 @@ DEFAULT_CONFIG: Config = {
     "include_stop": True,
     "include_time": True,
     "maxlen_delays": 50,
-    "enable_promotion_timing": False,
 }
 
 

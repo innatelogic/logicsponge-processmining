@@ -78,7 +78,6 @@ class Config(TypedDict, total=True):
     include_stop: bool
     include_time: bool
     maxlen_delays: int
-    enable_promotion_timing: bool
 
 
 class RequiredEvent(TypedDict):
