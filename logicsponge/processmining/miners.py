@@ -1557,6 +1557,7 @@ class Promotion(MultiMiner):
         *args: dict[str, Any],
         threshold: float = 0.003,
         min_votes: int = 20,
+        warmup_next_model: bool = False,
         **kwargs: Any,  # noqa: ANN401
     ) -> None:
         """Initialize the Promotion class."""
@@ -1564,6 +1565,7 @@ class Promotion(MultiMiner):
 
         self.threshold = float(threshold)
         self.min_votes = int(min_votes)
+        self.warmup_next_model = bool(warmup_next_model)
 
         # selection state
         self.current_index = 0
@@ -1588,11 +1590,26 @@ class Promotion(MultiMiner):
         self.initial_state = (cur_state, nxt_state)
 
         # Initialize the first next candidate with data from current model
-        if self.has_next_model:
+        if self.has_next_model and self.warmup_next_model:
             self._initialize_next_candidate_from_current()
+        
+        # Override parent class tracking to only track active models (max 2)
+        # This prevents scaling with total model count
+        max_active = 2
+        self.model_usage_counts = [0] * max_active
+        self.model_correct_usage_counts = [0] * max_active
+        self.model_prediction_counts = [0] * max_active
+        self.model_prediction_correct_counts = [0] * max_active
+        
+        # Update stats mirror to match
+        self.stats["model_usage_counts"] = [0] * max_active
+        self.stats["model_correct_usage_counts"] = [0] * max_active
+        self.stats["model_prediction_counts"] = [0] * max_active
+        self.stats["model_prediction_correct_counts"] = [0] * max_active
 
     def _initialize_next_candidate_from_current(self) -> None:
-        """Initialize the next candidate model with data from the current model.
+        """
+        Initialize the next candidate model with data from the current model.
 
         This method copies states, transitions, frequencies, and other relevant
         data from the current model to the next candidate. It only works with
@@ -1614,7 +1631,7 @@ class Promotion(MultiMiner):
         # Check if both models are BasicMiner instances wrapping NGram algorithms
         current_algo = getattr(current_model, "algorithm", None)
         next_algo = getattr(next_model, "algorithm", None)
-        
+
         if current_algo is None or next_algo is None:
             return
 
@@ -1653,9 +1670,7 @@ class Promotion(MultiMiner):
         # Return metrics from the currently selected model only
         cur = self.current_index
         cur_model = self.models[cur]
-        cur_metrics = cur_model.case_metrics(case_id)
-
-        return cur_metrics
+        return cur_model.case_metrics(case_id)
 
     def get_state_from_case(self, case_id: CaseId) -> ComposedState:
         """Return the composed state for the active pair (current, next) for a given case."""
@@ -1737,7 +1752,7 @@ class Promotion(MultiMiner):
                 self.initial_state = (cur_state, nxt_state)
 
                 # Initialize new next candidate (if exists) with data from newly promoted model
-                if new_nxt < len(self.models):
+                if new_nxt < len(self.models) and self.warmup_next_model:
                     self._initialize_next_candidate_from_current()
 
                 logger.info("Accuracy counters reset after promotion to model %d", self.current_index)
@@ -1999,69 +2014,52 @@ class Promotion(MultiMiner):
                 # Update shared statistics
                 self.update_stats(event, prediction, current_state) # type: ignore  # noqa: PGH003
 
-                # Record model usage for ALL models (but only use active ones for counting)
-                # Build a full metrics list indexed by model index
+                # Track statistics only for active models (max 2, not all N models)
+                # Map: current model -> tracking idx 0, next model -> tracking idx 1
                 cur = self.current_index
                 nxt = cur + 1
-
-                all_metrics = [empty_metrics()] * len(self.models)
-                active_indices = []
+                ensemble_activity = prediction["activity"] if prediction is not None else None
 
                 if isinstance(current_state, tuple):
-                    # Current model metrics
+                    # Track current model (index 0 in tracking arrays)
                     cur_model = self.models[cur]
                     cur_state = current_state[0]
-                    all_metrics[cur] = (
-                        cur_model.state_metrics(cur_state) if hasattr(cur_model, "state_metrics") else empty_metrics()
-                    )
-                    active_indices.append(cur)
-
+                    cur_metrics = cur_model.state_metrics(cur_state) if hasattr(cur_model, "state_metrics") else empty_metrics()
+                    
+                    if cur_metrics and cur_metrics != empty_metrics():
+                        cur_pred = metrics_prediction(cur_metrics, config=self.config)
+                        cur_activity = cur_pred.get("activity") if cur_pred is not None else None
+                        is_correct = cur_activity == actual_next_activity if cur_activity is not None else False
+                        
+                        self.model_prediction_counts[0] += 1
+                        if is_correct:
+                            self.model_prediction_correct_counts[0] += 1
+                        
+                        if ensemble_activity is not None and cur_activity == ensemble_activity:
+                            self.model_usage_counts[0] += 1
+                            if is_correct:
+                                self.model_correct_usage_counts[0] += 1
+                            self.model_usage_events += 1
+                    
+                    # Track next model (index 1 in tracking arrays) if it exists
                     if nxt < len(self.models):
                         nxt_model = self.models[nxt]
                         nxt_state = current_state[1]
-                        nxt_metrics = (
-                            nxt_model.state_metrics(nxt_state)
-                            if hasattr(nxt_model, "state_metrics")
-                            else empty_metrics()
-                        )
-                        all_metrics[nxt] = nxt_metrics
-                        active_indices.append(nxt)
-                else:
-                    # Using case metrics
-                    cur_model = self.models[cur]
-                    all_metrics[cur] = cur_model.state_metrics(current_state)
-                    active_indices.append(cur)
-
-                    if nxt < len(self.models):
-                        nxt_model = self.models[nxt]
-                        all_metrics[nxt] = nxt_model.state_metrics(current_state)
-                        active_indices.append(nxt)
-
-                ensemble_activity = prediction["activity"] if prediction is not None else None
-
-                # Record model events with proper indexing
-                for model_idx, metrics in enumerate(all_metrics):
-                    if model_idx in active_indices and metrics != empty_metrics():
-                        # Only record for active models
-                        if model_idx not in self.stats["per_state_stats"]:
-                            self.stats["per_state_stats"][model_idx] = PerStateStats(model_idx) # type: ignore
-
-                        # Determine if this model's prediction was correct
-                        model_pred = metrics_prediction(metrics, config=self.config)
-                        model_activity = model_pred.get("activity") if model_pred is not None else None
-                        is_correct = model_activity == actual_next_activity if model_activity is not None else False
-
-                        # Track absolute prediction counts
-                        self.model_prediction_counts[model_idx] += 1
-                        if is_correct:
-                            self.model_prediction_correct_counts[model_idx] += 1
-
-                        # Check if this model matched the ensemble prediction
-                        if ensemble_activity is not None and model_activity == ensemble_activity:
-                            self.model_usage_counts[model_idx] += 1
+                        nxt_metrics = nxt_model.state_metrics(nxt_state) if hasattr(nxt_model, "state_metrics") else empty_metrics()
+                        
+                        if nxt_metrics and nxt_metrics != empty_metrics():
+                            nxt_pred = metrics_prediction(nxt_metrics, config=self.config)
+                            nxt_activity = nxt_pred.get("activity") if nxt_pred is not None else None
+                            is_correct = nxt_activity == actual_next_activity if nxt_activity is not None else False
+                            
+                            self.model_prediction_counts[1] += 1
                             if is_correct:
-                                self.model_correct_usage_counts[model_idx] += 1
-                            self.model_usage_events += 1
+                                self.model_prediction_correct_counts[1] += 1
+                            
+                            if ensemble_activity is not None and nxt_activity == ensemble_activity:
+                                self.model_usage_counts[1] += 1
+                                if is_correct:
+                                    self.model_correct_usage_counts[1] += 1
 
                 pause_time += time.time() - pause_start_time
 
@@ -2107,7 +2105,7 @@ class Promotion(MultiMiner):
         """
         if self.offline_update:
             super().update(event)
-            return
+            return None
 
         case_id = event["case_id"]
         activity = event["activity"]
@@ -2123,19 +2121,13 @@ class Promotion(MultiMiner):
         cur_model = self.models[cur]
         nxt_model = self.models[nxt] if nxt < len(self.models) else None
 
-        # Update active models (cur first, then next)
-        cur_model.update(event)
-        if nxt_model is not None:
-            nxt_model.update(event)
-
-        # After updating, check accuracy using post-update state
-        # Get predictions from updated models
+        # Compute predictions BEFORE updating models to keep evaluation symmetric
         cur_pred = probs_prediction(cur_model.case_metrics(case_id)["probs"], config=self.config)
         nxt_pred = (
             probs_prediction(nxt_model.case_metrics(case_id)["probs"], config=self.config) if nxt_model else None
         )
 
-        # Track accuracy counters based on post-update predictions
+        # Track accuracy counters based on pre-update predictions
         cur_correct = 0
         nxt_correct = 0
 
@@ -2168,6 +2160,11 @@ class Promotion(MultiMiner):
                 prev,
                 self.next_correct,
             )
+
+        # Now update active models (cur first, then next)
+        cur_model.update(event)
+        if nxt_model is not None:
+            nxt_model.update(event)
 
         # Update promotion votes based on which model was more accurate
         pause_time = 0.0
