@@ -1,3 +1,19 @@
+"""
+Generate LaTeX table lines from summary CSV files.
+
+Usage:
+    python summary_to_latex.py results/new-run-2026/final-fraction-1/summary.csv
+
+This script performs two main tasks:
+1. Extracts model performance metrics from a specified summary CSV file and writes them to an output
+    text file in a LaTeX-friendly format.
+2. Aggregates prediction and training times from multiple summary.csv files located in subfolders
+    matching specified patterns, averages the metrics across those subfolders, and appends the results
+    to the same output text file.
+The output text file will contain lines formatted for LaTeX tables, which can be easily included in a LaTeX document.
+
+"""
+
 import pandas as pd
 import sys
 import os

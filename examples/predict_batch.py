@@ -2,7 +2,7 @@
 Module to evaluate and compare different process mining models.
 
 Usage example:
-    python examples/predict_batch.py --data path/to/log.csv
+    python examples/predict_batch.py --data BPI_Challenge_2018
 """
 
 import gc
