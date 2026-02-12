@@ -694,6 +694,9 @@ for iteration in range(N_ITERATIONS):
     config = {
         "top_k": 3,
         "include_stop": True,  # Include stop symbol in the training set, recommmended to set to True
+        "enable_promotion_timing": False,
+        # If True, the Promotion strategy will record
+        # the time taken for its promotion steps separately in the iteration data.
     }
 
     if config["include_stop"]:
@@ -766,8 +769,8 @@ for iteration in range(N_ITERATIONS):
     strategies = build_strategies(
         config=config,
         test_set_transformed=test_set_transformed,
-        ngram_names=NGRAM_NAMES,
-        voting_ngrams=VOTING_NGRAMS,
+        ngram_names=[],#NGRAM_NAMES,
+        voting_ngrams=[],#VOTING_NGRAMS,
         adaptive_ngram=ADAPTIVE_NGRAM,
         select_best_args=SELECT_BEST_ARGS,
     )
@@ -920,6 +923,18 @@ for iteration in range(N_ITERATIONS):
             num_delay_predictions=delay_count,
             per_state_stats=per_state_stats,
         )
+
+        if isinstance(strategy, Promotion):
+            # Inspect the promotion timings for this iteration and log them
+            promotion_timings = strategy.stats.get("promotion_timings", [])
+
+            if promotion_timings:
+                for idx, timing in enumerate(promotion_timings):
+                    logger.info(
+                        "Promotion timing | strategy=%s | iteration=%d | promotion_index=%d | time_micro=%.2f",
+                        strategy_name, iteration + 1, idx, timing
+                    )
+
 
         # ----------------- model usage CSV (per-strategy aggregated) -----------------
         # If the strategy exposes usage statistics (MultiMiner), record them in

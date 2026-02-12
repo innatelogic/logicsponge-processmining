@@ -472,6 +472,7 @@ def build_strategies(  # noqa: PLR0913
             adaptive_model = Promotion(
                 models=models_adaptive,
                 config=config,
+                enable_timing=config.get("enable_promotion_timing", False),
             )
             # Use singular 'promotion' to match elsewhere in the codebase
             strategy_name = f"promotion {grams} {select_best_arg}"

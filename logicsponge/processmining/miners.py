@@ -59,7 +59,7 @@ pd.set_option("display.max_columns", None)  # Show all columns
 pd.set_option("display.expand_frame_repr", False)  # Prevent line-wrapping # noqa: FBT003
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.WARNING,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
@@ -124,7 +124,7 @@ class PerStateStats:
 class TrackedDict(dict):
     """A dictionary that tracks changes to its items."""
 
-    def __setitem__(self, key: str, value: float | list) -> None:
+    def __setitem__(self, key: str, value: float | list | dict) -> None:  # noqa: UP013
         """Set an item in the dictionary and track the change."""
         if isinstance(value, float):
             old = self.get(key, None)
@@ -1558,6 +1558,7 @@ class Promotion(MultiMiner):
         threshold: float = 0.003,
         min_votes: int = 20,
         warmup_next_model: bool = False,
+        enable_timing: bool = False,
         **kwargs: Any,  # noqa: ANN401
     ) -> None:
         """Initialize the Promotion class."""
@@ -1566,6 +1567,7 @@ class Promotion(MultiMiner):
         self.threshold = float(threshold)
         self.min_votes = int(min_votes)
         self.warmup_next_model = bool(warmup_next_model)
+        self.enable_timing = bool(enable_timing)
 
         # selection state
         self.current_index = 0
@@ -1600,12 +1602,21 @@ class Promotion(MultiMiner):
         self.model_correct_usage_counts = [0] * max_active
         self.model_prediction_counts = [0] * max_active
         self.model_prediction_correct_counts = [0] * max_active
-        
+
         # Update stats mirror to match
         self.stats["model_usage_counts"] = [0] * max_active
         self.stats["model_correct_usage_counts"] = [0] * max_active
         self.stats["model_prediction_counts"] = [0] * max_active
         self.stats["model_prediction_correct_counts"] = [0] * max_active
+
+        if self.enable_timing:
+            self.stats["promotion_timing"] = {
+                "predictions_s": 0.0,
+                "updates_s": 0.0,
+                "promote_s": 0.0,
+                "total_update_s": 0.0,
+                "count": 0,
+            }
 
     def _initialize_next_candidate_from_current(self) -> None:
         """
@@ -2117,15 +2128,23 @@ class Promotion(MultiMiner):
         self.total_predictions += 1
         logger.debug("Promotion.update: total_predictions %d -> %d", prev_total, self.total_predictions)
 
+        timing_enabled = self.enable_timing
+        if timing_enabled:
+            t_total_start = time.perf_counter()
+
         # Access models
         cur_model = self.models[cur]
         nxt_model = self.models[nxt] if nxt < len(self.models) else None
 
         # Compute predictions BEFORE updating models to keep evaluation symmetric
+        if timing_enabled:
+            t_pred_start = time.perf_counter()
         cur_pred = probs_prediction(cur_model.case_metrics(case_id)["probs"], config=self.config)
         nxt_pred = (
             probs_prediction(nxt_model.case_metrics(case_id)["probs"], config=self.config) if nxt_model else None
         )
+        if timing_enabled:
+            self.stats["promotion_timing"]["predictions_s"] += time.perf_counter() - t_pred_start # type: ignore
 
         # Track accuracy counters based on pre-update predictions
         cur_correct = 0
@@ -2162,19 +2181,27 @@ class Promotion(MultiMiner):
             )
 
         # Now update active models (cur first, then next)
+        if timing_enabled:
+            t_update_start = time.perf_counter()
         cur_model.update(event)
         if nxt_model is not None:
             nxt_model.update(event)
+        if timing_enabled:
+            self.stats["promotion_timing"]["updates_s"] += time.perf_counter() - t_update_start # type: ignore
 
         # Update promotion votes based on which model was more accurate
         pause_time = 0.0
         if nxt_model is not None:
             pause_start_time = time.time()
+            if timing_enabled:
+                t_promote_start = time.perf_counter()
             if nxt_correct > cur_correct:
                 self.promotion_votes += 1
 
             # Try to promote after update
             _ = self._try_promote()
+            if timing_enabled:
+                self.stats["promotion_timing"]["promote_s"] += time.perf_counter() - t_promote_start # type: ignore
             pause_time = time.time() - pause_start_time
 
         # Update modified cases only from active models
@@ -2182,6 +2209,10 @@ class Promotion(MultiMiner):
         self.modified_cases.update(cur_model.get_modified_cases())
         if nxt < len(self.models):
             self.modified_cases.update(self.models[nxt].get_modified_cases())
+
+        if timing_enabled:
+            self.stats["promotion_timing"]["total_update_s"] += time.perf_counter() - t_total_start # type: ignore
+            self.stats["promotion_timing"]["count"] += 1
 
         return pause_time
 
