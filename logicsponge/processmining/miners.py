@@ -1567,6 +1567,7 @@ class Promotion(MultiMiner):
 
         # selection state
         self.current_index = 0
+        self.has_next_model = len(self.models) > 1  # Cache for efficiency
 
         # Track which model was active for each prediction during evaluation
         self.active_model_trace: list[int] = []
@@ -1582,18 +1583,16 @@ class Promotion(MultiMiner):
 
         # Initialize miner state as a pair: (current_model_state, next_model_state)
         # Do not include inactive models' states.
-        nxt = self.current_index + 1
         cur_state = self.models[self.current_index].initial_state
-        nxt_state = self.models[nxt].initial_state if nxt < len(self.models) else None
+        nxt_state = self.models[1].initial_state if self.has_next_model else None
         self.initial_state = (cur_state, nxt_state)
 
         # Initialize the first next candidate with data from current model
-        if nxt < len(self.models):
+        if self.has_next_model:
             self._initialize_next_candidate_from_current()
 
     def _initialize_next_candidate_from_current(self) -> None:
-        """
-        Initialize the next candidate model with data from the current model.
+        """Initialize the next candidate model with data from the current model.
 
         This method copies states, transitions, frequencies, and other relevant
         data from the current model to the next candidate. It only works with
@@ -1613,38 +1612,28 @@ class Promotion(MultiMiner):
         next_model = self.models[next_idx]
 
         # Check if both models are BasicMiner instances wrapping NGram algorithms
-        if not (hasattr(current_model, "algorithm") and hasattr(next_model, "algorithm")):
+        current_algo = getattr(current_model, "algorithm", None)
+        next_algo = getattr(next_model, "algorithm", None)
+        
+        if current_algo is None or next_algo is None:
             return
-
-        current_algo = current_model.algorithm # type: ignore
-        next_algo = next_model.algorithm # type: ignore
 
         # Check if both algorithms are NGram instances
         if type(current_algo).__name__ != "NGram" or type(next_algo).__name__ != "NGram":
             return
 
         # Deep copy the relevant data structures from current to next
-        # 1. Copy state information
+        # Use getattr to avoid redundant hasattr checks
         if hasattr(current_algo, "state_info"):
             next_algo.state_info = copy.deepcopy(current_algo.state_info)
-
-        # 2. Copy transitions
         if hasattr(current_algo, "transitions"):
             next_algo.transitions = copy.deepcopy(current_algo.transitions)
-
-        # 3. Copy activities set
         if hasattr(current_algo, "activities"):
             next_algo.activities = copy.deepcopy(current_algo.activities)
-
-        # 4. Copy access strings (NGram-specific)
         if hasattr(current_algo, "access_strings"):
             next_algo.access_strings = copy.deepcopy(current_algo.access_strings)
-
-        # 5. Copy case information
         if hasattr(current_algo, "case_info"):
             next_algo.case_info = copy.deepcopy(current_algo.case_info)
-
-        # 6. Update initial_state reference
         if hasattr(current_algo, "initial_state"):
             next_algo.initial_state = current_algo.initial_state
 
@@ -1671,9 +1660,10 @@ class Promotion(MultiMiner):
     def get_state_from_case(self, case_id: CaseId) -> ComposedState:
         """Return the composed state for the active pair (current, next) for a given case."""
         cur = self.current_index
-        nxt = cur + 1
         cur_state = self.models[cur].get_state_from_case(case_id)
-        nxt_state = self.models[nxt].get_state_from_case(case_id) if nxt < len(self.models) else None
+        nxt_state = (
+            self.models[cur + 1].get_state_from_case(case_id) if self.has_next_model else None
+        )
         return (cur_state, nxt_state)
 
     def get_state_info(self, state_id: ComposedState | None) -> ComposedState | None:
@@ -2184,14 +2174,14 @@ class Promotion(MultiMiner):
         if nxt_model is not None:
             pause_start_time = time.time()
             if nxt_correct > cur_correct:
-                self.promotion_votes = self.promotion_votes + 1
+                self.promotion_votes += 1
 
             # Try to promote after update
             _ = self._try_promote()
             pause_time = time.time() - pause_start_time
 
         # Update modified cases only from active models
-        self.modified_cases = set()
+        self.modified_cases.clear()
         self.modified_cases.update(cur_model.get_modified_cases())
         if nxt < len(self.models):
             self.modified_cases.update(self.models[nxt].get_modified_cases())
