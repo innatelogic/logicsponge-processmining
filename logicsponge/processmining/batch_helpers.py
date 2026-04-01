@@ -78,6 +78,12 @@ def record_model_results(  # noqa: PLR0913, PLR0915
     mean_actual_delay: float | None = None,
     mean_normalized_error: float | None = None,
     num_delay_predictions: int | None = None,
+    memory_train_peak_delta_mb: float | None = None,
+    memory_eval_peak_delta_mb: float | None = None,
+    memory_peak_delta_mb: float | None = None,
+    energy_train_joules: float | None = None,
+    energy_eval_joules: float | None = None,
+    energy_joules: float | None = None,
     per_state_stats: dict[str, Any] | None = None,
 ) -> None:
     """
@@ -141,6 +147,18 @@ def record_model_results(  # noqa: PLR0913, PLR0915
 
     iteration_data["Pred Time"].append(eval_time_micro)
     iteration_data["Train Time"].append(train_time_micro)
+    if "Memory Train Δ (MB)" in iteration_data:
+        iteration_data["Memory Train Δ (MB)"].append(memory_train_peak_delta_mb)
+    if "Memory Eval Δ (MB)" in iteration_data:
+        iteration_data["Memory Eval Δ (MB)"].append(memory_eval_peak_delta_mb)
+    if "Memory Peak Δ (MB)" in iteration_data:
+        iteration_data["Memory Peak Δ (MB)"].append(memory_peak_delta_mb)
+    if "Energy Train (J)" in iteration_data:
+        iteration_data["Energy Train (J)"].append(energy_train_joules)
+    if "Energy Eval (J)" in iteration_data:
+        iteration_data["Energy Eval (J)"].append(energy_eval_joules)
+    if "Energy (J)" in iteration_data:
+        iteration_data["Energy (J)"].append(energy_joules)
 
     iteration_data["Good Preds"].append(correct)
     iteration_data["Tot Preds"].append(total)
@@ -152,6 +170,12 @@ def record_model_results(  # noqa: PLR0913, PLR0915
         "strategy_accuracy": accuracy * 100.0,
         "strategy_perplexity": pp_harmo,
         "strategy_eval_time": eval_time_micro,
+        "strategy_memory_train_peak_delta_mb": memory_train_peak_delta_mb,
+        "strategy_memory_eval_peak_delta_mb": memory_eval_peak_delta_mb,
+        "strategy_memory_peak_delta_mb": memory_peak_delta_mb,
+        "strategy_energy_train_joules": energy_train_joules,
+        "strategy_energy_eval_joules": energy_eval_joules,
+        "strategy_energy_joules": energy_joules,
     }
     if per_state_stats is not None:
         entry["per_state_stats"] = per_state_stats
@@ -175,6 +199,12 @@ def record_model_results(  # noqa: PLR0913, PLR0915
             "mean_actual_delay": [],
             "mean_normalized_error": [],
             "num_delay_predictions": [],
+            "memory_train_peak_delta_mb": [],
+            "memory_eval_peak_delta_mb": [],
+            "memory_peak_delta_mb": [],
+            "energy_train_joules": [],
+            "energy_eval_joules": [],
+            "energy_joules": [],
         }
 
     all_metrics[display_name]["accuracies"].append(accuracy)
@@ -197,6 +227,12 @@ def record_model_results(  # noqa: PLR0913, PLR0915
     all_metrics[display_name]["mean_actual_delay"].append(mean_actual_delay)
     all_metrics[display_name]["mean_normalized_error"].append(mean_normalized_error)
     all_metrics[display_name]["num_delay_predictions"].append(num_delay_predictions)
+    all_metrics[display_name]["memory_train_peak_delta_mb"].append(memory_train_peak_delta_mb)
+    all_metrics[display_name]["memory_eval_peak_delta_mb"].append(memory_eval_peak_delta_mb)
+    all_metrics[display_name]["memory_peak_delta_mb"].append(memory_peak_delta_mb)
+    all_metrics[display_name]["energy_train_joules"].append(energy_train_joules)
+    all_metrics[display_name]["energy_eval_joules"].append(energy_eval_joules)
+    all_metrics[display_name]["energy_joules"].append(energy_joules)
 
 
 def write_prediction_vectors(  # noqa: C901, PLR0912

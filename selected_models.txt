@@ -1,0 +1,51 @@
+3-gram & 79.35 & 100.0 & 1.39 & 22.89 & 2.59
+5-gram & 99.0 & 100.0 & 1.06 & 20.53 & 2.45
+9-gram & 99.0 & 100.0 & 1.06 & 20.68 & 2.47
+17-gram & 99.0 & 100.0 & 1.06 & 20.78 & 2.45
+33-gram & 99.0 & 100.0 & 1.06 & 20.98 & 2.44
+soft voting (2, 3, 5, 8)* & 99.0 & 100.0 & 1.18 & 117.41 & 18.92
+soft voting (2, 3, 4, 5)* & 99.0 & 100.0 & 1.18 & 116.85 & 18.93
+adaptive (2, 3, 5, 8) prob & 99.0 & 100.0 & 1.06 & 149.92 & 10.64
+adaptive (2, 3, 4, 5) prob & 99.0 & 100.0 & 1.06 & 148.89 & 10.51
+adaptive (2, 4, 6, 8, 12, 16, 24, 32) prob & 99.0 & 100.0 & 1.06 & 268.28 & 21.2
+promotion (2, 3, 5, 8) prob & 97.54 & 99.87 & 1.13 & 66.18 & 10.81
+promotion (2, 3, 4, 5) prob & 97.54 & 99.87 & 1.13 & 66.5 & 10.79
+promotion (2, 4, 6, 8, 12, 16, 24, 32) prob & 97.48 & 99.8 & 1.13 & 65.96 & 20.69
+LSTM & nan & nan & nan & nan & nan
+Transformer & nan & nan & nan & nan & nan
+LSTM[win:2] & nan & nan & nan & nan & nan
+LSTM[win:4] & nan & nan & nan & nan & nan
+LSTM[win:8] & nan & nan & nan & nan & nan
+LSTM[win:16] & nan & nan & nan & nan & nan
+LSTM[win:32] & nan & nan & nan & nan & nan
+Transformer[win:2] & nan & nan & nan & nan & nan
+Transformer[win:4] & nan & nan & nan & nan & nan
+Transformer[win:8] & nan & nan & nan & nan & nan
+Transformer[win:16] & nan & nan & nan & nan & nan
+Transformer[win:32] & nan & nan & nan & nan & nan
+
+LSTM & nan & nan
+LSTM[win:16] & nan & nan
+LSTM[win:2] & nan & nan
+LSTM[win:32] & nan & nan
+LSTM[win:4] & nan & nan
+LSTM[win:8] & nan & nan
+adaptive (2, 3, 4, 5) prob & 460.284 & 40.928
+adaptive (2, 3, 5, 8) prob & 440.168 & 36.432
+adaptive (2, 4, 6, 8, 12, 16, 24, 32) prob & 685.486 & 119.13
+17-gram & 34.29 & 12.876
+3-gram & 66.78999999999999 & 9.076
+33-gram & 32.356 & 17.022
+5-gram & 50.43 & 5.682
+9-gram & 40.692 & 5.162
+promotion (2, 3, 4, 5) prob & 103.29400000000001 & 40.727999999999994
+promotion (2, 3, 5, 8) prob & 126.124 & 35.378
+promotion (2, 4, 6, 8, 12, 16, 24, 32) prob & 123.56199999999998 & 98.894
+soft voting (2, 3, 4, 5)* & 346.742 & 55.470000000000006
+soft voting (2, 3, 5, 8)* & 334.348 & 53.20399999999999
+Transformer & nan & nan
+Transformer[win:16] & nan & nan
+Transformer[win:2] & nan & nan
+Transformer[win:32] & nan & nan
+Transformer[win:4] & nan & nan
+Transformer[win:8] & nan & nan

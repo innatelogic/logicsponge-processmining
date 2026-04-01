@@ -4,6 +4,9 @@ Script to run batch experiments on multiple datasets by invoking predict_batch.p
 This script invokes the local `predict_batch.py` using the same Python
 interpreter and a path relative to this file. That makes it robust when
 executed from a different current working directory or on a server.
+
+Usage:
+    python run_experiments.py --data_prop 0.5
 """
 
 import argparse

@@ -8,6 +8,8 @@ Usage example:
 import gc
 import json
 import logging
+import resource
+import sys
 import time
 from dataclasses import dataclass
 from datetime import timedelta
@@ -71,6 +73,43 @@ from logicsponge.processmining.utils import (
 )
 
 SEC_TO_MICRO = 1_000_000
+
+
+def get_peak_rss_mb() -> float:
+    """Return process peak RSS in MB (platform-normalized)."""
+    max_rss = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    # On macOS ru_maxrss is bytes; on Linux it is KB.
+    if sys.platform == "darwin":
+        return max_rss / (1024.0 * 1024.0)
+    return max_rss / 1024.0
+
+
+def peak_delta_mb(start_peak_mb: float) -> float:
+    """Return non-negative peak RSS growth since `start_peak_mb`."""
+    return max(0.0, get_peak_rss_mb() - start_peak_mb)
+
+
+DEFAULT_POWER_WATTS = {
+    "cpu": 65.0,
+    "cuda": 225.0,
+    "mps": 35.0,
+}
+
+
+def get_power_watts(backend: str) -> float:
+    """Return configured backend power draw in watts for energy estimation."""
+    energy_cfg = run_config.get("energy", {}) if isinstance(run_config, dict) else {}
+    val = energy_cfg.get(f"{backend}_watts", DEFAULT_POWER_WATTS.get(backend, DEFAULT_POWER_WATTS["cpu"]))
+    try:
+        watts = float(val)
+    except (TypeError, ValueError):
+        return DEFAULT_POWER_WATTS.get(backend, DEFAULT_POWER_WATTS["cpu"])
+    return max(0.0, watts)
+
+
+def estimate_energy_joules(duration_sec: float, *, backend: str) -> float:
+    """Estimate energy consumption as E = P * t in joules for a backend."""
+    return max(0.0, float(duration_sec)) * get_power_watts(backend)
 
 def lstm_model() -> tuple[LSTMModel, optim.Optimizer, nn.Module]:
     """Initialize and return an LSTM model, optimizer, and loss function."""
@@ -152,6 +191,7 @@ def process_neural_model(  # noqa: PLR0913
                 raise ValueError(msg)
 
     # Train the model on (optionally) windowed prefixes
+    memory_train_peak_start_mb = get_peak_rss_mb()
     start_time = time.time()
     model = train_rnn(
         model,
@@ -165,7 +205,9 @@ def process_neural_model(  # noqa: PLR0913
         patience=3
     )
     end_time = time.time()
-    training_time = (end_time - start_time) * SEC_TO_MICRO / (TRAIN_EVENTS + VAL_EVENTS)
+    train_duration_sec = end_time - start_time
+    training_time = train_duration_sec * SEC_TO_MICRO / (TRAIN_EVENTS + VAL_EVENTS)
+    memory_train_peak_delta_mb = peak_delta_mb(memory_train_peak_start_mb)
 
     # Save best model weights to the run-specific models directory (if available)
     try:
@@ -179,6 +221,7 @@ def process_neural_model(  # noqa: PLR0913
     # If a window_size is provided we want to evaluate the model in "prefix" mode
     # (one prediction per prefix), so that the resulting flattened prediction vector
     # aligns with the baseline `actual` vector and with how RL/qlearning is evaluated.
+    memory_eval_peak_start_mb = get_peak_rss_mb()
     stats, perplexities, eval_time, prediction_vector = evaluate_rnn(
         model,
         nn_test_set_transformed,
@@ -186,6 +229,7 @@ def process_neural_model(  # noqa: PLR0913
         idx_to_activity=nn_processor.idx_to_activity,
         window_size=window_size
     )
+    memory_eval_peak_delta_mb = peak_delta_mb(memory_eval_peak_start_mb)
 
     # Store neural model prediction vector in global memory under display name
     prediction_vectors_memory.setdefault(display_name, []).append(prediction_vector)
@@ -208,7 +252,10 @@ def process_neural_model(  # noqa: PLR0913
             raise ValueError(msg)
 
     perplexity_stats = compute_perplexity_stats(perplexities)
+    eval_time_sec = eval_time
     eval_time *= SEC_TO_MICRO / TEST_EVENTS
+    energy_train_joules = estimate_energy_joules(train_duration_sec, backend=device.type)
+    energy_eval_joules = estimate_energy_joules(eval_time_sec, backend=device.type)
 
     if (
         not isinstance(stats["top_k_correct_preds"], list)
@@ -235,6 +282,12 @@ def process_neural_model(  # noqa: PLR0913
         iteration_data=iteration_data,
         all_metrics=all_metrics,
         stats_to_log=stats_to_log,
+        memory_train_peak_delta_mb=memory_train_peak_delta_mb,
+        memory_eval_peak_delta_mb=memory_eval_peak_delta_mb,
+        memory_peak_delta_mb=memory_train_peak_delta_mb + memory_eval_peak_delta_mb,
+        energy_train_joules=energy_train_joules,
+        energy_eval_joules=energy_eval_joules,
+        energy_joules=energy_train_joules + energy_eval_joules,
     )
 
 
@@ -306,7 +359,7 @@ def process_rl_model(
     nn_val_set_transformed: torch.Tensor,
     nn_eval_set_transformed: torch.Tensor,
     epochs: int = 20,
-) -> tuple[dict[str, Any], list[Any], float, list[Any], float]:
+) -> tuple[dict[str, Any], list[Any], float, list[Any], float, float, float]:
     """
     Train and evaluate a Q-learning model with specified window size.
 
@@ -320,6 +373,7 @@ def process_rl_model(
     model, optimizer, criterion = qnetwork_model()
 
     # Train model
+    memory_train_peak_start_mb = get_peak_rss_mb()
     model = train_rl(
         model=model,
         train_sequences=nn_train_set_transformed,
@@ -333,8 +387,10 @@ def process_rl_model(
     )
 
     train_time = time.time() - start_time
+    memory_train_peak_delta_mb = peak_delta_mb(memory_train_peak_start_mb)
 
     # Evaluate on the common evaluation set (same sequences as other models)
+    memory_eval_peak_start_mb = get_peak_rss_mb()
     model.eval()
     with torch.no_grad():
         # evaluate_rl returns: metrics, perplexities, eval_time, prediction_vector
@@ -345,6 +401,7 @@ def process_rl_model(
             idx_to_activity=nn_processor.idx_to_activity,
             window_size=window_size,
         )
+    memory_eval_peak_delta_mb = peak_delta_mb(memory_eval_peak_start_mb)
 
     # Persist RL model weights (best state) to models directory
     try:
@@ -356,7 +413,15 @@ def process_rl_model(
         logger.debug("Failed to save RL model weights (window=%s): %s", window_size, _e, exc_info=True)
 
     # Return the relevant outputs so the caller can integrate them into iteration records
-    return metrics, eval_pp, eval_time, prediction_vector, train_time
+    return (
+        metrics,
+        eval_pp,
+        eval_time,
+        prediction_vector,
+        train_time,
+        memory_train_peak_delta_mb,
+        memory_eval_peak_delta_mb,
+    )
 
 
 ML_TRAINING = False
@@ -537,6 +602,11 @@ config_file_path = Path(__file__).parent / "predict_config.json"
 default_run_config = {
     "nn": {"lr": 0.001, "batch_size": 8, "epochs": 20},
     "rl": {"lr": 0.001, "batch_size": 64, "epochs": 20, "gamma": 0.99},
+    "energy": {
+        "cpu_watts": DEFAULT_POWER_WATTS["cpu"],
+        "cuda_watts": DEFAULT_POWER_WATTS["cuda"],
+        "mps_watts": DEFAULT_POWER_WATTS["mps"],
+    },
     "lstm": {
         "vocab_size": MAGIC_NUMBER, "embedding_dim": MAGIC_NUMBER, "hidden_dim": 128, "output_dim": MAGIC_NUMBER
     },
@@ -584,7 +654,7 @@ except (TypeError, OSError):
 # Define the number of iterations
 # ============================================================
 
-N_ITERATIONS = 1
+N_ITERATIONS = 3
 
 # Store metrics across iterations
 all_metrics: dict = {
@@ -604,6 +674,12 @@ all_metrics: dict = {
         "mean_actual_delay": [],
         "mean_normalized_error": [],
         "num_delay_predictions": [],
+        "memory_train_peak_delta_mb": [],
+        "memory_eval_peak_delta_mb": [],
+        "memory_peak_delta_mb": [],
+        "energy_train_joules": [],
+        "energy_eval_joules": [],
+        "energy_joules": [],
     }
     for name in [
         "fpt",
@@ -729,6 +805,12 @@ for iteration in range(N_ITERATIONS):
         "Top-3": [],
         "Pred Time": [],
         "Train Time": [],
+        "Memory Train Δ (MB)": [],
+        "Memory Eval Δ (MB)": [],
+        "Memory Peak Δ (MB)": [],
+        "Energy Train (J)": [],
+        "Energy Eval (J)": [],
+        "Energy (J)": [],
         "Good Preds": [],
         "Tot Preds": [],
         "Nb States": [],
@@ -801,13 +883,16 @@ for iteration in range(N_ITERATIONS):
         # Training loop
         # ============================================================
 
+        strategy_memory_train_peak_start_mb = get_peak_rss_mb()
+        train_duration_sec = 0.0
         for event in tqdm(train_set, desc="Processing events"):
             start_time = time.time()
             pause = strategy.update(event)
             end_time = time.time()
-            training_times[strategy_name] += end_time - start_time - (pause or 0.0)
+            train_duration_sec += end_time - start_time - (pause or 0.0)
 
-        training_times[strategy_name] *= float(SEC_TO_MICRO) / len(train_set)
+        training_times[strategy_name] = train_duration_sec * float(SEC_TO_MICRO) / len(train_set)
+        memory_train_peak_delta_mb = peak_delta_mb(strategy_memory_train_peak_start_mb)
 
         # ============================================================
         # Evaluation loop
@@ -820,13 +905,16 @@ for iteration in range(N_ITERATIONS):
             strategy.offline_update = False
             logger.info("AdaptiveVoting offline update disabled for %s", strategy_name)
 
+        strategy_memory_eval_peak_start_mb = get_peak_rss_mb()
         evaluation_time, prediction_vector = strategy.evaluate(
             test_data,
             mode="incremental",
             debug=(data_name == "Synthetic_Train"),
             compute_perplexity=("hard" not in strategy_name and "qlearning" not in strategy_name),
         )
+        eval_duration_sec = evaluation_time
         evaluation_time *= SEC_TO_MICRO / TEST_EVENTS
+        memory_eval_peak_delta_mb = peak_delta_mb(strategy_memory_eval_peak_start_mb)
 
         # Store prediction vector for this strategy and iteration (keep ordering across iterations)
         prediction_vectors_memory.setdefault(strategy_name, []).append(prediction_vector)
@@ -918,6 +1006,12 @@ for iteration in range(N_ITERATIONS):
             mean_actual_delay=mean_actual_delay,
             mean_normalized_error=mean_normalized_error,
             num_delay_predictions=delay_count,
+            memory_train_peak_delta_mb=memory_train_peak_delta_mb,
+            memory_eval_peak_delta_mb=memory_eval_peak_delta_mb,
+            memory_peak_delta_mb=memory_train_peak_delta_mb + memory_eval_peak_delta_mb,
+            energy_train_joules=estimate_energy_joules(train_duration_sec, backend="cpu"),
+            energy_eval_joules=estimate_energy_joules(eval_duration_sec, backend="cpu"),
+            energy_joules=estimate_energy_joules(train_duration_sec + eval_duration_sec, backend="cpu"),
             per_state_stats=per_state_stats,
         )
 
@@ -1163,7 +1257,15 @@ for iteration in range(N_ITERATIONS):
                 rl_name = f"qlearning_win{w}" if w is not None else "qlearning"
                 logger.info("Training and evaluating %s model...", rl_name)
 
-                metrics, perplexities, eval_time, prediction_vector, training_time = process_rl_model(
+                (
+                    metrics,
+                    perplexities,
+                    eval_time,
+                    prediction_vector,
+                    training_time,
+                    memory_train_peak_delta_mb,
+                    memory_eval_peak_delta_mb,
+                ) = process_rl_model(
                     rl_name,
                     w,
                     iteration_data,
@@ -1172,6 +1274,8 @@ for iteration in range(N_ITERATIONS):
                     rl_eval_set_transformed,
                     epochs=default_run_config["rl"]["epochs"],
                 )
+                rl_energy_train_joules = estimate_energy_joules(training_time, backend=device.type)
+                rl_energy_eval_joules = estimate_energy_joules(eval_time, backend=device.type)
 
                 # Store prediction vector like other strategies
                 prediction_vectors_memory.setdefault(rl_name, []).append(prediction_vector)
@@ -1222,6 +1326,12 @@ for iteration in range(N_ITERATIONS):
                     iteration_data=iteration_data,
                     all_metrics=all_metrics,
                     stats_to_log=stats_to_log,
+                    memory_train_peak_delta_mb=memory_train_peak_delta_mb,
+                    memory_eval_peak_delta_mb=memory_eval_peak_delta_mb,
+                    memory_peak_delta_mb=memory_train_peak_delta_mb + memory_eval_peak_delta_mb,
+                    energy_train_joules=rl_energy_train_joules,
+                    energy_eval_joules=rl_energy_eval_joules,
+                    energy_joules=rl_energy_train_joules + rl_energy_eval_joules,
                 )
 
     # Create a DataFrame for the iteration and log it
@@ -1267,6 +1377,12 @@ results: dict = {
     "States": [],
     "Pred Time": [],
     "Train Time": [],
+    "Memory Train (MB)": [],
+    "Memory Eval (MB)": [],
+    "Memory (MB)": [],
+    "Energy Train (J)": [],
+    "Energy Eval (J)": [],
+    "Energy (J)": [],
     "Delay Error": [],
     "Actual Delay": [],
     "Normalized Error": [],
@@ -1286,6 +1402,12 @@ for model_name, stats in all_metrics.items():
         "Top-3 (%)": "top-3",
         "Pred Time": "pred_time",
         "Train Time": "train_time",
+        "Memory Train (MB)": "memory_train_peak_delta_mb",
+        "Memory Eval (MB)": "memory_eval_peak_delta_mb",
+        "Memory (MB)": "memory_peak_delta_mb",
+        "Energy Train (J)": "energy_train_joules",
+        "Energy Eval (J)": "energy_eval_joules",
+        "Energy (J)": "energy_joules",
     }
 
     for label, key_name in key_labels.items():
