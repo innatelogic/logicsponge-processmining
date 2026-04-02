@@ -73,6 +73,13 @@ from logicsponge.processmining.utils import (
     save_run_config,
 )
 
+# Import rigorous energy measurement (Linux/RAPL+NVML)
+try:
+    from logicsponge.processmining.energy_meter import EnergyPhaseTracker
+    HAS_RIGOROUS_ENERGY = True
+except ImportError:
+    HAS_RIGOROUS_ENERGY = False
+
 SEC_TO_MICRO = 1_000_000
 
 # Try to import psutil for more robust memory tracking
@@ -172,8 +179,40 @@ def get_power_watts(backend: str) -> float:
 
 
 def estimate_energy_joules(duration_sec: float, *, backend: str) -> float:
-    """Estimate energy consumption as E = P * t in joules for a backend."""
+    """Estimate energy consumption as E = P * t in joules for a backend (fallback only)."""
     return max(0.0, float(duration_sec)) * get_power_watts(backend)
+
+
+def create_energy_tracker(phase_name: str) -> tuple[EnergyPhaseTracker | None, bool]:
+    """
+    Create an energy tracker for this phase.
+
+    Returns (tracker, is_rigorous) where tracker is None if RAPL/NVML unavailable.
+    is_rigorous=True means actual measured energy; False means fallback to estimation.
+    """
+    if HAS_RIGOROUS_ENERGY and sys.platform.startswith("linux"):
+        tracker = EnergyPhaseTracker(phase_name=phase_name)
+        if tracker.rapl_meter.is_available() or tracker.nvml_meter.is_available():
+            return tracker, True
+    return None, False
+
+
+def get_phase_energy_joules(
+    tracker: EnergyPhaseTracker | None,
+    is_rigorous: bool,
+    fallback_duration_sec: float,
+    backend: str = "cpu",
+) -> float:
+    """
+    Get energy for completed phase.
+
+    If tracker available, return measured energy; else estimate from duration.
+    """
+    if tracker and is_rigorous:
+        measurement = tracker.stop()
+        return measurement.total_energy_joules
+    else:
+        return estimate_energy_joules(fallback_duration_sec, backend=backend)
 
 def lstm_model() -> tuple[LSTMModel, optim.Optimizer, nn.Module]:
     """Initialize and return an LSTM model, optimizer, and loss function."""
@@ -257,6 +296,12 @@ def process_neural_model(  # noqa: PLR0913
     # Train the model on (optionally) windowed prefixes
     memory_train_peak_start_mb = get_current_rss_mb()
     start_time = time.time()
+    
+    # Initialize rigorous energy tracker for training
+    energy_train_tracker, energy_is_rigorous = create_energy_tracker(f"{display_name}_train")
+    if energy_train_tracker:
+        energy_train_tracker.start()
+    
     model = train_rnn(
         model,
         nn_train_set_transformed,
@@ -268,10 +313,17 @@ def process_neural_model(  # noqa: PLR0913
         window_size=window_size,
         patience=3
     )
+    
     end_time = time.time()
     train_duration_sec = end_time - start_time
     training_time = train_duration_sec * SEC_TO_MICRO / (TRAIN_EVENTS + VAL_EVENTS)
     memory_train_peak_delta_mb = measure_peak_delta_mb(memory_train_peak_start_mb)
+    
+    # Measure energy for training
+    backend = "cuda" if torch.cuda.is_available() else "cpu"
+    energy_train_joules = get_phase_energy_joules(
+        energy_train_tracker, energy_is_rigorous, train_duration_sec, backend=backend
+    )
 
     # Save best model weights to the run-specific models directory (if available)
     try:
@@ -286,6 +338,13 @@ def process_neural_model(  # noqa: PLR0913
     # (one prediction per prefix), so that the resulting flattened prediction vector
     # aligns with the baseline `actual` vector and with how RL/qlearning is evaluated.
     memory_eval_peak_start_mb = get_current_rss_mb()
+    eval_start_time = time.time()
+    
+    # Initialize rigorous energy tracker for evaluation
+    energy_eval_tracker, _ = create_energy_tracker(f"{display_name}_eval")
+    if energy_eval_tracker:
+        energy_eval_tracker.start()
+    
     stats, perplexities, eval_time, prediction_vector = evaluate_rnn(
         model,
         nn_test_set_transformed,
@@ -293,7 +352,14 @@ def process_neural_model(  # noqa: PLR0913
         idx_to_activity=nn_processor.idx_to_activity,
         window_size=window_size
     )
+    
+    eval_duration_sec = time.time() - eval_start_time
     memory_eval_peak_delta_mb = measure_peak_delta_mb(memory_eval_peak_start_mb)
+    
+    # Measure energy for evaluation
+    energy_eval_joules = get_phase_energy_joules(
+        energy_eval_tracker, energy_is_rigorous, eval_duration_sec, backend=backend
+    )
 
     # Store neural model prediction vector in global memory under display name
     prediction_vectors_memory.setdefault(display_name, []).append(prediction_vector)
@@ -316,10 +382,9 @@ def process_neural_model(  # noqa: PLR0913
             raise ValueError(msg)
 
     perplexity_stats = compute_perplexity_stats(perplexities)
-    eval_time_sec = eval_time
-    eval_time *= SEC_TO_MICRO / TEST_EVENTS
-    energy_train_joules = estimate_energy_joules(train_duration_sec, backend=device.type)
-    energy_eval_joules = estimate_energy_joules(eval_time_sec, backend=device.type)
+
+    
+    # Note: energy_train_joules and energy_eval_joules are set above using rigorous tracker if available
 
     if (
         not isinstance(stats["top_k_correct_preds"], list)
@@ -423,21 +488,32 @@ def process_rl_model(
     nn_val_set_transformed: torch.Tensor,
     nn_eval_set_transformed: torch.Tensor,
     epochs: int = 20,
-) -> tuple[dict[str, Any], list[Any], float, list[Any], float, float, float]:
+) -> tuple[dict[str, Any], list[Any], float, list[Any], float, float, float, float, float]:
     """
     Train and evaluate a Q-learning model with specified window size.
 
     Evaluation is performed on the same sequences as other models (test set),
     transformed to tensor format, and intentionally WITHOUT an added START token
     so that prediction vectors align with the common "actual" baseline.
+    
+    Returns: (metrics, eval_pp, eval_time, prediction_vector, train_time, 
+              memory_train_peak_delta_mb, memory_eval_peak_delta_mb,
+              energy_train_joules, energy_eval_joules)
     """
-    start_time = time.time()
+    overall_start = time.time()
 
     # Initialize model
     model, optimizer, criterion = qnetwork_model()
 
     # Train model
     memory_train_peak_start_mb = get_current_rss_mb()
+    train_loop_start = time.time()
+    
+    # Initialize rigorous energy tracker for RL training
+    energy_train_tracker, energy_is_rigorous = create_energy_tracker("rl_train")
+    if energy_train_tracker:
+        energy_train_tracker.start()
+    
     model = train_rl(
         model=model,
         train_sequences=nn_train_set_transformed,
@@ -450,11 +526,25 @@ def process_rl_model(
         gamma=run_config.get("rl", {}).get("gamma", 0.99),  # Standard RL discount factor
     )
 
-    train_time = time.time() - start_time
+    wall_clock_train = time.time() - train_loop_start
+    train_time = time.time() - overall_start
     memory_train_peak_delta_mb = measure_peak_delta_mb(memory_train_peak_start_mb)
+    
+    # Measure energy for RL training
+    backend = "cuda" if torch.cuda.is_available() else "cpu"
+    energy_train_joules = get_phase_energy_joules(
+        energy_train_tracker, energy_is_rigorous, wall_clock_train, backend=backend
+    )
 
     # Evaluate on the common evaluation set (same sequences as other models)
     memory_eval_peak_start_mb = get_current_rss_mb()
+    eval_start = time.time()
+
+    # Initialize rigorous energy tracker for RL evaluation
+    energy_eval_tracker, _ = create_energy_tracker("rl_eval")
+    if energy_eval_tracker:
+        energy_eval_tracker.start()
+
     model.eval()
     with torch.no_grad():
         # evaluate_rl returns: metrics, perplexities, eval_time, prediction_vector
@@ -465,7 +555,14 @@ def process_rl_model(
             idx_to_activity=nn_processor.idx_to_activity,
             window_size=window_size,
         )
+    
+    wall_clock_eval = time.time() - eval_start
     memory_eval_peak_delta_mb = measure_peak_delta_mb(memory_eval_peak_start_mb)
+
+    # Measure energy for RL evaluation
+    energy_eval_joules = get_phase_energy_joules(
+        energy_eval_tracker, energy_is_rigorous, wall_clock_eval, backend=backend
+    )
 
     # Persist RL model weights (best state) to models directory
     try:
@@ -485,10 +582,12 @@ def process_rl_model(
         train_time,
         memory_train_peak_delta_mb,
         memory_eval_peak_delta_mb,
+        energy_train_joules,
+        energy_eval_joules,
     )
 
 
-ML_TRAINING = False
+ML_TRAINING = True
 NN_TRAINING = True
 ALERGIA_TRAINING = False
 SHOW_DELAYS = False
@@ -948,15 +1047,30 @@ for iteration in range(N_ITERATIONS):
         # ============================================================
 
         strategy_memory_train_peak_start_mb = get_current_rss_mb()
+        train_loop_start = time.time()
+        
+        # Initialize rigorous energy tracker for mining/training
+        energy_train_tracker, energy_is_rigorous = create_energy_tracker(f"{strategy_name}_train")
+        if energy_train_tracker:
+            energy_train_tracker.start()
+        
         train_duration_sec = 0.0
         for event in tqdm(train_set, desc="Processing events"):
             start_time = time.time()
             pause = strategy.update(event)
             end_time = time.time()
             train_duration_sec += end_time - start_time - (pause or 0.0)
+        
+        # Wall-clock time for fallback energy estimation
+        wall_clock_train_sec = time.time() - train_loop_start
 
         training_times[strategy_name] = train_duration_sec * float(SEC_TO_MICRO) / len(train_set)
         memory_train_peak_delta_mb = measure_peak_delta_mb(strategy_memory_train_peak_start_mb)
+        
+        # Measure energy for miner training
+        energy_train_joules = get_phase_energy_joules(
+            energy_train_tracker, energy_is_rigorous, wall_clock_train_sec, backend="cpu"
+        )
 
         # ============================================================
         # Evaluation loop
@@ -970,15 +1084,29 @@ for iteration in range(N_ITERATIONS):
             logger.info("AdaptiveVoting offline update disabled for %s", strategy_name)
 
         strategy_memory_eval_peak_start_mb = get_current_rss_mb()
+        eval_start_time = time.time()
+        
+        # Initialize rigorous energy tracker for evaluation
+        energy_eval_tracker, _ = create_energy_tracker(f"{strategy_name}_eval")
+        if energy_eval_tracker:
+            energy_eval_tracker.start()
+        
         evaluation_time, prediction_vector = strategy.evaluate(
             test_data,
             mode="incremental",
             debug=(data_name == "Synthetic_Train"),
             compute_perplexity=("hard" not in strategy_name and "qlearning" not in strategy_name),
         )
+        
+        wall_clock_eval_sec = time.time() - eval_start_time
         eval_duration_sec = evaluation_time
         evaluation_time *= SEC_TO_MICRO / TEST_EVENTS
         memory_eval_peak_delta_mb = measure_peak_delta_mb(strategy_memory_eval_peak_start_mb)
+        
+        # Measure energy for miner evaluation
+        energy_eval_joules = get_phase_energy_joules(
+            energy_eval_tracker, energy_is_rigorous, wall_clock_eval_sec, backend="cpu"
+        )
 
         # Store prediction vector for this strategy and iteration (keep ordering across iterations)
         prediction_vectors_memory.setdefault(strategy_name, []).append(prediction_vector)
@@ -1073,9 +1201,10 @@ for iteration in range(N_ITERATIONS):
             memory_train_peak_delta_mb=memory_train_peak_delta_mb,
             memory_eval_peak_delta_mb=memory_eval_peak_delta_mb,
             memory_peak_delta_mb=memory_train_peak_delta_mb + memory_eval_peak_delta_mb,
-            energy_train_joules=estimate_energy_joules(train_duration_sec, backend="cpu"),
-            energy_eval_joules=estimate_energy_joules(eval_duration_sec, backend="cpu"),
-            energy_joules=estimate_energy_joules(train_duration_sec + eval_duration_sec, backend="cpu"),
+            # Note: energy_train_joules, energy_eval_joules, energy_joules already set from rigorous tracker above
+            energy_train_joules=energy_train_joules,
+            energy_eval_joules=energy_eval_joules,
+            energy_joules=energy_train_joules + energy_eval_joules,
             per_state_stats=per_state_stats,
         )
 
@@ -1329,6 +1458,8 @@ for iteration in range(N_ITERATIONS):
                     training_time,
                     memory_train_peak_delta_mb,
                     memory_eval_peak_delta_mb,
+                    rl_energy_train_joules,
+                    rl_energy_eval_joules,
                 ) = process_rl_model(
                     rl_name,
                     w,
@@ -1338,8 +1469,7 @@ for iteration in range(N_ITERATIONS):
                     rl_eval_set_transformed,
                     epochs=default_run_config["rl"]["epochs"],
                 )
-                rl_energy_train_joules = estimate_energy_joules(training_time, backend=device.type)
-                rl_energy_eval_joules = estimate_energy_joules(eval_time, backend=device.type)
+                # Note: rl_energy_train_joules and rl_energy_eval_joules already set from rigorous tracker
 
                 # Store prediction vector like other strategies
                 prediction_vectors_memory.setdefault(rl_name, []).append(prediction_vector)
