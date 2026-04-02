@@ -18,4 +18,5 @@ sortedcontainers
 torch
 seaborn
 tabulate
+psutil
 
