@@ -8,6 +8,7 @@ Usage example:
 import gc
 import json
 import logging
+import os
 import resource
 import sys
 import time
@@ -74,19 +75,82 @@ from logicsponge.processmining.utils import (
 
 SEC_TO_MICRO = 1_000_000
 
-
-def get_peak_rss_mb() -> float:
-    """Return process peak RSS in MB (platform-normalized)."""
-    max_rss = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
-    # On macOS ru_maxrss is bytes; on Linux it is KB.
-    if sys.platform == "darwin":
-        return max_rss / (1024.0 * 1024.0)
-    return max_rss / 1024.0
+# Try to import psutil for more robust memory tracking
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
 
 
-def peak_delta_mb(start_peak_mb: float) -> float:
-    """Return non-negative peak RSS growth since `start_peak_mb`."""
-    return max(0.0, get_peak_rss_mb() - start_peak_mb)
+def _get_rss_from_proc_status() -> float:
+    """Try to read RSS from /proc/self/status on Linux. Returns 0.0 on failure."""
+    try:
+        with Path("/proc/self/status").open() as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    kb = int(line.split()[1])
+                    return kb / 1024.0
+    except (OSError, ValueError, IndexError):
+        pass
+    return 0.0
+
+
+def _get_rss_from_proc_stat() -> float:
+    """Try to read RSS from /proc/self/stat on Linux. Returns 0.0 on failure."""
+    try:
+        with Path("/proc/self/stat").open() as f:
+            fields = f.read().split()
+            rss_pages = int(fields[23])
+            page_size = os.sysconf("SC_PAGE_SIZE") if hasattr(os, "sysconf") else 4096
+            return rss_pages * page_size / (1024.0 * 1024.0)
+    except (OSError, ValueError, IndexError):
+        pass
+    return 0.0
+
+
+def _get_rss_from_resource() -> float:
+    """Try to read RSS from resource module on macOS. Returns 0.0 on failure."""
+    try:
+        if sys.platform == "darwin":
+            max_rss = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+            return max_rss / (1024.0 * 1024.0)
+    except (OSError, ValueError):
+        pass
+    return 0.0
+
+
+def get_current_rss_mb() -> float:
+    """Return process current RSS in MB using most reliable method available."""
+    if HAS_PSUTIL:
+        try:
+            return psutil.Process(os.getpid()).memory_info().rss / (1024.0 * 1024.0) # type: ignore  # noqa: PGH003
+        except (OSError, psutil.NoSuchProcess): # type: ignore  # noqa: PGH003
+            pass
+
+    if sys.platform.startswith("linux"):
+        rss = _get_rss_from_proc_status()
+        if rss > 0.0:
+            return rss
+        rss = _get_rss_from_proc_stat()
+        if rss > 0.0:
+            return rss
+
+    rss = _get_rss_from_resource()
+    if rss > 0.0:
+        return rss
+
+    return 0.0
+
+
+def measure_peak_delta_mb(start_rss_mb: float) -> float:
+    """
+    Return non-negative peak RSS growth since start_rss_mb.
+
+    This tracks actual memory usage (not just peak-since-start-of-process).
+    """
+    current_rss = get_current_rss_mb()
+    return max(0.0, current_rss - start_rss_mb)
 
 
 DEFAULT_POWER_WATTS = {
@@ -191,7 +255,7 @@ def process_neural_model(  # noqa: PLR0913
                 raise ValueError(msg)
 
     # Train the model on (optionally) windowed prefixes
-    memory_train_peak_start_mb = get_peak_rss_mb()
+    memory_train_peak_start_mb = get_current_rss_mb()
     start_time = time.time()
     model = train_rnn(
         model,
@@ -207,7 +271,7 @@ def process_neural_model(  # noqa: PLR0913
     end_time = time.time()
     train_duration_sec = end_time - start_time
     training_time = train_duration_sec * SEC_TO_MICRO / (TRAIN_EVENTS + VAL_EVENTS)
-    memory_train_peak_delta_mb = peak_delta_mb(memory_train_peak_start_mb)
+    memory_train_peak_delta_mb = measure_peak_delta_mb(memory_train_peak_start_mb)
 
     # Save best model weights to the run-specific models directory (if available)
     try:
@@ -221,7 +285,7 @@ def process_neural_model(  # noqa: PLR0913
     # If a window_size is provided we want to evaluate the model in "prefix" mode
     # (one prediction per prefix), so that the resulting flattened prediction vector
     # aligns with the baseline `actual` vector and with how RL/qlearning is evaluated.
-    memory_eval_peak_start_mb = get_peak_rss_mb()
+    memory_eval_peak_start_mb = get_current_rss_mb()
     stats, perplexities, eval_time, prediction_vector = evaluate_rnn(
         model,
         nn_test_set_transformed,
@@ -229,7 +293,7 @@ def process_neural_model(  # noqa: PLR0913
         idx_to_activity=nn_processor.idx_to_activity,
         window_size=window_size
     )
-    memory_eval_peak_delta_mb = peak_delta_mb(memory_eval_peak_start_mb)
+    memory_eval_peak_delta_mb = measure_peak_delta_mb(memory_eval_peak_start_mb)
 
     # Store neural model prediction vector in global memory under display name
     prediction_vectors_memory.setdefault(display_name, []).append(prediction_vector)
@@ -373,7 +437,7 @@ def process_rl_model(
     model, optimizer, criterion = qnetwork_model()
 
     # Train model
-    memory_train_peak_start_mb = get_peak_rss_mb()
+    memory_train_peak_start_mb = get_current_rss_mb()
     model = train_rl(
         model=model,
         train_sequences=nn_train_set_transformed,
@@ -387,10 +451,10 @@ def process_rl_model(
     )
 
     train_time = time.time() - start_time
-    memory_train_peak_delta_mb = peak_delta_mb(memory_train_peak_start_mb)
+    memory_train_peak_delta_mb = measure_peak_delta_mb(memory_train_peak_start_mb)
 
     # Evaluate on the common evaluation set (same sequences as other models)
-    memory_eval_peak_start_mb = get_peak_rss_mb()
+    memory_eval_peak_start_mb = get_current_rss_mb()
     model.eval()
     with torch.no_grad():
         # evaluate_rl returns: metrics, perplexities, eval_time, prediction_vector
@@ -401,7 +465,7 @@ def process_rl_model(
             idx_to_activity=nn_processor.idx_to_activity,
             window_size=window_size,
         )
-    memory_eval_peak_delta_mb = peak_delta_mb(memory_eval_peak_start_mb)
+    memory_eval_peak_delta_mb = measure_peak_delta_mb(memory_eval_peak_start_mb)
 
     # Persist RL model weights (best state) to models directory
     try:
@@ -883,7 +947,7 @@ for iteration in range(N_ITERATIONS):
         # Training loop
         # ============================================================
 
-        strategy_memory_train_peak_start_mb = get_peak_rss_mb()
+        strategy_memory_train_peak_start_mb = get_current_rss_mb()
         train_duration_sec = 0.0
         for event in tqdm(train_set, desc="Processing events"):
             start_time = time.time()
@@ -892,7 +956,7 @@ for iteration in range(N_ITERATIONS):
             train_duration_sec += end_time - start_time - (pause or 0.0)
 
         training_times[strategy_name] = train_duration_sec * float(SEC_TO_MICRO) / len(train_set)
-        memory_train_peak_delta_mb = peak_delta_mb(strategy_memory_train_peak_start_mb)
+        memory_train_peak_delta_mb = measure_peak_delta_mb(strategy_memory_train_peak_start_mb)
 
         # ============================================================
         # Evaluation loop
@@ -905,7 +969,7 @@ for iteration in range(N_ITERATIONS):
             strategy.offline_update = False
             logger.info("AdaptiveVoting offline update disabled for %s", strategy_name)
 
-        strategy_memory_eval_peak_start_mb = get_peak_rss_mb()
+        strategy_memory_eval_peak_start_mb = get_current_rss_mb()
         evaluation_time, prediction_vector = strategy.evaluate(
             test_data,
             mode="incremental",
@@ -914,7 +978,7 @@ for iteration in range(N_ITERATIONS):
         )
         eval_duration_sec = evaluation_time
         evaluation_time *= SEC_TO_MICRO / TEST_EVENTS
-        memory_eval_peak_delta_mb = peak_delta_mb(strategy_memory_eval_peak_start_mb)
+        memory_eval_peak_delta_mb = measure_peak_delta_mb(strategy_memory_eval_peak_start_mb)
 
         # Store prediction vector for this strategy and iteration (keep ordering across iterations)
         prediction_vectors_memory.setdefault(strategy_name, []).append(prediction_vector)
