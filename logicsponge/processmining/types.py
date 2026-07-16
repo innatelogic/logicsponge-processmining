@@ -1,7 +1,9 @@
 """Types for process mining."""
 
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Self, TypedDict
+from typing import Any, Literal, Self, TypedDict
 
 # ============================================================
 # Types
@@ -35,6 +37,16 @@ class StateId(int):
 
 ComposedState = Any  # QUESTION: Is there a way to write this? ComposedState = StateId | tuple[ComposedState, ...]
 
+
+@dataclass(frozen=True, slots=True)
+class OrderedModelState:
+    """States for the previous, current, and next models in an ordered strategy."""
+
+    previous: ComposedState | None
+    current: ComposedState
+    next: ComposedState | None
+
+
 ActivityName = str | tuple[str, ...]  # QUESTION: why tuple[str, ...]?
 
 Prediction = dict[str, Any]
@@ -42,6 +54,11 @@ Prediction = dict[str, Any]
 ProbDistr = dict[ActivityName, float]
 
 ActivityDelays = dict[ActivityName, timedelta]
+
+NumericEstimatorName = Literal["mean", "median", "mode", "quantile", "trimmed_mean"]
+NumericErrorName = Literal["smape", "mae", "mape", "mse", "rmse"]
+NumericAggregator = Callable[[Mapping[int, int]], float]
+NumericErrorFunction = Callable[[float, float], float]
 
 
 class Metrics(TypedDict):
@@ -106,3 +123,41 @@ class Event(RequiredEvent, total=False):
     """
 
     attributes: dict[str, Any]
+
+
+class RequiredNumericEvent(TypedDict):
+    """Required fields for an integer-valued sequence event."""
+
+    case_id: CaseId
+    value: int
+    timestamp: datetime | None
+
+
+class NumericEvent(RequiredNumericEvent, total=False):
+    """Canonical event for integer-valued sequence prediction."""
+
+    attributes: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class NumericMetrics:
+    """Prediction and learned next-value distribution for a numeric context."""
+
+    state_id: tuple[int, ...]
+    prediction: float | None
+    distribution: dict[int, float]
+    estimator: str
+
+
+@dataclass(frozen=True, slots=True)
+class NumericEvaluationResult:
+    """Aggregate and per-observation results from numeric evaluation."""
+
+    metric: str
+    score: float | None
+    total_observations: int
+    evaluated_observations: int
+    missing_predictions: int
+    predictions: list[float | None]
+    actuals: list[int]
+    errors: list[float | None]

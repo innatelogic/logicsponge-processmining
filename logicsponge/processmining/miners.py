@@ -3,7 +3,7 @@ Module for streaming miners.
 
 This module contains the implementation of various streaming miners,
 including the BasicMiner, MultiMiner, HardVoting, SoftVoting, AdaptiveVoting,
-and Fallback classes.
+Promotion, BidirectionalPromotion, and Fallback classes.
 """
 
 import copy
@@ -41,6 +41,7 @@ from logicsponge.processmining.types import (
     ComposedState,
     Event,
     Metrics,
+    OrderedModelState,
     Prediction,
     ProbDistr,
     StateId,
@@ -346,7 +347,7 @@ class StreamingMiner(ABC):
                 # ============================================================
                 # Update statistics based on the prediction
                 # -----------------------------------------
-                self.update_stats(event, prediction, current_state) # type: ignore  # noqa: PGH003
+                self.update_stats(event, prediction, current_state)  # type: ignore  # noqa: PGH003
                 # Record model usage for ensemble/miner if applicable (batch mode)
                 if isinstance(self, MultiMiner):
                     # Build per-model metrics from the composed current_state
@@ -687,13 +688,12 @@ class MultiMiner(StreamingMiner, ABC):
                 metrics_list = [model.state_metrics(self.initial_state) for model in self.models]
 
         matched_any = False
-        is_correct = actual_activity is not None and ensemble_prediction is not None and (
-            actual_activity == ensemble_prediction
+        is_correct = (
+            actual_activity is not None and ensemble_prediction is not None and (actual_activity == ensemble_prediction)
         )
 
         for i, metrics in enumerate(metrics_list):
             model_pred = metrics_prediction(metrics, config=self.config)
-
 
             # Only consider models that offer a top prediction
             if model_pred is None:
@@ -724,7 +724,6 @@ class MultiMiner(StreamingMiner, ABC):
         self.stats["model_usage_events"] = int(self.model_usage_events)
         self.stats["model_prediction_counts"] = list(self.model_prediction_counts)
         self.stats["model_prediction_correct_counts"] = list(self.model_prediction_correct_counts)
-
 
     def get_model_usage_stats(self) -> dict:
         """
@@ -1159,7 +1158,6 @@ class LiveMultiMiner(MultiMiner):
         #         actual_activity=activity, ensemble_prediction=ensemble_activity, metrics_list=metrics_list
         #     )
 
-
         for i, model in enumerate(self.models):
             pred = probs_prediction(model.case_metrics(case_id)["probs"], config=self.config)
             if not self.offline_update and pred is not None and pred.get("activity") == activity:
@@ -1224,7 +1222,6 @@ class AdaptiveVoting(LiveMultiMiner):
         # Track which model was selected at each prediction during evaluation
         self.active_model_trace: list[int] = []
         self.last_selected_model_index: int | None = None
-
 
     def get_accuracies(self) -> list[float]:
         """Return the accuracy of each model as a list of floats."""
@@ -1387,9 +1384,7 @@ class AdaptiveVoting(LiveMultiMiner):
                 logger.debug("AdaptiveVoting.evaluate: total_predictions %d -> %d", prev_total, self.total_predictions)
 
                 if current_state is not None and isinstance(current_state, tuple):
-                    for idx, (model, model_state) in enumerate(
-                        zip(self.models, current_state, strict=True)
-                    ):
+                    for idx, (model, model_state) in enumerate(zip(self.models, current_state, strict=True)):
                         m_metrics = model.state_metrics(model_state)
                         m_pred = metrics_prediction(m_metrics, config=self.config)
                         if m_pred is not None and m_pred.get("activity") == actual_next_activity:
@@ -1423,7 +1418,6 @@ class AdaptiveVoting(LiveMultiMiner):
                                 self.correct_predictions[idx],
                             )
 
-
                 pause_start_time = time.time()
 
                 if compute_perplexity:
@@ -1441,7 +1435,7 @@ class AdaptiveVoting(LiveMultiMiner):
                 logger.debug("Metrics: %s", metrics)
 
                 # Update shared statistics
-                self.update_stats(event, prediction, current_state) # type: ignore  # noqa: PGH003
+                self.update_stats(event, prediction, current_state)  # type: ignore  # noqa: PGH003
 
                 # Record model usage for ensemble/miner if applicable
                 if isinstance(current_state, tuple):
@@ -1457,7 +1451,6 @@ class AdaptiveVoting(LiveMultiMiner):
                     ensemble_prediction=ensemble_activity,
                     metrics_list=metrics_list,
                 )
-
 
                 pause_time += time.time() - pause_start_time
 
@@ -1536,7 +1529,84 @@ class AdaptiveVoting(LiveMultiMiner):
         )
 
 
-class Promotion(MultiMiner):
+class OrderedModelSelection(MultiMiner):
+    """Shared lifecycle helpers for strategies that select from ordered models."""
+
+    def __init__(self, *args: dict[str, Any], **kwargs: Any) -> None:  # noqa: ANN401
+        """Initialize ordered model selection state."""
+        super().__init__(*args, **kwargs)
+        if not self.models:
+            msg = "Ordered model selection requires at least one model."
+            raise ValueError(msg)
+
+        self.current_index = 0
+        self.active_model_trace: list[int] = []
+        self.last_selected_model_index: int | None = None
+
+    def _initialize_candidate_from_model(self, source_index: int, candidate_index: int) -> None:
+        """Initialize an NGram candidate with the source model's accumulated data."""
+        if not (0 <= source_index < len(self.models) and 0 <= candidate_index < len(self.models)):
+            return
+
+        source_model = self.models[source_index]
+        candidate_model = self.models[candidate_index]
+        if not (hasattr(source_model, "algorithm") and hasattr(candidate_model, "algorithm")):
+            return
+
+        source_algorithm = source_model.algorithm  # type: ignore[attr-defined]
+        candidate_algorithm = candidate_model.algorithm  # type: ignore[attr-defined]
+        if type(source_algorithm).__name__ != "NGram" or type(candidate_algorithm).__name__ != "NGram":
+            return
+
+        for attribute in ("state_info", "transitions", "activities", "access_strings", "case_info"):
+            if hasattr(source_algorithm, attribute):
+                setattr(candidate_algorithm, attribute, copy.deepcopy(getattr(source_algorithm, attribute)))
+
+        if hasattr(source_algorithm, "initial_state"):
+            candidate_algorithm.initial_state = source_algorithm.initial_state
+
+        logger.debug(
+            "Initialized candidate model %d with model %d data (%d states, %d transitions).",
+            candidate_index,
+            source_index,
+            len(candidate_algorithm.state_info) if hasattr(candidate_algorithm, "state_info") else 0,
+            len(candidate_algorithm.transitions) if hasattr(candidate_algorithm, "transitions") else 0,
+        )
+
+    def _model_initial_state(self, model_index: int) -> ComposedState | None:
+        """Return a model's initial state, or ``None`` outside the model list."""
+        return self.models[model_index].initial_state if 0 <= model_index < len(self.models) else None
+
+    def _model_case_state(self, model_index: int, case_id: CaseId) -> ComposedState | None:
+        """Return a model's case state, or ``None`` outside the model list."""
+        return self.models[model_index].get_state_from_case(case_id) if 0 <= model_index < len(self.models) else None
+
+    def _model_state_info(self, model_index: int, state: ComposedState | None) -> ComposedState | None:
+        """Return state information when both the model and state exist."""
+        if not 0 <= model_index < len(self.models) or state is None:
+            return None
+        return self.models[model_index].get_state_info(state)
+
+    def _advance_model_state(
+        self,
+        model_index: int,
+        state: ComposedState | None,
+        activity: ActivityName,
+    ) -> ComposedState | None:
+        """Advance one model state when both the model and state exist."""
+        if not 0 <= model_index < len(self.models) or state is None:
+            return None
+        return self.models[model_index].next_state(state, activity)
+
+    def _set_modified_cases_from_models(self, model_indices: tuple[int, ...]) -> None:
+        """Collect modified cases from the currently active models."""
+        self.modified_cases = set()
+        for model_index in model_indices:
+            if 0 <= model_index < len(self.models):
+                self.modified_cases.update(self.models[model_index].get_modified_cases())
+
+
+class Promotion(OrderedModelSelection):
     """
     Progressive selection of ordered models.
 
@@ -1565,13 +1635,6 @@ class Promotion(MultiMiner):
         self.threshold = float(threshold)
         self.min_votes = int(min_votes)
 
-        # selection state
-        self.current_index = 0
-
-        # Track which model was active for each prediction during evaluation
-        self.active_model_trace: list[int] = []
-        self.last_selected_model_index: int | None = None
-
         # Only track accuracy for active models (current and next)
         self.total_predictions = 0
         self.current_correct = 0  # accuracy counter for current model
@@ -1583,8 +1646,8 @@ class Promotion(MultiMiner):
         # Initialize miner state as a pair: (current_model_state, next_model_state)
         # Do not include inactive models' states.
         nxt = self.current_index + 1
-        cur_state = self.models[self.current_index].initial_state
-        nxt_state = self.models[nxt].initial_state if nxt < len(self.models) else None
+        cur_state = self._model_initial_state(self.current_index)
+        nxt_state = self._model_initial_state(nxt)
         self.initial_state = (cur_state, nxt_state)
 
         # Initialize the first next candidate with data from current model
@@ -1592,70 +1655,8 @@ class Promotion(MultiMiner):
             self._initialize_next_candidate_from_current()
 
     def _initialize_next_candidate_from_current(self) -> None:
-        """
-        Initialize the next candidate model with data from the current model.
-
-        This method copies states, transitions, frequencies, and other relevant
-        data from the current model to the next candidate. It only works with
-        NGram models wrapped in BasicMiner.
-
-        The copying ensures that when a new model enters as the next candidate
-        after a promotion, it starts with the knowledge accumulated by the
-        previous candidate (which just became the current model).
-        """
-        current_idx = self.current_index
-        next_idx = current_idx + 1
-
-        if next_idx >= len(self.models):
-            return  # No next candidate to initialize
-
-        current_model = self.models[current_idx]
-        next_model = self.models[next_idx]
-
-        # Check if both models are BasicMiner instances wrapping NGram algorithms
-        if not (hasattr(current_model, "algorithm") and hasattr(next_model, "algorithm")):
-            return
-
-        current_algo = current_model.algorithm # type: ignore  # noqa: PGH003
-        next_algo = next_model.algorithm # type: ignore  # noqa: PGH003
-
-        # Check if both algorithms are NGram instances
-        if type(current_algo).__name__ != "NGram" or type(next_algo).__name__ != "NGram":
-            return
-
-        # Deep copy the relevant data structures from current to next
-        # 1. Copy state information
-        if hasattr(current_algo, "state_info"):
-            next_algo.state_info = copy.deepcopy(current_algo.state_info)
-
-        # 2. Copy transitions
-        if hasattr(current_algo, "transitions"):
-            next_algo.transitions = copy.deepcopy(current_algo.transitions)
-
-        # 3. Copy activities set
-        if hasattr(current_algo, "activities"):
-            next_algo.activities = copy.deepcopy(current_algo.activities)
-
-        # 4. Copy access strings (NGram-specific)
-        if hasattr(current_algo, "access_strings"):
-            next_algo.access_strings = copy.deepcopy(current_algo.access_strings)
-
-        # 5. Copy case information
-        if hasattr(current_algo, "case_info"):
-            next_algo.case_info = copy.deepcopy(current_algo.case_info)
-
-        # 6. Update initial_state reference
-        if hasattr(current_algo, "initial_state"):
-            next_algo.initial_state = current_algo.initial_state
-
-        logger.debug(
-            "Initialized next candidate model (index %d) with data from current model (index %d). "
-            "Copied %d states and %d transitions.",
-            next_idx,
-            current_idx,
-            len(next_algo.state_info) if hasattr(next_algo, "state_info") else 0,
-            len(next_algo.transitions) if hasattr(next_algo, "transitions") else 0,
-        )
+        """Initialize the immediate next candidate from the current model."""
+        self._initialize_candidate_from_model(self.current_index, self.current_index + 1)
 
     def case_metrics(self, case_id: str | tuple[str, ...]) -> Metrics:
         """Return the metrics from the currently selected model and track promotion votes."""
@@ -1683,8 +1684,7 @@ class Promotion(MultiMiner):
             if nxt_max_prob > cur_max_prob:
                 self.promotion_votes += 1
                 logger.debug(
-                    "Promotion.case_metrics: next model %d has higher confidence (%.4f > %.4f), "
-                    "promotion_votes -> %d",
+                    "Promotion.case_metrics: next model %d has higher confidence (%.4f > %.4f), promotion_votes -> %d",
                     nxt,
                     nxt_max_prob,
                     cur_max_prob,
@@ -1700,8 +1700,8 @@ class Promotion(MultiMiner):
         """Return the composed state for the active pair (current, next) for a given case."""
         cur = self.current_index
         nxt = cur + 1
-        cur_state = self.models[cur].get_state_from_case(case_id)
-        nxt_state = self.models[nxt].get_state_from_case(case_id) if nxt < len(self.models) else None
+        cur_state = self._model_case_state(cur, case_id)
+        nxt_state = self._model_case_state(nxt, case_id)
         return (cur_state, nxt_state)
 
     def get_state_info(self, state_id: ComposedState | None) -> ComposedState | None:
@@ -1714,16 +1714,8 @@ class Promotion(MultiMiner):
         cur = self.current_index
         nxt = cur + 1
 
-        cur_info = (
-            self.models[cur].get_state_info(state_id[0])
-            if hasattr(self.models[cur], "get_state_info")
-            else None
-        )
-        nxt_info = (
-            self.models[nxt].get_state_info(state_id[1])
-            if nxt < len(self.models) and hasattr(self.models[nxt], "get_state_info")
-            else None
-        )
+        cur_info = self._model_state_info(cur, state_id[0])
+        nxt_info = self._model_state_info(nxt, state_id[1])
         return (cur_info, nxt_info)
 
     def _try_promote(self) -> bool:
@@ -1770,8 +1762,8 @@ class Promotion(MultiMiner):
 
                 # Update the miner initial_state to represent the newly active pair
                 new_nxt = self.current_index + 1
-                cur_state = self.models[self.current_index].initial_state
-                nxt_state = self.models[new_nxt].initial_state if new_nxt < len(self.models) else None
+                cur_state = self._model_initial_state(self.current_index)
+                nxt_state = self._model_initial_state(new_nxt)
                 self.initial_state = (cur_state, nxt_state)
 
                 # Initialize new next candidate (if exists) with data from newly promoted model
@@ -1832,14 +1824,12 @@ class Promotion(MultiMiner):
         cur = self.current_index
         nxt = cur + 1
 
-        cur_model = self.models[cur]
         cur_state = current_state[0] if isinstance(current_state, tuple) else current_state
-        next_cur_state = cur_model.next_state(cur_state, activity)
+        next_cur_state = self._advance_model_state(cur, cur_state, activity)
 
         if nxt < len(self.models):
-            nxt_model = self.models[nxt]
             nxt_state = current_state[1] if isinstance(current_state, tuple) else None
-            next_nxt_state = nxt_model.next_state(nxt_state, activity) if nxt_state is not None else None
+            next_nxt_state = self._advance_model_state(nxt, nxt_state, activity)
         else:
             next_nxt_state = None
 
@@ -1992,7 +1982,7 @@ class Promotion(MultiMiner):
                 logger.debug("Metrics: %s", metrics)
 
                 # Update shared statistics
-                self.update_stats(event, prediction, current_state) # type: ignore  # noqa: PGH003
+                self.update_stats(event, prediction, current_state)  # type: ignore  # noqa: PGH003
 
                 # Record model usage for active models only
                 ensemble_activity = prediction["activity"] if prediction is not None else None
@@ -2009,7 +1999,7 @@ class Promotion(MultiMiner):
                         continue
 
                     if model_idx not in self.stats["per_state_stats"]:
-                        self.stats["per_state_stats"][model_idx] = PerStateStats(model_idx) # type: ignore  # noqa: PGH003
+                        self.stats["per_state_stats"][model_idx] = PerStateStats(model_idx)  # type: ignore  # noqa: PGH003
 
                     self.model_prediction_counts[model_idx] += 1
                     is_correct = model_activity == actual_next_activity
@@ -2117,7 +2107,8 @@ class Promotion(MultiMiner):
 
         if (
             nxt_model is not None
-            and not self.offline_update and nxt_pred is not None
+            and not self.offline_update
+            and nxt_pred is not None
             and nxt_pred.get("activity") == activity
         ):
             prev = self.next_correct
@@ -2150,13 +2141,322 @@ class Promotion(MultiMiner):
             _ = self._try_promote()
             pause_time = time.time() - pause_start_time
 
-        # Update modified cases only from active models
-        self.modified_cases = set()
-        self.modified_cases.update(cur_model.get_modified_cases())
-        if nxt < len(self.models):
-            self.modified_cases.update(self.models[nxt].get_modified_cases())
+        # Update modified cases only from active models.
+        self._set_modified_cases_from_models((cur, nxt))
 
         return pause_time
+
+
+class BidirectionalPromotion(OrderedModelSelection):
+    """Select bidirectionally among ordered models while training three adjacent models."""
+
+    offline_update: bool = False
+
+    def __init__(
+        self,
+        *args: dict[str, Any],
+        threshold: float = 0.003,
+        min_votes: int = 20,
+        demotion_threshold: float | None = None,
+        min_demotion_votes: int | None = None,
+        cooldown_predictions: int = 0,
+        **kwargs: Any,  # noqa: ANN401
+    ) -> None:
+        """Initialize bidirectional ordered model selection."""
+        super().__init__(*args, **kwargs)
+        self.threshold = float(threshold)
+        self.demotion_threshold = float(demotion_threshold if demotion_threshold is not None else threshold)
+        self.min_votes = int(min_votes)
+        self.min_demotion_votes = int(min_demotion_votes if min_demotion_votes is not None else min_votes)
+        self.cooldown_predictions = int(cooldown_predictions)
+        if self.min_votes < 1 or self.min_demotion_votes < 1:
+            msg = "Promotion and demotion vote counts must be positive."
+            raise ValueError(msg)
+        if self.cooldown_predictions < 0:
+            msg = "cooldown_predictions cannot be negative."
+            raise ValueError(msg)
+
+        self.cooldown_remaining = 0
+        self.total_predictions = 0
+        self.previous_correct = 0
+        self.current_correct = 0
+        self.next_correct = 0
+        self.promotion_votes = 0
+        self.demotion_votes = 0
+
+        self.initial_state = self._initial_ordered_state()
+        if len(self.models) > 1:
+            self._initialize_candidate_from_model(0, 1)
+
+    def _active_indices(self) -> tuple[int, ...]:
+        """Return valid previous, current, and next model indices."""
+        return tuple(
+            index
+            for index in (self.current_index - 1, self.current_index, self.current_index + 1)
+            if 0 <= index < len(self.models)
+        )
+
+    def _initial_ordered_state(self) -> OrderedModelState:
+        """Build the initial state for the active three-model window."""
+        previous = self._model_initial_state(self.current_index - 1)
+        current = self._model_initial_state(self.current_index)
+        next_state = self._model_initial_state(self.current_index + 1)
+        return OrderedModelState(previous=previous, current=current, next=next_state)
+
+    def _reset_comparison(self) -> None:
+        """Reset evidence after changing the selected model."""
+        self.total_predictions = 0
+        self.previous_correct = 0
+        self.current_correct = 0
+        self.next_correct = 0
+        self.promotion_votes = 0
+        self.demotion_votes = 0
+
+    def _metrics_for_state(self, state: OrderedModelState) -> dict[int, Metrics]:
+        """Return metrics for each active model role."""
+        metrics = {self.current_index: self.models[self.current_index].state_metrics(state.current)}
+        if self.current_index > 0 and state.previous is not None:
+            metrics[self.current_index - 1] = self.models[self.current_index - 1].state_metrics(state.previous)
+        next_index = self.current_index + 1
+        if next_index < len(self.models) and state.next is not None:
+            metrics[next_index] = self.models[next_index].state_metrics(state.next)
+        return metrics
+
+    def _observe_outcome(self, metrics: dict[int, Metrics], actual_activity: ActivityName) -> None:
+        """Accumulate promotion and demotion evidence for one prediction."""
+        self.total_predictions += 1
+        correctness: dict[int, int] = {}
+        for index, model_metrics in metrics.items():
+            prediction = metrics_prediction(model_metrics, config=self.config)
+            correctness[index] = int(prediction is not None and prediction.get("activity") == actual_activity)
+
+        current_result = correctness.get(self.current_index, 0)
+        self.current_correct += current_result
+        previous_index = self.current_index - 1
+        next_index = self.current_index + 1
+        if previous_index in correctness:
+            previous_result = correctness[previous_index]
+            self.previous_correct += previous_result
+            if previous_result > current_result:
+                self.demotion_votes += 1
+        if next_index in correctness:
+            next_result = correctness[next_index]
+            self.next_correct += next_result
+            if next_result > current_result:
+                self.promotion_votes += 1
+
+        if self.cooldown_remaining > 0:
+            self.cooldown_remaining -= 1
+
+    def _try_switch(self) -> bool:
+        """Promote or demote by one model when sufficient evidence has accumulated."""
+        if self.total_predictions == 0 or self.cooldown_remaining > 0:
+            return False
+
+        current_accuracy = self.current_correct / self.total_predictions
+        previous_accuracy = self.previous_correct / self.total_predictions
+        next_accuracy = self.next_correct / self.total_predictions
+
+        promotion_gain = next_accuracy - current_accuracy
+        demotion_gain = previous_accuracy - current_accuracy
+        can_promote = (
+            self.current_index + 1 < len(self.models)
+            and self.promotion_votes >= self.min_votes
+            and promotion_gain > self.threshold
+        )
+        can_demote = (
+            self.current_index > 0
+            and self.demotion_votes >= self.min_demotion_votes
+            and demotion_gain > self.demotion_threshold
+        )
+
+        direction = 0
+        if can_promote and (not can_demote or promotion_gain >= demotion_gain):
+            direction = 1
+        elif can_demote:
+            direction = -1
+
+        if direction == 0:
+            return False
+
+        old_index = self.current_index
+        self.current_index += direction
+        logger.info(
+            "%s model %d -> %d (current accuracy %.4f, candidate accuracy %.4f).",
+            "Promoting" if direction > 0 else "Demoting",
+            old_index,
+            self.current_index,
+            current_accuracy,
+            next_accuracy if direction > 0 else previous_accuracy,
+        )
+
+        if direction > 0 and self.current_index + 1 < len(self.models):
+            self._initialize_candidate_from_model(self.current_index, self.current_index + 1)
+
+        self._reset_comparison()
+        self.cooldown_remaining = self.cooldown_predictions
+        self.initial_state = self._initial_ordered_state()
+        return True
+
+    def get_state_from_case(self, case_id: CaseId) -> OrderedModelState:
+        """Return case states for the previous, current, and next active models."""
+        previous = self._model_case_state(self.current_index - 1, case_id)
+        current = self._model_case_state(self.current_index, case_id)
+        next_state = self._model_case_state(self.current_index + 1, case_id)
+        return OrderedModelState(previous=previous, current=current, next=next_state)
+
+    def get_state_info(self, state_id: ComposedState | None) -> OrderedModelState | None:
+        """Return state information for the active ordered model window."""
+        if not isinstance(state_id, OrderedModelState):
+            return None
+        previous = self._model_state_info(self.current_index - 1, state_id.previous)
+        current = self._model_state_info(self.current_index, state_id.current)
+        next_info = self._model_state_info(self.current_index + 1, state_id.next)
+        return OrderedModelState(previous=previous, current=current, next=next_info)
+
+    def case_metrics(self, case_id: CaseId) -> Metrics:
+        """Return metrics from the currently selected model."""
+        self.last_selected_model_index = self.current_index
+        state = self.get_state_from_case(case_id)
+        return self.models[self.current_index].state_metrics(state.current)
+
+    def state_metrics(self, state: ComposedState | None) -> Metrics:
+        """Return metrics from the currently selected model."""
+        if not isinstance(state, OrderedModelState):
+            return empty_metrics()
+        model_metrics = self.models[self.current_index].state_metrics(state.current)
+        return Metrics(
+            state_id=state,
+            probs=model_metrics["probs"],
+            predicted_delays=model_metrics.get("predicted_delays", {}),
+        )
+
+    def state_act_likelihood(self, state: ComposedState | None, next_activity: ActivityName) -> float:
+        """Return likelihood from the currently selected model."""
+        if not isinstance(state, OrderedModelState):
+            return 0.0
+        return self.models[self.current_index].state_act_likelihood(state.current, next_activity)
+
+    def next_state(self, current_state: ComposedState | None, activity: ActivityName) -> OrderedModelState | None:
+        """Advance all three active model states."""
+        if not isinstance(current_state, OrderedModelState):
+            return None
+        previous = self._advance_model_state(self.current_index - 1, current_state.previous, activity)
+        current = self._advance_model_state(self.current_index, current_state.current, activity)
+        next_state = self._advance_model_state(self.current_index + 1, current_state.next, activity)
+        return OrderedModelState(previous=previous, current=current, next=next_state)
+
+    def update(self, event: Event) -> None | float:
+        """Evaluate and train the previous, current, and next active models."""
+        if self.offline_update:
+            super().update(event)
+            return None
+
+        pause_start_time = time.time()
+        state = self.get_state_from_case(event["case_id"])
+        active_metrics = self._metrics_for_state(state)
+        self._observe_outcome(active_metrics, event["activity"])
+
+        for model_index in self._active_indices():
+            self.models[model_index].update(event)
+
+        _ = self._try_switch()
+        self._set_modified_cases_from_models(self._active_indices())
+        return time.time() - pause_start_time
+
+    def evaluate(  # noqa: C901, PLR0912, PLR0915
+        self,
+        data: list[list[Event]],
+        mode: str = "incremental",  # noqa: ARG002
+        *,
+        log_likelihood: bool = False,
+        compute_perplexity: bool = False,
+        debug: bool = False,  # noqa: ARG002
+    ) -> tuple[float, list[ActivityName]]:
+        """Evaluate sequences while collecting bidirectional switching evidence."""
+        perplexities: list[float] = []
+        predicted_vector: list[ActivityName] = []
+        eval_start_time = time.time()
+        pause_time = 0.0
+        self.active_model_trace = []
+
+        for sequence in tqdm(data, desc="Processing sequences"):
+            current_state = self.initial_state
+            likelihood = 0.0 if (log_likelihood or not compute_perplexity) else 1.0
+
+            for position, event in enumerate(sequence):
+                if not isinstance(current_state, OrderedModelState):
+                    current_state = self.get_state_from_case(event["case_id"])
+
+                active_metrics = self._metrics_for_state(current_state)
+                current_metrics = active_metrics[self.current_index]
+                prediction = metrics_prediction(current_metrics, config=self.config)
+                predicted_vector.append(
+                    prediction["activity"] if prediction is not None else DEFAULT_CONFIG["empty_symbol"]
+                )
+                self.active_model_trace.append(self.current_index)
+
+                pause_start_time = time.time()
+                self._observe_outcome(active_metrics, event["activity"])
+                old_metrics = active_metrics
+                switched = self._try_switch()
+                if switched:
+                    current_state = self.get_state_from_case(event["case_id"])
+
+                if compute_perplexity:
+                    activity_likelihood = self.state_act_likelihood(current_state, event["activity"])
+                    if log_likelihood:
+                        likelihood += math.log(activity_likelihood)
+                    else:
+                        likelihood *= activity_likelihood
+
+                self.update_stats(event, prediction, current_state)  # type: ignore[arg-type]
+                ensemble_activity = prediction["activity"] if prediction is not None else None
+                for model_index, model_metrics in old_metrics.items():
+                    model_prediction = metrics_prediction(model_metrics, config=self.config)
+                    if model_prediction is None:
+                        continue
+                    model_activity = model_prediction.get("activity")
+                    if model_activity is None:
+                        continue
+                    self.model_prediction_counts[model_index] += 1
+                    is_correct = model_activity == event["activity"]
+                    if is_correct:
+                        self.model_prediction_correct_counts[model_index] += 1
+                    if ensemble_activity is not None and model_activity == ensemble_activity:
+                        self.model_usage_counts[model_index] += 1
+                        if is_correct:
+                            self.model_correct_usage_counts[model_index] += 1
+                        self.model_usage_events += 1
+
+                pause_time += time.time() - pause_start_time
+                if position < len(sequence) - 1:
+                    current_state = self.next_state(current_state, event["activity"])
+
+            if compute_perplexity:
+                normalized = (
+                    likelihood / len(sequence)
+                    if log_likelihood and sequence
+                    else likelihood ** (1 / len(sequence))
+                    if sequence
+                    else likelihood
+                )
+                perplexities.append(compute_seq_perplexity(normalized, log_likelihood=log_likelihood))
+            else:
+                perplexities.append(likelihood)
+
+        for key, value in compute_perplexity_stats(perplexities).items():
+            self.stats[key] = value
+        self.stats["model_usage_counts"] = list(self.model_usage_counts)
+        self.stats["model_correct_usage_counts"] = list(self.model_correct_usage_counts)
+        self.stats["model_usage_events"] = self.model_usage_events
+        self.stats["model_prediction_counts"] = list(self.model_prediction_counts)
+        self.stats["model_prediction_correct_counts"] = list(self.model_prediction_correct_counts)
+        return time.time() - eval_start_time - pause_time, predicted_vector
+
+
+# Descriptive alias retained for callers that prefer the broader strategy name.
+AdaptivePromotion = BidirectionalPromotion
 
 
 # ============================================================
@@ -2445,7 +2745,7 @@ class NeuralNetworkMiner(StreamingMiner):
 
     def __init__(  # noqa: PLR0913
         self,
-    model: RNNModel | LSTMModel | GRUModel | TransformerModel | QNetwork,
+        model: RNNModel | LSTMModel | GRUModel | TransformerModel | QNetwork,
         batch_size: int,
         optimizer: torch.optim.Optimizer,
         *,
@@ -2593,9 +2893,6 @@ class NeuralNetworkMiner(StreamingMiner):
         self.optimizer.step()
         # loss.item()
 
-
-
-
     def train_on_batch(self, batch_case_ids: list[str]) -> torch.Tensor | None:
         """
         Construct a batch from case ids (their full sequences) and perform a training step.
@@ -2619,7 +2916,7 @@ class NeuralNetworkMiner(StreamingMiner):
             return None
         logits = logits[mask]
         targets = targets[mask]
-        return self.criterion(logits, targets) # loss
+        return self.criterion(logits, targets)  # loss
 
     def select_batch(self, case_id: CaseId) -> list[list[int]]:
         """
@@ -2638,10 +2935,7 @@ class NeuralNetworkMiner(StreamingMiner):
         if len(valid_case_ids) < self.batch_size:
             # Use DEBUG level to avoid noisy INFO spam during cold-start streaming
             if len(valid_case_ids) > 0:
-                logger.debug(
-                    "Not enough case_ids to form a full batch, using %d case_ids.",
-                    len(valid_case_ids)
-                )
+                logger.debug("Not enough case_ids to form a full batch, using %d case_ids.", len(valid_case_ids))
             return [self.get_sequence(cid) for cid in valid_case_ids]
 
         # Prepare the batch, starting with the current case_id if it's valid
@@ -2672,7 +2966,6 @@ class NeuralNetworkMiner(StreamingMiner):
 
         # Fetch the actual sequences based on the selected case_ids
         return [self.get_sequence(cid) for cid in batch_case_ids]
-
 
     def case_metrics(self, case_id: CaseId) -> Metrics:
         """
@@ -2779,7 +3072,7 @@ class WindowedNeuralNetworkMiner(NeuralNetworkMiner):
 
     def __init__(  # noqa: PLR0913
         self,
-    model: RNNModel | LSTMModel | GRUModel | TransformerModel,
+        model: RNNModel | LSTMModel | GRUModel | TransformerModel,
         batch_size: int,
         optimizer: torch.optim.Optimizer,
         *,
@@ -2886,6 +3179,7 @@ class WindowedNeuralNetworkMiner(NeuralNetworkMiner):
         probs = self.idx_sequence_probs(windowed)
         return Metrics(state_id=-1, probs=probs, predicted_delays={})
 
+
 # New: Reinforcement-Learning-style miner (REINFORCE-like updates)
 class RLMiner(NeuralNetworkMiner):
     """
@@ -2945,7 +3239,10 @@ class RLMiner(NeuralNetworkMiner):
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
                 "[RLMiner.__init__] buffer_len=%s, long_mem=%s, short_mem=%s, device=%s",
-                self.sequence_buffer_length, self.long_term_mem_size, self.short_term_mem_size, self.device
+                self.sequence_buffer_length,
+                self.long_term_mem_size,
+                self.short_term_mem_size,
+                self.device,
             )
 
     def _enqueue_activity(self, case_id: CaseId, activity_idx: int) -> None:
@@ -3050,7 +3347,9 @@ class RLMiner(NeuralNetworkMiner):
             else:
                 logger.error(
                     "[RLMiner.update] activity '%s' with idx=%s not in vocab (size=%s)",
-                    activity, target_idx, log_probs.shape[0]
+                    activity,
+                    target_idx,
+                    log_probs.shape[0],
                 )
         else:
             logger.debug("[RLMiner.update] no context (empty sequence). Skipping loss computation.")
@@ -3078,8 +3377,13 @@ class RLMiner(NeuralNetworkMiner):
         if logger.isEnabledFor(logging.DEBUG):
             top_k = self.config.get("top_k", 5)
             sorted_probs = sorted(probs.items(), key=lambda x: x[1], reverse=True)
-            logger.debug("[RLMiner.case_metrics] case=%s seq_len=%s top-%s=%s",
-                         case_id, len(index_sequence), top_k, sorted_probs[:top_k])
+            logger.debug(
+                "[RLMiner.case_metrics] case=%s seq_len=%s top-%s=%s",
+                case_id,
+                len(index_sequence),
+                top_k,
+                sorted_probs[:top_k],
+            )
         return Metrics(state_id=-1, probs=probs, predicted_delays={})
 
     def idx_sequence_probs(self, index_sequence: list[int]) -> ProbDistr:
@@ -3087,7 +3391,6 @@ class RLMiner(NeuralNetworkMiner):
         # Convert to a tensor and add a batch dimension
         input_sequence = torch.as_tensor([index_sequence], dtype=torch.long, device=self.device)
         # input_sequence = torch.tensor(index_sequence, dtype=torch.long, device=self.device).unsqueeze(0)  # Shape [1, sequence_length] # noqa: E501
-
 
         # Pass the sequence through the model to get the output
         self.model.eval()
@@ -3112,6 +3415,7 @@ class RLMiner(NeuralNetworkMiner):
         if logger.isEnabledFor(logging.DEBUG):
             top_k = self.config.get("top_k", 5)
             sorted_probs = sorted(result.items(), key=lambda x: x[1], reverse=True)
-            logger.debug("[RLMiner.idx_sequence_probs] seq_len=%s top-%s=%s",
-                         len(index_sequence), top_k, sorted_probs[:top_k])
+            logger.debug(
+                "[RLMiner.idx_sequence_probs] seq_len=%s top-%s=%s", len(index_sequence), top_k, sorted_probs[:top_k]
+            )
         return result
