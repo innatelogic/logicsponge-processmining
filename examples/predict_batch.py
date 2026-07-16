@@ -2,7 +2,7 @@
 Module to evaluate and compare different process mining models.
 
 Usage example:
-    python examples/predict_batch.py --data path/to/log.csv
+    python examples/predict_batch.py --data=Sepsis_Cases --data_prop=0.5
 """
 
 import gc
@@ -389,7 +389,7 @@ VOTING_NGRAMS = [(2, 3, 5, 8), (2, 3, 4, 5)]
 
 ADAPTIVE_NGRAM = [*VOTING_NGRAMS, (2, 4, 6, 8, 12, 16, 24, 32)]
 
-SELECT_BEST_ARGS = ["prob"]  # ["acc", "prob", "prob x acc"]
+SELECT_BEST_ARGS = ["acc", "prob"]  # ["acc", "prob", "prob x acc"]
 
 WINDOW_RANGE = [2, 4, 8, 16, 32] #[1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32, 48, 64, 96, 128, 192, 256]
 
@@ -766,7 +766,7 @@ except (TypeError, OSError):
 # Define the number of iterations
 # ============================================================
 
-N_ITERATIONS = 3
+N_ITERATIONS = 1
 
 # Store metrics across iterations
 all_metrics: dict = {

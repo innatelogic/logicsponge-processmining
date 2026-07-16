@@ -25,6 +25,7 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import Colormap, LinearSegmentedColormap
 
 from logicsponge.processmining.config import DEFAULT_CONFIG
+from logicsponge.processmining.data_utils import parse_timestamp
 from logicsponge.processmining.types import Config, Event, Metrics, Prediction, ProbDistr
 
 # Lazy import types from test_data only at function call time to avoid import cycles
@@ -767,8 +768,6 @@ def resolve_dataset_from_args(args: argparse.Namespace) -> tuple[str, Iterator[E
         if csv_candidate.exists():
             logging.getLogger(__name__).info("File %s already exists.", csv_candidate)
             # Build a lightweight pandas-based row iterator and an Event iterator
-            from logicsponge.processmining.data_utils import parse_timestamp
-
             def csv_row_iterator(file_path: Path, delimiter: str = ",", chunksize: int = 1000) -> Iterator[dict]:
                 for chunk in pd.read_csv(
                     file_path, chunksize=chunksize, delimiter=delimiter, dtype=str, keep_default_na=False
