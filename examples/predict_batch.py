@@ -55,7 +55,7 @@ from logicsponge.processmining.data_utils import (
 
 # Import rigorous energy measurement (Linux/RAPL+NVML)
 from logicsponge.processmining.energy_meter import EnergyPhaseTracker
-from logicsponge.processmining.miners import AdaptiveVoting, BasicMiner, Promotion
+from logicsponge.processmining.miners import AdaptiveVoting, BasicMiner, HardVoting, Promotion
 from logicsponge.processmining.neural_networks import (
     LSTMModel,
     PreprocessData,
@@ -806,6 +806,7 @@ all_metrics: dict = {
         # "fallback ngram_8->...->1",
         # "complex fallback",
         "hard voting",
+        "cheating voting",
         # *[
         #     f"adaptive voting {grams} {select_best_arg}"
         #     for select_best_arg in SELECT_BEST_ARGS
@@ -1037,7 +1038,7 @@ for iteration in range(N_ITERATIONS):
             test_data,
             mode="incremental",
             debug=(data_name == "Synthetic_Train"),
-            compute_perplexity=("hard" not in strategy_name and "qlearning" not in strategy_name),
+            compute_perplexity=(not isinstance(strategy, HardVoting) and "qlearning" not in strategy_name),
         )
 
         evaluation_time *= SEC_TO_MICRO / TEST_EVENTS

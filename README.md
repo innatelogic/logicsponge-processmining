@@ -38,6 +38,10 @@ the sequence of activities observed so far.
 
 logicsponge-processmining offers several predefined models: frequency prefix trees, n-grams, LSTMs, and ensemble methods (soft, hard, and adaptive voting).
 
+For event-level analysis of why oracle/cheating voting outperforms soft voting,
+including calibrated model-selection hypotheses and an interactive
+dashboard, see [Voting model-selection investigation](docs/voting_investigation.md).
+
 Let’s walk through the required imports to understand the structure of the library:
 
 ```python

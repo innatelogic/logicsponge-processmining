@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from logicsponge.processmining.batch_helpers import build_strategies
 from logicsponge.processmining.miners import CheatingMiner
 from logicsponge.processmining.types import Event
 from tests.test_ordered_model_selection import FixedPredictionMiner
@@ -19,7 +20,7 @@ def test_cheating_miner_uses_correct_constituent_prediction() -> None:
 
     _, predictions = strategy.evaluate([[event("b"), event("missing")]])
 
-    assert predictions == ["b", "a"]
+    assert predictions == ["b", "b"]
     assert strategy.oracle_hits == 1
     assert strategy.oracle_misses == 1
     assert strategy.get_oracle_accuracy() == 0.5
@@ -28,12 +29,18 @@ def test_cheating_miner_uses_correct_constituent_prediction() -> None:
     assert strategy.active_model_trace == [1, -1]
 
 
-def test_cheating_miner_uses_hard_voting_without_a_label() -> None:
+def test_cheating_miner_uses_soft_voting_without_a_label() -> None:
     strategy = CheatingMiner(models=[FixedPredictionMiner("a"), FixedPredictionMiner("b")])
 
-    prediction = strategy.case_metrics("case")
+    probabilities = strategy.voting_probs(
+        [
+            {"a": 0.51, "b": 0.49},
+            {"a": 0.51, "b": 0.49},
+            {"a": 0.0, "b": 1.0},
+        ]
+    )
 
-    assert prediction["probs"]["a"] == 1.0
+    assert probabilities["b"] > probabilities["a"]
 
 
 def test_cheating_miner_rejects_perplexity() -> None:
@@ -41,3 +48,21 @@ def test_cheating_miner_rejects_perplexity() -> None:
 
     with pytest.raises(NotImplementedError, match="undefined"):
         strategy.evaluate([[event("a")]], compute_perplexity=True)
+
+
+def test_batch_strategies_include_independent_cheating_baseline() -> None:
+    strategies = build_strategies(
+        config={},
+        test_set_transformed=[],
+        ngram_names=[],
+        voting_ngrams=[],
+        adaptive_ngram=[],
+        select_best_args=[],
+    )
+
+    cheating = strategies["cheating voting"][0]
+    hard_voting = strategies["hard voting"][0]
+
+    assert isinstance(cheating, CheatingMiner)
+    assert cheating.models is not hard_voting.models
+    assert {id(model) for model in cheating.models}.isdisjoint({id(model) for model in hard_voting.models})

@@ -14,21 +14,21 @@
     "enabled": false
   },
   "lstm": {
-    "vocab_size": 34,
-    "embedding_dim": 34,
+    "vocab_size": 24,
+    "embedding_dim": 24,
     "hidden_dim": 128,
-    "output_dim": 34
+    "output_dim": 24
   },
   "transformer": {
-    "vocab_size": 34,
-    "embedding_dim": 34,
+    "vocab_size": 24,
+    "embedding_dim": 24,
     "hidden_dim": 128,
-    "output_dim": 34
+    "output_dim": 24
   },
   "qlearning": {
-    "vocab_size": 34,
-    "embedding_dim": 34,
+    "vocab_size": 24,
+    "embedding_dim": 24,
     "hidden_dim": 128,
-    "output_dim": 34
+    "output_dim": 24
   }
 }

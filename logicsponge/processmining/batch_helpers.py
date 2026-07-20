@@ -20,7 +20,15 @@ import torch
 from tabulate import tabulate
 
 from logicsponge.processmining.algorithms_and_structures import Bag, FrequencyPrefixTree, NGram
-from logicsponge.processmining.miners import AdaptiveVoting, BasicMiner, Fallback, HardVoting, Promotion, SoftVoting
+from logicsponge.processmining.miners import (
+    AdaptiveVoting,
+    BasicMiner,
+    CheatingMiner,
+    Fallback,
+    HardVoting,
+    Promotion,
+    SoftVoting,
+)
 from logicsponge.processmining.utils import (
     RED_TO_GREEN_CMAP,
     compare_models_comparison,
@@ -62,7 +70,7 @@ def _pick_perplexity_value(
     return fallback_stats.get(key)
 
 
-def record_model_results(  # noqa: PLR0913, PLR0915
+def record_model_results(  # noqa: C901, PLR0912, PLR0913, PLR0915
     *,
     display_name: str,
     stats: dict[str, Any],
@@ -412,6 +420,7 @@ def build_strategies(  # noqa: PLR0913
       - ngram models based on provided ngram_names (no recovery, matching current behavior)
       - 'fallback fpt->ngram' (FPT( min_total_visits=10 ) -> NGram(window=4))
       - 'hard voting' with Bag, FPT(min_total_visits=10), NGram(2,3,4)
+      - 'cheating voting' oracle baseline with the same independent constituent models
       - soft voting variants for each grams in voting_ngrams:
           'soft voting {grams}' (plain NGram windows)
           'soft voting {grams}*' (NGram with min_total_visits=10)
@@ -447,6 +456,23 @@ def build_strategies(  # noqa: PLR0913
             BasicMiner(algorithm=NGram(window_length=2)),
             BasicMiner(algorithm=NGram(window_length=3)),
             BasicMiner(algorithm=NGram(window_length=4)),
+        ],
+        config=config,
+    )
+
+    # Oracle upper bound for the same model family as hard voting. These must be
+    # separate instances so training this strategy cannot mutate hard_voting.
+    cheating_voting = CheatingMiner(
+        models=[
+            BasicMiner(algorithm=Bag()),
+            BasicMiner(algorithm=FrequencyPrefixTree(min_total_visits=10)),
+            BasicMiner(algorithm=NGram(window_length=2)),
+            BasicMiner(algorithm=NGram(window_length=3)),
+            BasicMiner(algorithm=NGram(window_length=4)),
+            BasicMiner(algorithm=NGram(window_length=5)),
+            BasicMiner(algorithm=NGram(window_length=6)),
+            BasicMiner(algorithm=NGram(window_length=7)),
+            BasicMiner(algorithm=NGram(window_length=8)),
         ],
         config=config,
     )
@@ -523,6 +549,7 @@ def build_strategies(  # noqa: PLR0913
         },
         "fallback fpt->ngram": (fallback, test_set_transformed),
         "hard voting": (hard_voting, test_set_transformed),
+        "cheating voting": (cheating_voting, test_set_transformed),
         **{f"soft voting {grams}": (sv, test_set_transformed) for grams, sv in soft_voting_plain},
         **{f"soft voting {grams}*": (sv, test_set_transformed) for grams, sv in soft_voting_star},
         **{name: (model, test_set_transformed) for name, model in adaptive_voting},
@@ -792,7 +819,7 @@ def evaluate_strategy(  # noqa: ANN201, D103, PLR0913
         test_data,
         mode="incremental",
         debug=debug,
-        compute_perplexity=("hard" not in strategy_name and "qlearning" not in strategy_name),
+        compute_perplexity=(not isinstance(strategy, HardVoting) and "qlearning" not in strategy_name),
     )
     evaluation_time *= sec_to_micro_arg / test_events_arg
 

@@ -801,6 +801,18 @@ class MultiMiner(StreamingMiner, ABC):
 # ============================================================
 
 
+def _soft_voting_probs(probs_list: list[ProbDistr], weights: list[float]) -> ProbDistr:
+    """Return a normalized weighted sum of constituent distributions."""
+    combined_probs: dict[ActivityName, float] = {}
+    for prob_dict, weight in zip(probs_list, weights, strict=True):
+        for activity, probability in prob_dict.items():
+            combined_probs[activity] = combined_probs.get(activity, 0.0) + weight * probability
+    total_probability = sum(combined_probs.values())
+    if total_probability <= 0:
+        return {}
+    return {activity: probability / total_probability for activity, probability in combined_probs.items()}
+
+
 class HardVoting(MultiMiner):
     """The Hard Voting class implements a hard voting mechanism for ensemble learning."""
 
@@ -985,8 +997,8 @@ class CheatingMiner(HardVoting):
     Oracle ensemble that is correct whenever any constituent model is correct.
 
     Oracle selection is only available during :meth:`evaluate`, where the true
-    activity is known. Normal ``state_metrics`` and ``case_metrics`` calls retain
-    :class:`HardVoting` behavior because live predictions have no true label.
+    activity is known. Normal ``state_metrics`` and ``case_metrics`` calls use
+    soft voting because live predictions have no true label.
     """
 
     def __init__(self, *args: dict[str, Any] | None, **kwargs: Any) -> None:  # noqa: ANN401
@@ -1006,7 +1018,7 @@ class CheatingMiner(HardVoting):
         metrics_list: list[Metrics],
         actual_activity: ActivityName,
     ) -> tuple[Metrics, int | None]:
-        """Choose the first model predicting the truth, or use hard voting."""
+        """Choose the first model predicting the truth, or use soft voting."""
         selected_index = next(
             (
                 index
@@ -1039,6 +1051,18 @@ class CheatingMiner(HardVoting):
             ),
             None,
         )
+
+    def voting_probs(self, probs_list: list[ProbDistr]) -> ProbDistr:
+        """Use uniform soft voting whenever oracle selection is unavailable."""
+        return _soft_voting_probs(probs_list, [1.0] * len(probs_list))
+
+    def state_act_likelihood(self, state: ComposedState | None, next_activity: ActivityName) -> float:
+        """Return the soft-voting likelihood when no oracle label is available."""
+        if state is None:
+            return 0.0
+        metrics_list = [model.state_metrics(model_state) for model, model_state in zip(self.models, state, strict=True)]
+        probabilities = self.voting_probs([metrics["probs"] for metrics in metrics_list])
+        return probabilities.get(next_activity, 0.0)
 
     def get_oracle_accuracy(self) -> float:
         """Return the fraction of evaluated events covered by at least one model."""
@@ -1150,25 +1174,7 @@ class SoftVoting(MultiMiner):
 
     def voting_probs(self, probs_list: list[ProbDistr]) -> ProbDistr:
         """Return the weighted average of the predicted probabilities for each activity."""
-        combined_probs = {}
-
-        # Accumulate weighted probabilities
-        for prob_dict, weight in zip(probs_list, self.prob_weights, strict=True):
-            for activity, prob in prob_dict.items():
-                if activity not in combined_probs:
-                    combined_probs[activity] = 0.0
-                combined_probs[activity] += weight * prob
-
-        # If there are no activities, return an empty dictionary
-        if not combined_probs:
-            return {}
-
-        # Normalize the combined probabilities so that they sum to 1
-        total_prob = sum(combined_probs.values())
-        if total_prob > 0:
-            combined_probs = {activity: prob / total_prob for activity, prob in combined_probs.items()}
-
-        return combined_probs
+        return _soft_voting_probs(probs_list, self.prob_weights)
 
     def voting_likelihood(self, metrics: Metrics) -> float:
         """
@@ -1206,7 +1212,7 @@ class SoftVoting(MultiMiner):
         )
 
     def case_metrics(self, case_id: CaseId) -> Metrics:
-        """Return the hard voting of predictions from the ensemble."""
+        """Return the soft voting of predictions from the ensemble."""
         # Non optimal, but it is convenient to call state_act_likelihood for the likelihood computation
         # So we need first to get the state of each model, although this is already done inside
         # each model.case_metrics() call
