@@ -980,6 +980,140 @@ class HardVoting(MultiMiner):
         )
 
 
+class CheatingMiner(HardVoting):
+    """
+    Oracle ensemble that is correct whenever any constituent model is correct.
+
+    Oracle selection is only available during :meth:`evaluate`, where the true
+    activity is known. Normal ``state_metrics`` and ``case_metrics`` calls retain
+    :class:`HardVoting` behavior because live predictions have no true label.
+    """
+
+    def __init__(self, *args: dict[str, Any] | None, **kwargs: Any) -> None:  # noqa: ANN401
+        """Initialize the oracle ensemble."""
+        super().__init__(*args, **kwargs)
+        if not self.models:
+            msg = "CheatingMiner requires at least one model."
+            raise ValueError(msg)
+
+        self.active_model_trace: list[int] = []
+        self.last_selected_model_index: int | None = None
+        self.oracle_hits = 0
+        self.oracle_misses = 0
+
+    def _oracle_metrics(
+        self,
+        metrics_list: list[Metrics],
+        actual_activity: ActivityName,
+    ) -> tuple[Metrics, int | None]:
+        """Choose the first model predicting the truth, or use hard voting."""
+        selected_index = next(
+            (
+                index
+                for index, model_metrics in enumerate(metrics_list)
+                if (prediction := metrics_prediction(model_metrics, config=self.config)) is not None
+                and prediction.get("activity") == actual_activity
+            ),
+            None,
+        )
+
+        state_id = tuple(model_metrics["state_id"] for model_metrics in metrics_list)
+        if selected_index is not None:
+            selected_metrics = metrics_list[selected_index]
+            return (
+                Metrics(
+                    state_id=state_id,
+                    probs={actual_activity: 1.0},
+                    predicted_delays=selected_metrics.get("predicted_delays", {}),
+                ),
+                selected_index,
+            )
+
+        return (
+            Metrics(
+                state_id=state_id,
+                probs=self.voting_probs([model_metrics["probs"] for model_metrics in metrics_list]),
+                predicted_delays=self.voting_delays(
+                    [model_metrics.get("predicted_delays", {}) for model_metrics in metrics_list]
+                ),
+            ),
+            None,
+        )
+
+    def get_oracle_accuracy(self) -> float:
+        """Return the fraction of evaluated events covered by at least one model."""
+        total = self.oracle_hits + self.oracle_misses
+        return self.oracle_hits / total if total else 0.0
+
+    def evaluate(
+        self,
+        data: list[list[Event]],
+        mode: str = "incremental",  # noqa: ARG002
+        *,
+        log_likelihood: bool = False,
+        compute_perplexity: bool = False,
+        debug: bool = False,  # noqa: ARG002
+    ) -> tuple[float, list[ActivityName]]:
+        """Evaluate the upper-bound accuracy attainable from model predictions."""
+        if compute_perplexity or log_likelihood:
+            msg = "Likelihood and perplexity are undefined for oracle-selected predictions."
+            raise NotImplementedError(msg)
+
+        eval_start_time = time.time()
+        pause_time = 0.0
+        predicted_vector: list[ActivityName] = []
+        self.active_model_trace = []
+        self.last_selected_model_index = None
+        self.oracle_hits = 0
+        self.oracle_misses = 0
+
+        for sequence in tqdm(data, desc="Processing sequences"):
+            current_state = self.initial_state
+            for position, event in enumerate(sequence):
+                actual_activity = event["activity"]
+                if not isinstance(current_state, tuple):
+                    current_state = self.get_state_from_case(event["case_id"])
+
+                metrics_list = [
+                    model.state_metrics(model_state)
+                    for model, model_state in zip(self.models, current_state, strict=True)
+                ]
+                metrics, selected_index = self._oracle_metrics(metrics_list, actual_activity)
+                prediction = metrics_prediction(metrics, config=self.config)
+                predicted_activity = (
+                    prediction["activity"] if prediction is not None else DEFAULT_CONFIG["empty_symbol"]
+                )
+                predicted_vector.append(predicted_activity)
+
+                self.last_selected_model_index = selected_index
+                self.active_model_trace.append(selected_index if selected_index is not None else -1)
+                if selected_index is not None:
+                    self.oracle_hits += 1
+                else:
+                    self.oracle_misses += 1
+
+                pause_start_time = time.time()
+                self.update_stats(event, prediction, current_state)  # type: ignore[arg-type]
+                self.record_model_event(
+                    actual_activity=actual_activity,
+                    ensemble_prediction=prediction["activity"] if prediction is not None else None,
+                    metrics_list=metrics_list,
+                )
+                pause_time += time.time() - pause_start_time
+
+                if position < len(sequence) - 1:
+                    current_state = self.next_state(current_state, actual_activity)
+
+        self.stats["oracle_hits"] = self.oracle_hits
+        self.stats["oracle_misses"] = self.oracle_misses
+        self.stats["oracle_accuracy"] = self.get_oracle_accuracy()
+        return time.time() - eval_start_time - pause_time, predicted_vector
+
+
+# Academic name for the same upper-bound baseline.
+OracleVoting = CheatingMiner
+
+
 class SoftVoting(MultiMiner):
     """Soft voting based on weighted probabilities."""
 
