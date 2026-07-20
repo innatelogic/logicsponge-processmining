@@ -38,38 +38,6 @@ the sequence of activities observed so far.
 
 logicsponge-processmining offers several predefined models: frequency prefix trees, n-grams, LSTMs, and ensemble methods (soft, hard, and adaptive voting).
 
-## Integer-valued sequence prediction
-
-Integer estimation is kept separate from categorical activity prediction so that
-probability/top-k accuracy semantics do not leak into regression evaluation. A
-numeric N-gram learns a frequency distribution of the next integer for every
-observed context and aggregates that distribution with a selectable estimator.
-
-```python
-from logicsponge.processmining.numeric import NumericNGram, NumericNGramConfig, NumericNGramMiner
-
-config = NumericNGramConfig(
-    window_length=3,
-    estimator="mean",       # mean, median, mode, quantile, or trimmed_mean
-    value_key="visits",
-    case_id_key="session_id",
-    coerce_values=True,
-)
-miner = NumericNGramMiner(NumericNGram(config), error_metric="smape")
-miner.fit(training_sequences)
-result = miner.evaluate(test_sequences)
-```
-
-Evaluation metrics include SMAPE (the default), MAE, MAPE, MSE, and RMSE. Both
-the distribution estimator and point-error function can also be supplied as
-custom callables. For CSV datasets, see `examples/predict_numeric.py`:
-
-```sh
-python examples/predict_numeric.py visits.csv \
-  --case-column session_id --value-column visits \
-  --window-length 5 --estimator trimmed_mean --metric smape
-```
-
 Let’s walk through the required imports to understand the structure of the library:
 
 ```python
