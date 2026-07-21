@@ -31,7 +31,7 @@ from logicsponge.processmining.types import Config, Event, Metrics, Prediction, 
 # Lazy import types from test_data only at function call time to avoid import cycles
 # Note: test_data is imported lazily inside helpers to avoid circular imports.
 
-RED_TO_GREEN_CMAP = LinearSegmentedColormap.from_list("rg",["r", "w", "g"], N=256)
+RED_TO_GREEN_CMAP = LinearSegmentedColormap.from_list("rg", ["r", "w", "g"], N=256)
 
 
 def save_run_config(config: dict, dest: Path) -> bool:
@@ -113,6 +113,7 @@ def get_git_log(repo_path: Path | None = None) -> str:
         logger.debug("Error while running git log: %s", exc)
     return ""
 
+
 def extract_event_fields(event: Event) -> Event:
     """Extract the required fields from an event."""
     return event
@@ -125,7 +126,7 @@ def extract_event_fields(event: Event) -> Event:
 stop_symbol = DEFAULT_CONFIG["stop_symbol"]
 
 
-def probs_prediction(probs: ProbDistr, config: Config) -> Prediction | None: # noqa: C901
+def probs_prediction(probs: ProbDistr, config: Config) -> Prediction | None:  # noqa: C901
     """
     Return the top-k activities based on their probabilities.
 
@@ -138,7 +139,6 @@ def probs_prediction(probs: ProbDistr, config: Config) -> Prediction | None: # n
     # If there are no probabilities, return None
     if not probs:
         return None
-
 
     def compute_highest_probability(probs_input: dict) -> Prediction:
         """Get the highest probability of a given activity."""
@@ -243,6 +243,7 @@ def probs_prediction(probs: ProbDistr, config: Config) -> Prediction | None: # n
 
     return compute_highest_probability(probs)
 
+
 def metrics_prediction(metrics: Metrics, config: Config) -> Prediction | None:
     """Return prediction including time delays."""
     probs = metrics["probs"]
@@ -290,7 +291,7 @@ def compute_seq_perplexity(normalized_likelihood: float, *, log_likelihood: bool
     return float("inf")
 
 
-def compare_models_comparison( # noqa: C901, PLR0915, PLR0912
+def compare_models_comparison(  # noqa: C901, PLR0915, PLR0912
     prediction_vectors_memory: dict,
     tested_model: str,
     reference_model: str,
@@ -377,9 +378,9 @@ def compare_models_comparison( # noqa: C901, PLR0915, PLR0912
         similarity_matches = 0
 
         for i in range(n):
-            ref_equal_base = (ref_vec[i] == base_vec[i])
-            tested_equal_base = (tested_vec[i] == base_vec[i])
-            tested_equal_ref = (tested_vec[i] == ref_vec[i])
+            ref_equal_base = ref_vec[i] == base_vec[i]
+            tested_equal_base = tested_vec[i] == base_vec[i]
+            tested_equal_ref = tested_vec[i] == ref_vec[i]
 
             if ref_equal_base:
                 ref_correct += 1
@@ -727,7 +728,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
         dest="data_prop",
         type=float,
         default=1.0,
-        help="Fraction of the dataset to use (float in (0,1], default 1.0)."
+        help="Fraction of the dataset to use (float in (0,1], default 1.0).",
     )
     parser.add_argument(
         "--live-plots",
@@ -767,6 +768,36 @@ def resolve_dataset_from_args(args: argparse.Namespace) -> tuple[str, Iterator[E
         csv_candidate = Path(__file__).resolve().parents[2] / "data" / f"{name}.csv"
         if csv_candidate.exists():
             logging.getLogger(__name__).info("File %s already exists.", csv_candidate)
+            schema_overrides = {
+                "Helpdesk": {
+                    "delimiter": ",",
+                    "case_keys": ["Case ID"],
+                    "activity_keys": ["Activity"],
+                    "timestamp": "Complete Timestamp",
+                },
+                "BPI_Challenge_2014": {
+                    "delimiter": ";",
+                    "case_keys": ["Incident ID"],
+                    "activity_keys": ["IncidentActivity_Type"],
+                    "timestamp": "DateStamp",
+                },
+                "BPI_Challenge_2019": {
+                    "delimiter": ",",
+                    "case_keys": ["case:Purchasing Document", "case:Item"],
+                    "activity_keys": ["concept:name"],
+                    "timestamp": "time:timestamp",
+                },
+            }
+            entry = schema_overrides.get(
+                name,
+                {
+                    "delimiter": ",",
+                    "case_keys": ["case:concept:name"],
+                    "activity_keys": ["concept:name"],
+                    "timestamp": "time:timestamp",
+                },
+            )
+
             # Build a lightweight pandas-based row iterator and an Event iterator
             def csv_row_iterator(file_path: Path, delimiter: str = ",", chunksize: int = 1000) -> Iterator[dict]:
                 for chunk in pd.read_csv(
@@ -774,16 +805,16 @@ def resolve_dataset_from_args(args: argparse.Namespace) -> tuple[str, Iterator[E
                 ):
                     yield from chunk.to_dict("records")
 
-            entry = {
-                "case_keys": ["case:concept:name"], "activity_keys": ["concept:name"], "timestamp": "time:timestamp"
-            }
-
             def my_iterator_from_csv(iter_data: dict, iter_row_iterator: Iterator[dict]) -> Iterator[Event]:
                 timestamp_key = iter_data.get("timestamp")
+                case_keys = iter_data["case_keys"]
+                activity_keys = iter_data["activity_keys"]
                 for row in iter_row_iterator:
+                    case_parts = [row.get(key, "") for key in case_keys]
+                    activity_parts = [row.get(key, "") for key in activity_keys]
                     ev = {
-                        "case_id": row.get("case:concept:name"),
-                        "activity": row.get("concept:name"),
+                        "case_id": "::".join(case_parts),
+                        "activity": "::".join(activity_parts),
                         "timestamp": None,
                     }
                     if timestamp_key:
@@ -792,12 +823,15 @@ def resolve_dataset_from_args(args: argparse.Namespace) -> tuple[str, Iterator[E
                             ev["timestamp"] = parse_timestamp(raw_ts)
                     yield ev  # type: ignore  # Event-compatible dict  # noqa: PGH003
 
-            dataset_train = my_iterator_from_csv(entry, csv_row_iterator(csv_candidate))
+            dataset_train = my_iterator_from_csv(
+                entry,
+                csv_row_iterator(csv_candidate, delimiter=entry["delimiter"]),
+            )
             # No paired test iterator by default when using direct CSV
             return name, dataset_train, None
 
     # Defer import to avoid heavy module import for utilities that don't need datasets
-    from logicsponge.processmining import test_data as td  # local import to avoid cycles
+    from logicsponge.processmining import test_data as td  # noqa: PLC0415  # local import to avoid cycles
 
     if getattr(args, "data", None):
         # Prefer explicit choice when provided
@@ -823,12 +857,12 @@ def resolve_dataset_from_args(args: argparse.Namespace) -> tuple[str, Iterator[E
                     entry_test = data_map[paired_name]
                     file_path_test = Path("data") / entry_test["target_filename"]
                     row_iter_test = csv_it_func(
-                        file_path=str(file_path_test), delimiter=entry_test.get("delimiter", ","),
-                        dtypes=entry_test.get("dtypes")
+                        file_path=str(file_path_test),
+                        delimiter=entry_test.get("delimiter", ","),
+                        dtypes=entry_test.get("dtypes"),
                     )
                     dataset_test = (
-                        td.my_iterator(entry_test, row_iter_test)
-                        if hasattr(td, "my_iterator") else row_iter_test
+                        td.my_iterator(entry_test, row_iter_test) if hasattr(td, "my_iterator") else row_iter_test
                     )
                 return name, dataset_train, dataset_test
         logging.getLogger(__name__).warning("Dataset '%s' not found; falling back to defaults from test_data.", name)
@@ -879,7 +913,7 @@ def prepare_synthetic_dataset(  # noqa: C901
 
     try:
         # Import the generator module by path to avoid package import side-effects
-        import importlib.util as _importlib_util
+        import importlib.util as _importlib_util  # noqa: PLC0415
 
         gen_path = Path(__file__).resolve().parents[2] / "examples" / "synthetic_generator.py"
         spec = _importlib_util.spec_from_file_location("synthetic_generator", str(gen_path))
@@ -904,7 +938,7 @@ def prepare_synthetic_dataset(  # noqa: C901
             logger.info("Synthetic dataset already exists at %s", save_path)
 
         # Build a lightweight pandas-based row iterator and an Event iterator
-        from logicsponge.processmining.data_utils import parse_timestamp
+        from logicsponge.processmining.data_utils import parse_timestamp  # noqa: PLC0415
 
         def csv_row_iterator(file_path: Path, delimiter: str = ",", chunksize: int = chunksize) -> Iterator[dict]:
             for chunk in pd.read_csv(
@@ -935,5 +969,3 @@ def prepare_synthetic_dataset(  # noqa: C901
         return None
     else:
         return data_name, dataset, None
-
-

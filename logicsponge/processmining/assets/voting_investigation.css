@@ -43,7 +43,7 @@ body {
 
 .metric-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 12px;
   margin-bottom: 20px;
 }
@@ -72,6 +72,15 @@ body {
   font-weight: 600;
 }
 
+.dataset-selector {
+  display: grid;
+  grid-template-columns: minmax(110px, auto) minmax(260px, 520px);
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  color: var(--muted);
+}
+
 .tab-content {
   display: grid;
   gap: 18px;
@@ -85,6 +94,54 @@ body {
 
 .tab-content h2 {
   font-size: 1rem;
+}
+
+.section-heading {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.info-button {
+  position: relative;
+  z-index: 4;
+}
+
+.info-button summary {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.info-button summary::-webkit-details-marker {
+  display: none;
+}
+
+.info-button p {
+  position: absolute;
+  top: 24px;
+  left: 0;
+  width: min(360px, 75vw);
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgb(23 33 43 / 14%);
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 400;
+  line-height: 1.4;
 }
 
 .two-column {
@@ -110,6 +167,18 @@ body {
 .overview-panel .dash-graph {
   width: 100%;
   min-height: 0;
+}
+
+.global-comparison-chart-panel {
+  box-sizing: border-box;
+  min-width: 0;
+  height: 500px;
+  overflow: hidden;
+}
+
+.global-comparison-chart {
+  width: 100%;
+  height: 450px;
 }
 
 .analysis-notice {
@@ -174,7 +243,8 @@ body {
   }
 
   .investigation-header,
-  .control-row {
+  .control-row,
+  .dataset-selector {
     display: grid;
     grid-template-columns: 1fr;
   }
@@ -185,9 +255,14 @@ body {
   }
 
   .overview-panel,
-  .overview-main-panel {
+  .overview-main-panel,
+  .global-comparison-chart-panel {
     height: auto;
     overflow: visible;
+  }
+
+  .global-comparison-chart {
+    height: 420px;
   }
 }
 

@@ -29,21 +29,24 @@ environment first:
 source .venv/bin/activate
 ```
 
-Run an investigation on half of the Sepsis cases:
+Run the requested Sepsis investigation:
 
 ```bash
 python -m logicsponge.processmining.voting_investigation run \
   --data Sepsis_Cases \
-  --data-prop 0.5 \
-  --windows 2,3,4 \
-  --output results/sepsis-voting-investigation
+  --data-prop 0.9 \
+  --windows 2,3,4,5,6 \
+  --seed 0
 ```
+
+Without `--output`, this is saved in the stable dataset-named directory
+`results/voting-investigation/Sepsis_Cases/`.
 
 Open the saved results in the dashboard:
 
 ```bash
 python -m logicsponge.processmining.voting_investigation dashboard \
-  results/sepsis-voting-investigation
+  results/voting-investigation/Sepsis_Cases
 ```
 
 Then open:
@@ -73,18 +76,18 @@ python -m logicsponge.processmining.voting_investigation run [OPTIONS]
 
 | Option | Default | Meaning |
 |---|---:|---|
-| `--data` | `Sepsis_Cases` | Dataset name resolved through the repository's dataset utilities. |
+| `--data` | `Sepsis_Cases` | Dataset name resolved through the repository's dataset utilities. Choose among: Sepsis_Cases, Helpdesk, BPI_Challenge_2012, BPI_Challenge_2013, BPI_Challenge_2014, BPI_Challenge_2017, BPI_Challenge_2018, BPI_Challenge_2019|
 | `--data-prop` | `1.0` | Fraction of grouped cases retained before train/calibration/test shuffling. Must be in `(0, 1]`. |
-| `--windows` | `2,3,4` | Comma-separated N-gram window lengths. Bag and FPT are always included. |
+| `--windows` | `2,3,4` | Comma-separated N-gram window lengths of at least 2. Bag and FPT are always included; smaller values are rejected so `streak / (window_size - 1)` is defined. |
 | `--seed` | `0` | Seed used for deterministic case-level split shuffling. |
-| `--output` | timestamped directory | Directory receiving `summary.json` and `events.jsonl`. |
+| `--output` | `results/voting-investigation/DATASET/` | Optional exact directory receiving `summary.json` and `events.jsonl`. |
 | `--dashboard` | disabled | Start the dashboard after analysis finishes. |
 | `--port` | `8050` | Dashboard port when `--dashboard` is used. |
 
-If `--output` is omitted, results are stored under:
+If `--output` is omitted, results are stored by dataset name under:
 
 ```text
-results/voting-investigation-YYYYMMDD-HHMMSS/
+results/voting-investigation/<DatasetName>/
 ```
 
 Examples:
@@ -104,18 +107,42 @@ python -m logicsponge.processmining.voting_investigation run \
   --data Helpdesk --seed 7 --output results/helpdesk-seed-7
 ```
 
+### Preparing several datasets
+
+The `benchmark` command runs datasets sequentially and always stores each one
+under its own name:
+
+```bash
+python -m logicsponge.processmining.voting_investigation benchmark \
+  --data Sepsis_Cases Helpdesk BPI_Challenge_2012 BPI_Challenge_2013 \
+  --data-prop 0.9 \
+  --windows 2,3,4,5,6 \
+  --seed 0 \
+  --output-root results/voting-investigation \
+  --skip-existing
+```
+
+`--data` accepts space-separated names or comma-separated groups. The default
+list contains Sepsis, Helpdesk, and BPI Challenges 2012, 2013, 2014, 2017,
+2018, and 2019. `--skip-existing` avoids replacing a dataset that already has a
+`summary.json`. The command is orchestration only: it does not change the
+train/calibration/test protocol used by an individual run.
+
 ### Opening existing results
 
 ```text
 python -m logicsponge.processmining.voting_investigation dashboard RESULTS [--port PORT]
 ```
 
-`RESULTS` must be a directory containing both `summary.json` and
-`events.jsonl`.
+`RESULTS` can be either:
+
+- one dataset directory containing `summary.json` and `events.jsonl`; or
+- a root containing dataset-named child directories, each with a
+  `summary.json`.
 
 ```bash
 python -m logicsponge.processmining.voting_investigation dashboard \
-  results/sepsis-voting-investigation --port 8060
+  results/voting-investigation --port 8060
 ```
 
 Open `http://127.0.0.1:8060` in that case.
@@ -145,8 +172,13 @@ The `complexity` value recorded for a model is:
 - `1` for FPT;
 - the window length for an N-gram.
 
-It is recorded as an input for future generalization/complexity hypotheses. The
-initial built-in rules do not yet select directly from this value.
+It is recorded as an input for generalization/complexity hypotheses. The
+state-evidence, structural-regime, and branching rules use it to determine
+whether a model's context order is mature at the current sequence position.
+Each saved model row also records `model_type` and `window_size`. The streak
+rule uses these structural fields to identify N-grams and their orders without
+depending on names such as `ngram_6`. Older event files are supported through a
+name-based compatibility fallback during dashboard migration.
 
 ## Experimental protocol
 
@@ -185,11 +217,18 @@ Only the 70% training split updates the constituent models. Calibration and
 test diagnostics perform state transitions through each sequence but do not
 update model parameters or frequency tables.
 
-### 5. Rule calibration
+### 5. Rule state and calibration split
 
-Decision rules are fitted using labeled events from the 15% calibration split.
-Examples include learning the best model after a suffix pattern or in a
-position bucket.
+The active rules use the 15% calibration split only where their name says they
+are calibrated. The two transient Bag boosts have fixed strengths and use only
+outcomes revealed after each prediction. The remaining active rules have
+minimum-support fallbacks, so a sparse local pattern cannot replace their
+global or soft-voting fallback.
+
+This separation is intentional: the deployable combination is an arithmetic
+composition of positive per-model multipliers, not a learned hierarchy of
+rules. Former age/context/blend calibrations and meta-selectors remain archived
+for explicit ablation studies only.
 
 ### 6. Final evaluation
 
@@ -344,7 +383,7 @@ recovered_gap_fraction = recovered_gap_with_best_rule / recoverable_gap
 ```
 
 The first value is an absolute accuracy change; the fraction says how much of
-the available soft-to-oracle opportunity was actually closed.
+the available soft-to-cheating-baseline opportunity was actually closed.
 
 ## Event-level diagnostic metrics
 
@@ -379,6 +418,12 @@ available preceding events.
 | `agreement_count` | Number of models predicting `consensus_prediction`; it is the size of the largest top-1 agreement group. |
 | `distinct_prediction_count` | Number of distinct non-empty constituent top-1 predictions. |
 | `correct_model_count` | Number of constituent models whose top-1 prediction equals the actual activity. |
+| `empty_prediction_count` | Number of constituents without a current top prediction. |
+| `previous_soft_correct` | Whether the previous soft prediction was correct, or `null` at sequence start. |
+| `previous_actual` | Previously observed actual activity, or an empty string at sequence start. |
+| `previous_correct_models` | Models whose previous top prediction was correct. |
+| `previous_wrong_model_count` | Number of models wrong on the previous event. |
+| `previous_empty_prediction_count` | Number of empty constituent predictions on the previous event. |
 
 Models with an empty prediction do not contribute to agreement or distinct
 prediction counts.
@@ -396,6 +441,14 @@ The nested `models` list contains one object per constituent:
 | `state_visits` | Training-time `total_visits` for that state when exposed by the model; otherwise `0`. |
 | `prediction` | Processed top-1 activity, or an empty string if no prediction exists. |
 | `confidence` | Probability assigned to the processed top-1 prediction. |
+| `distribution` | Full normalized activity-probability mapping. |
+| `ranked_predictions` | Full distribution ordered from greatest to smallest probability. |
+| `entropy`, `normalized_entropy` | Raw and support-normalized distribution entropy. |
+| `margin` | Probability difference between the first and second ranked activities. |
+| `support` | Number of activities with positive probability. |
+| `top3_mass` | Total probability assigned to the three highest-ranked activities. |
+| `soft_divergence` | Jensen-Shannon divergence from the aggregated soft distribution. |
+| `probability_on_soft_prediction` | Probability this model assigns to the soft-voting top activity. |
 | `correct` | Whether `prediction == actual`. |
 
 `confidence` values are model-specific and need not be calibrated across
@@ -408,6 +461,12 @@ highest-confidence hypothesis.
 | Field | Exact meaning |
 |---|---|
 | `soft_prediction`, `soft_correct` | Soft-voting result and correctness. |
+| `soft_distribution`, `soft_ranked_predictions` | Full normalized soft distribution and its ordered activities. |
+| `soft_entropy`, `soft_normalized_entropy` | Raw and normalized soft-distribution entropy. |
+| `soft_margin` | Soft top-one minus top-two probability. |
+| `soft_support`, `soft_top3_mass` | Positive support size and top-three probability mass. |
+| `model_confidence_mean`, `model_confidence_spread` | Mean and range of constituent top probabilities. |
+| `model_entropy_mean` | Mean normalized entropy across constituent distributions. |
 | `oracle_prediction`, `oracle_correct` | Oracle result with soft fallback, and correctness of that final result. |
 | `oracle_model` | First correct constituent in model order, or an empty string. |
 | `correct_models` | Names of all correct constituents. |
@@ -417,8 +476,12 @@ highest-confidence hypothesis.
 
 | Field | Exact meaning |
 |---|---|
-| `rule_models` | Mapping from hypothesis name to the constituent selected for this event. |
-| `rule_predictions` | Mapping from hypothesis name to that constituent's top-1 prediction. |
+| `rule_models` | Mapping from hypothesis name to the selected constituent or direct source such as `soft rank 2`. |
+| `rule_predictions` | Mapping from hypothesis name to the activity predicted by its selected model, rank, pool, or meta-rule. |
+| `rule_diagnostics` | Per-rule enforcement trace. For transient rules this records whether recovery is active, its age, the minimum-complexity target, and exact target-prediction agreement. |
+| `integration_predictions` | Mapping from each active smart-integration name to its final event prediction. |
+| `scenario_predictions` | Mapping from each deployable rule-consensus scenario to its event prediction; diagnostic oracle scenarios are excluded. |
+| `best_deployable_method`, `best_deployable_prediction` | Explicit final deployment policy and prediction selected for this event. |
 | `condition_matches` | IDs of favorable conditional hypotheses fulfilled before this event's label is revealed. |
 
 ## Built-in decision hypotheses
@@ -452,18 +515,19 @@ For each bucket containing at least five calibration events, the rule stores
 the model with the highest accuracy in that bucket. Unseen or insufficiently
 supported buckets fall back to the globally best calibration model.
 
-### Suffix-pattern rules
+### Activity-label invariance policy
 
-Rules are generated for suffix lengths `1`, `2`, and `3`, with minimum support
-`3` and `10`.
+Suffix-identity, previous-activity, activity-confusion, motif-residual, and
+hashed activity-token rules have been removed from the investigation engine.
+New default rules must make the same decision after any consistent renaming of
+the dataset's activities. Previously saved JSON remains readable by the
+dashboard, but reruns use the structural grid.
 
-For each suffix appearing at least the required number of times in calibration
-data, the rule selects the model with the best accuracy after that suffix.
-Unseen or low-support suffixes fall back to the globally best calibration
-model.
-
-The suffix contains only activities preceding the predicted event, so the rule
-does not use the current true activity.
+The default benchmark may still use an algorithm's process-state identifier:
+that is a learned state of the fitted miner, not a source-code rule naming a
+particular activity. Every exact-state context backs off to state-support,
+n-gram-maturity, agreement-topology, and distribution contexts when support is
+insufficient.
 
 ### Per-state accuracy
 
@@ -495,28 +559,74 @@ Below the threshold:
 |---|---|
 | `name` | Unique human-readable rule name. |
 | `family` | Group used by dashboard filtering. |
+| `description` | Operational definition of the selector. |
+| `interpretation` | Process-mining meaning suggested by its routing behavior. |
+| `selection_policy` | Metric or learned ordering used to choose a source. This makes explicit that a displayed model name is fitted, not hard-coded. |
+| `parameters` | Fixed or fitted settings used by parameterized rules, including an explicit `calibrated` flag for the active adaptive rules. |
 | `accuracy` | Correct rule predictions divided by all test events. |
 | `correct` | Number of correct test predictions. |
 | `total` | Number of test events. |
-| `selected_models` | Number of test events assigned to each constituent. Counts sum to `total`. |
+| `selected_models` | Number of test events assigned to each selected source: a constituent model or a direct derived source such as a distribution rank/pool. Counts sum to `total`. |
 
 ## Advanced model-selection rules
 
-The default hypothesis grid now includes higher-capacity selectors. They are
-still evaluated without exposing the current test label: calibration labels
-fit the selector, and only previous-event feedback is allowed for adaptive
-rules.
+The active hypothesis grid contains seven compact, interpretable rules:
+calibrated distribution blending, a guarded second-choice override, a
+calibration-verified lone-dissenter override, a risk-gated lone-dissenter
+second-choice override, a complexity-contrast exception override, and two
+complementary transient Bag boosts. The N-gram multiplier rules remain available for explicit
+experiments but are disabled from the deployed default grid. An event's correctness becomes available only after
+that event is predicted.
+
+### Current default rule inventory
+
+The table below is the authoritative default grid produced by
+`default_hypotheses()`. “Best” always means computed from the current run's
+calibration data or current event metrics; no rule body returns `bag`, `fpt`,
+or a particular `ngram_N` name.
+
+| Rule or generated variants | Selection policy |
+|---|---|
+| Evidence-weighted distribution mixture (support 12) | Blends every model's probability distribution, weighting models by their calibration evidence in the current structural regime; sparse regimes fall back safely. |
+| Calibrated soft rank 2 override (support 2) | Uses soft voting's second-ranked activity only in contexts where calibration showed it reliably beats the usual first choice; otherwise retains soft voting. |
+| Calibrated lone-dissenter override (support 2) | Keeps soft voting unless exactly one model opposes a consensus of at least two and its supported, uncertainty-adjusted calibration advantage is positive. |
+| Calibrated lone-dissenter rank 2 override (support 2) | Uses the dissenter's second activity only after an observable failure-risk signal and calibration evidence that it beats soft voting. |
+| Complexity-contrast exception override | When every model gives the soft-vote top activity less than 50% probability, systematically discounts lower-complexity models' top activities to surface a stronger alternative. |
+| Transient Bag favoritism after a generalist-correct error | After a soft-voting error that the minimum-complexity model predicted correctly, applies a model-count-scaled multiplier with `1.0` extra weight for every competing constituent, then halves that extra weight on each of the next two events. |
+
+Model identity is necessarily retained as the key under which calibration
+statistics are accumulated. This is not a fixed choice: renaming every model
+consistently and refitting produces the same source role and prediction. The
+test suite checks this invariance across the complete default grid.
+
+### Archived exploratory rules
+
+`archived_hypotheses()` contains every selector outside this compact grid. This
+includes both former direct-routing transient variants, all three Bag
+calibrations, global and state-accuracy routing, highest-confidence routing,
+agreement routing, alternative position/state variants, hierarchical and contextual
+selectors, other calibrated ranks and probability pools, and the previous-error
+correct-set selector.
+
+They are not fitted, evaluated, written to results, or displayed by default.
+They can still be passed explicitly to `evaluate_hypotheses()` for a focused
+experiment. Archiving reduces benchmark noise without deleting implementations
+or making older experiments irreproducible.
+
+The dashboard also filters these names while loading older result files. Their
+saved JSON is left untouched, but archived rules are omitted from accuracy
+charts, impact tables, rule scenarios, and event-level rule annotations.
 
 ### Hierarchical reliability
 
 `hierarchical reliability (support 3)` estimates each model's probability of
 being correct using a fine-to-coarse context cascade:
 
-1. model + current state + last three activities + agreement + position bucket;
-2. model + state + last two activities + agreement;
-3. model + state + agreement;
-4. model + state;
-5. model + agreement;
+1. model + current state + state support + soft rank + canonical agreement topology;
+2. model + support/confidence/entropy ranks + n-gram maturity + topology;
+3. model + relative evidence ranks + maturity;
+4. model + state-support band + soft rank + agreement;
+5. model + support band + maturity;
 6. model-global calibration accuracy.
 
 The first context with sufficient support is selected. Its estimate is shrunk
@@ -532,47 +642,352 @@ global model. `consensus hierarchy ≥ 3` adds a branch: when at least three
 models agree, it chooses only among models making that consensus prediction;
 otherwise it uses the full hierarchical candidate set.
 
-### Confidence, state, and prediction-behavior reliability
+### Confidence, state, and structural disagreement reliability
 
 `confidence/state reliability` calibrates correctness by discretized confidence
 (five bins), state-visit band (`0`, `1–2`, `3–9`, `10+`), and agreement. It is
 intended to test whether confidence means the same thing for different models
 and states.
 
-`prediction/state reliability` adds the model's own predicted activity to the
-state context. This can reveal that a model is reliable for one transition but
-systematically wrong for another, even when its state-level accuracy looks
-acceptable.
+`disagreement profile reliability` canonicalizes predictions into equivalence
+classes. For example, model outputs `A, B, B, C` become topology `0, 1, 1, 2`.
+It combines that topology with state support, soft-distribution rank, and
+relative divergence. The learned behavior therefore transfers across activity
+renamings and focuses on how models disagree.
 
-`disagreement profile reliability` encodes the full observable profile of which
-models agree with soft voting and which agree with top-1 consensus. It tests
-pairwise/model-specific disagreement patterns rather than only the number of
-agreeing models.
+### Transient Bag favoritism
 
-### Prefix and composite decision lists
-
-`prefix/state reliability` first matches repeated full prefixes, then backs off
-to suffix, position, state, and global contexts. It is intentionally strict:
-full-prefix matches need repeated calibration evidence to be used.
-
-`calibrated decision list` learns favorable single conditions and applies the
-highest-weight matching condition, with hierarchical reliability as fallback.
-`composite decision list` extends this to two-clause interactions such as:
+The first variant, `transient Bag favoritism after generalist-correct error (3
+steps)`, activates only when the preceding soft vote was wrong and the
+minimum-complexity model was among the models that predicted that event
+correctly. The target is found structurally:
 
 ```text
-last-2-activities = Leucocytes → CRP
-AND agreement-count = 3
+target = model with minimum complexity
 ```
 
-Only combinations with positive calibration gain and sufficient support are
-kept. This tests whether a pattern is useful only under a particular model
-agreement regime.
+With the standard model specifications this is Bag (`complexity = 0`), but the
+rule never checks the name `bag`. A stable model-index tie break is used for a
+custom ensemble with several minimum-complexity models.
+
+For recovery age `a = 0, 1, 2`, the target receives:
+
+```text
+multiplier(a) = 1 + 3.0 × (model_count - 1) × 0.5^a
+```
+
+For example, a three-model ensemble receives `7`, `4`, `2.5`, then `1`;
+a five-model ensemble receives `13`, `7`, `4`, then `1`. A new eligible error
+restarts the schedule. The rule merges every constituent's full distribution;
+it does not directly route to Bag's top prediction. All non-target models stay
+at weight `1`, so favoritism cannot suppress or negatively weight them.
+
+The former `after generalist-wrong error` variant is no longer part of the
+deployed experiment grid. The retained Bag rule tests whether broad process
+memory remains the safest immediate
+recovery bias even when it did not identify the error event itself.
+
+The previous event's truth is consumed only after its prediction. Therefore it
+can affect the next decision but never the already-scored decision. The
+process interpretation is a short recovery from over-specialization. The first
+variant represents demonstrated generalist competence; the second is an
+explicit fallback hypothesis after a joint ensemble/generalist error.
+
+Event diagnostics contain `active`, `recovery_age`, `target_model`,
+`target_complexity`, `multiplier`, and the model-local `model_multipliers` map.
+The fitted parameters state `calibrated: false` and persist the complete
+multiplier schedule.
+
+The former direct-routing variants and the three recovery calibration methods
+are retained by `archived_hypotheses()` for reproducibility. They are neither
+evaluated nor displayed in a normal run.
+
+### N-gram correctness-streak multiplier
+
+For every model structurally marked as an N-gram of window size `x`, the rule
+tracks consecutive correct predictions within the current case. A multiplier
+is applied only when `previous_soft_correct == false`; otherwise the latent
+streak remains visible but the multiplier stays `1`. The state is
+updated only by `observe()` after the current prediction is scored, so the
+current true activity can never affect its own selection. A wrong N-gram
+prediction resets only that N-gram's streak to zero; a new case resets all
+streaks.
+
+The requested pre-maturity ratio is first computed literally, then mapped
+through a normalized exponential curve (`rate = 4`) so that the greatest
+streaks receive much more of the boost:
+
+```text
+linear_ratio = (
+    min(1, max(0, streak / (window_size - 1)))
+    if streak < window_size + 1
+    else 0
+)
+
+boost_ratio = (exp(4 * linear_ratio) - 1) / (exp(4) - 1)
+```
+
+The linear precursor reaches `1` at streak `x - 1` and remains capped at `1`
+through streak `x`; at streak `x + 1` it drops to `0` and remains zero for
+longer streaks. The exponential mapping is convex: it stays near zero for
+short streaks and rises sharply toward `1` for the greatest streaks. This makes
+the boost a temporary pre-maturity intervention. Eligibility and the current
+numerical ratio are preserved separately in event diagnostics through the
+`eligible` and `boost_ratios` mappings. Window sizes below 2 are rejected to
+keep the formula well-defined.
+
+After a soft-voting error, each N-gram's full probability distribution receives
+a bounded exponential multiplier. With
+`progress = min(1, max(0, streak / (window_size - 1)))`, it is
+
+```text
+distribution_multiplier = (
+    0.1 × 10 ** (2 × progress)   if progress <= 0.5
+    2 ** (2 × progress - 1)      otherwise
+)
+```
+
+This gives base weight `0.1` at zero streak, `1` at half-window progress, and
+`2` near the window size. It is then multiplied by
+`sqrt(window_size / minimum_ngram_window_size)`, so two N-grams that both
+reach their window size give the larger-window N-gram the higher multiplier.
+Regardless of the soft-error gate, an N-gram whose immediately previous
+prediction was wrong receives multiplier `0` and contributes no probability
+mass for that event. The scale remains fixed rather than calibrated.
+
+### Largest N-gram disagreement multiplier
+
+When at least two N-grams make different predictions, this fixed tie-breaker
+multiplies the largest order by `1.1`. It activates only when the ratio of the
+largest to smallest current streak multiplier is at most `1.1`. Therefore it
+cannot override a material streak-based preference; it only resolves close
+streak-weight ties in favor of the richer context.
+
+The rule records per event:
+
+- delayed streak for every N-gram;
+- `x - 1` eligibility;
+- boost ratio and resulting multiplier;
+- boosted model names;
+- the positive `model_multipliers` contributed to the combined stack.
+
+No collective gate or priority rule is active. After a soft error, if two
+N-grams have ratios `1` and `0.75`, both multipliers are applied in the same
+merge. One of the two complementary transient Bag variants is active at that
+event too, and its Bag multiplier is applied in the same merge.
+
+### State-evidence topology
+
+`state-evidence topology (support 5)` is the most process-state-oriented
+selector. Its context cascade combines:
+
+- the joint current state vector across miners;
+- each state's occurrence band (`0`, `1–2`, `3–9`, `10+`);
+- the evidence curve across increasing n-gram orders;
+- whether the current prefix is long enough to make each order mature;
+- relative ranks of support, confidence, entropy, and soft divergence;
+- canonical model-agreement topology and each model's soft rank.
+
+Interpretation: selection of a longer-order n-gram in a well-visited state is
+evidence for a stable local subprocess or routing pattern. Selection of Bag,
+FPT, or a shorter n-gram while longer states are sparse indicates branching,
+novel context, or insufficient repetition for the specific model.
+
+### Evidence-weighted distribution mixture
+
+`evidence-weighted distribution mixture (support 12)` scores the probability
+that each model assigned to the observed calibration transition with a bounded
+logarithmic score. Scores are estimated inside structural regimes and shrunk
+toward each model's global score. At prediction time they become positive
+weights for merging the complete model distributions; state visit counts add a
+small evidence multiplier but cannot override calibrated quality.
+
+This is a weighted ponderation, not a top-1 model switch. Broad models receiving
+high weight near uncertain branches suggests useful generalization; a deep
+n-gram receiving high weight in supported regimes suggests a repeatable local
+path.
+
+### Structural branching ensemble
+
+`structural branching ensemble (support 8)` reserves whole calibration
+sequences as an internal gate-validation split. Within each activity-invariant
+regime it compares five experts:
+
+1. state-evidence topology selection;
+2. evidence-weighted distribution merging;
+3. median pooling;
+4. trimmed pooling;
+5. product pooling.
+
+It installs a branch only when the best expert beats soft voting by more than a
+sampling-uncertainty penalty; otherwise it keeps soft voting. Experts are then
+refitted on all calibration events. A state-selection branch identifies a
+recurring subprocess, robust pooling identifies noisy/outlier models, product
+pooling identifies cross-model corroboration, and fallback identifies weak or
+ambiguous evidence.
+
+### Second/third-choice and model-rank rules
+
+`calibrated soft rank 2/3 override` can predict the second- or third-ranked
+activity in the aggregated soft distribution. It groups calibration events by
+well-defined contexts combining:
+
+- whether the previous soft prediction was correct;
+- previous wrong/empty model counts and current empty model count;
+- agreement count;
+- soft top-two margin and normalized entropy;
+- spread between constituent top probabilities.
+- canonical prediction topology, state-evidence curve, soft ranks, and n-gram
+  maturity.
+
+A rank is enabled for a context only when it has at least eight calibration
+events and beats the ordinary soft prediction there. Otherwise the rule keeps
+soft voting. These rules may predict an activity that is not any constituent's
+top-1 choice.
+
+`calibrated model rank 2/3 switch` instead ranks constituent models by global
+calibration accuracy, then learns contexts where the second- or third-ranked
+model beats soft voting. It tests the hypothesis that a globally weaker model
+is a useful conditional specialist.
+
+### Calibrated lone-dissenter override
+
+`calibrated lone-dissenter override (support 2)` is a deliberately narrow
+contrarian rule. It considers an override only when exactly one model predicts
+an activity different from a non-empty consensus of at least two models. It
+then searches, from a detailed to a broader structural context, for calibration
+evidence about that same model acting as the lone dissenter. Contexts use the
+model's learned state and visit band, confidence, top-two margin, divergence
+from soft voting, consensus size, soft-vote margin, and canonical disagreement
+topology. No activity label is used as a feature.
+
+For a context with `n` calibration events, each event contributes the paired
+difference:
+
+```text
+delta = 1(model is correct) - 1(soft vote is correct)
+```
+
+The observed mean is shrunk toward the model's overall paired advantage, using
+a prior weight of four events. An override is installed only if the lower bound
+below is strictly positive:
+
+```text
+lower_bound = shrunken_mean(delta) - 0.5 × standard_error(delta)
+```
+
+The default requires at least six comparable calibration events. A missing,
+sparse, tied, negative, or statistically uncertain context always retains soft
+voting. Event diagnostics record the candidate model, support, raw and
+shrunken advantage, lower bound, and whether the override was active.
+
+### Lone-dissenter second-choice override
+
+`calibrated lone-dissenter rank 2 override (support 2)` tests the dissenter's
+second-ranked activity, rather than its top activity. It is narrower than the
+ordinary lone-dissenter rule: the second activity must be distinct from soft
+voting, and at least one observable risk signal must be present:
+
+- **Previous all-model failure:** on the preceding event every constituent
+  top prediction was wrong. This is delayed feedback, never knowledge of the
+  current event's outcome.
+- **Low representation:** the dissenter's current learned state has been seen
+  at most twice in training, so the ordinary consensus may be extrapolating.
+- **High variability:** the soft distribution is diffuse or nearly tied, or
+  constituent confidence is widely spread.
+
+Within those risk regimes, calibration groups examples by the dissenter's
+learned state, sequence stage, support band, confidence and margin, soft-vote
+margin, disagreement topology, and the active risk signals. This is the
+case-dependent component: it learns which observable case signatures have
+actually made the rank-two activity useful. It needs four comparable events
+and the same positive, shrunken lower-bound test as the ordinary contrarian
+rule; otherwise it retains soft voting. The diagnostic records every active
+risk signal and the complete calibration decision.
+
+### Complexity-contrast exception override
+
+`complexity-contrast exception override` searches for exceptions when the
+ensemble's apparent top choice is not individually predominant: every model
+must assign the soft-vote top activity **less than 50%** probability. When that
+condition holds, the transformation is systematic; it does not wait for a
+calibration gate. It has no hard “lowest 20%” cutoff: every model contributes
+to both sides of a continuous complexity contrast. Higher-complexity models
+receive more positive weight; lower-complexity models receive more subtractive
+weight. The rule declines to act when every model has the same complexity,
+because there is then no complexity signal to contrast.
+
+For every activity in the richer pool's top three, other than the consensus
+activity, it computes:
+
+```text
+contrast(activity) = complexity-weighted probability(activity)
+                   - inverse-complexity-weighted top-prediction reward(activity)
+```
+
+The negative term applies only to each model's own top activity. Therefore a
+low-complexity model discounts the broad rule it actively proposes but does not
+erase every alternative it assigns a small probability to. Repeated low-model
+top predictions add their negative rewards together.
+
+The candidate must retain at least 8 percentage points after subtraction, be
+at least half as probable as the complexity-weighted consensus activity, exceed
+the consensus activity's contrast score, and appear in the top three of at
+least 60% of all constituent models (with a minimum of two models). This
+prevents a single high-order model's speculative tail from causing a switch.
+
+If the probability, contrast, or top-three-support safeguards fail, the rule
+retains soft voting. Diagnostics preserve each model's positive and subtractive
+complexity weights, candidate probabilities, contrast, support, and the
+systematic applicability decision.
+
+No rule uses whether the *current* predictions are correct. That information
+requires the current label and is forbidden. Delayed previous correctness is
+valid only because it has already been observed before the next prediction.
+
+### Distribution-shape specialist
+
+`distribution-shape reliability` scores each model from calibrated versions of:
+
+- normalized entropy of its full distribution;
+- its top-one versus top-two probability margin;
+- Jensen-Shannon divergence from the aggregated soft distribution;
+- whether its top activity agrees with soft voting;
+- the current number of empty constituent predictions.
+
+This distinguishes, for example, a confident contrarian model from a diffuse
+contrarian model instead of treating every disagreement equally.
+
+### Probability-distribution pools
+
+Three direct ensemble rules use all probability values rather than only model
+top predictions:
+
+- `median probability pool` takes the per-activity median across models;
+- `trimmed probability pool` removes the smallest and largest per-activity
+  values, then averages the remaining models;
+- `product probability pool` uses a geometric mean, rewarding activities that
+  receive support across several distributions.
+
+`calibrated probability pool` learns which of soft, median, trimmed, or product
+pooling works best for each state-evidence, agreement-topology, sequence-stage,
+and distribution regime. It retains soft voting when calibration does not show
+a positive gain.
+
+### Data-driven conditional hypotheses
+
+The favorable-condition analysis now discovers only structural conditions:
+process state, state-support band, support/confidence/entropy rank, n-gram
+maturity, canonical prediction topology, agreement, position, delayed previous
+correctness, and distribution uncertainty. It no longer proposes conditions
+such as “after activity X, prefer model Y.”
 
 ### Nearest calibration behavior
 
 `nearest calibration behavior (k 32)` is a non-parametric sequence matcher. It
 finds calibration events close to the current event using relative position,
-agreement/diversity, suffixes, each model's prediction, state, and confidence.
+agreement topology, state-support bands, soft ranks, entropy, divergence, and
+confidence.
 For each constituent, correctness is inverse-distance weighted across the
 nearest neighbors and shrunk toward its global rate. No test labels are used
 to define the distance or the selected model.
@@ -580,11 +995,11 @@ to define the distance or the selected model.
 ### Stacked rule portfolio
 
 `stacked rule portfolio` is a hierarchical composition of selectors. It first
-fits a portfolio of confidence, state, agreement, hierarchical, and
-prediction-behavior rules on three quarters of calibration events. The
+fits a portfolio of confidence, state, agreement, topology, and
+distribution-mixture rules on three quarters of calibration events. The
 remaining quarter is an internal validation set used to learn which rule is
-most reliable for each context (suffix/agreement/position, then broader
-contexts). Constituent rules are finally refit on all calibration events before
+most reliable for each structural regime, with hierarchical backoff.
+Constituent rules are finally refit on all calibration events before
 test evaluation.
 
 This internal holdout is important: choosing the best rule on the same events
@@ -603,15 +1018,69 @@ known. It is not valid for a batch setting in which labels are unavailable
 between predictions. It also cannot repair the first event of a stream before
 any feedback exists.
 
+### Smart rule-integration methods
+
+The active integration is deliberately not a rule selector. It begins every
+constituent at weight `1.0`, reads each rule's `model_multipliers`, multiplies
+independent N-gram modifiers, coalesces overlapping Bag recovery windows, and
+performs one merge of the complete constituent distributions:
+
+```text
+combined_weight(ngram) = product of that N-gram's active positive multipliers
+combined_weight(bag) = max of overlapping transient Bag multipliers
+prediction = argmax_activity sum_model(
+    combined_weight(model) × model_distribution(activity)
+)
+```
+
+In the default family the target sets are disjoint: the two complementary
+transient variants target the minimum-complexity model on mutually exclusive
+events, while streak favoritism targets structurally identified N-grams. The multiplication rule remains well-defined for custom
+families where target sets overlap. Every accepted multiplier must be at least
+`1.0`; a smaller value raises an error in the distribution helper and is also
+counted by the integration audit.
+
+| Method | Decision mechanism |
+|---|---|
+| Independent Bag + N-gram boost stack | Applies the transient Bag and per-N-gram streak modifiers independently, then merges once. It has no calibration gate, winner selection, branch priority, or negative overlay. |
+
+The stack carries `deployment_priority = true` and is available even when no
+selector-calibration partition can be reserved. `best_rule_result` therefore
+uses this defined deployable policy rather than retrospectively choosing a
+different test winner.
+
+`enforcement_audit` reports Bag-boost events, N-gram-boost events, simultaneous
+events, overlap between the two Bag recovery windows, cross-family target overlap, and
+any attempted multiplier below `1.0`.
+Each event's `integration_diagnostics` stores the exact combined model weights,
+per-rule target sets, and whether all weights are non-decreasing. The
+`independent_boost_contract` summary verifies the minimum-complexity target,
+the stack's deployment status, and repeats this audit. The older
+`adaptive_recovery_contract` key is retained as a schema-compatible alias.
+
+#### Archived integration methods
+
+Former calibration-best, adaptive-recovery routing, specialist overlay,
+family-voting, contextual routing, consensus, nearest-behavior, and Hedge
+methods remain available through `evaluate_archived_rule_integrations()` for
+explicit ablation studies. They are excluded from normal result files and the
+dashboard because their selection gates and precedence rules obscure the two
+model-local effects being tested. Older result files remain readable, but the
+current dashboard hides those archived integration rows.
+
 ### Interpreting the expanded grid
 
-The extra rules are a search space, not a guarantee of improvement. On the
-Sepsis split used by the project (`data-prop=0.5`, seed `0`, windows `2,3,4`),
-the strongest added selector was `consensus hierarchy ≥ 3`, while ordinary
-`agreement ≥ 3, else confidence` remained stronger. This is useful evidence:
-the state/pattern rules are not yet closing the entire oracle gap, so the next
-experiments should vary context support, split seeds, and model families rather
-than treating one split's leaderboard as a final gating policy.
+The extra rules are a search space, not a guarantee of improvement. Existing
+saved result files retain the rule grid with which they were produced; they are
+not silently rewritten. Rerun an investigation to benchmark the new structural
+rules and compare their recoveries, harms, and gap closed across datasets and
+seeds. Old numeric examples are intentionally omitted here because they refer
+to the retired activity-sensitive default grid.
+
+Direct rank and pooling rules expand the prediction space beyond constituent
+top-1 activities. Consequently, a rule-set oracle can exceed the
+cheating-voting baseline; cheating voting remains the requested top-1 model
+selection baseline, not an absolute ceiling for these expanded rules.
 
 The meaningful target is not merely the highest selector accuracy. Inspect
 each selector's recoveries, harms, and `net_correct` relative to soft voting,
@@ -656,7 +1125,12 @@ prediction. The following counts are evaluated on held-out test events:
 that recovers many errors by also destroying correct soft-voting decisions.
 `recoveries` alone is not sufficient evidence of improvement.
 
-### Favorable conditional hypotheses
+### Data-mined favorable conditions
+
+These conditions are **not members of the decision-rule grid**. They are an
+additional descriptive mining pass over pre-label event features. Consequently,
+they are unrelated to `default_hypotheses()` and `archived_hypotheses()` and
+should not be read as archived rules returning through another dashboard view.
 
 The engine enumerates categorical conditions using only information available
 at prediction time:
@@ -664,16 +1138,26 @@ at prediction time:
 - consensus strength (`low/no majority`, `majority`, or `unanimous`), exact
   agreement count, and prediction diversity;
 - early, middle, or late sequence stage and position buckets of width 2 and 5;
-- exact last-activity patterns of length 1, 2, and 3;
+- canonical prediction topology, which preserves which models agree without
+  preserving the activity labels;
+- each model's current process state, state-support band, and relative support
+  rank;
+- the evidence curve and maturity profile across configured n-gram orders;
 - the set of models forming the consensus;
 - the set of models disagreeing with soft voting;
 - whether each particular model agrees or disagrees with soft voting and with
-  the top-1 consensus.
+  the top-1 consensus;
+- previous soft correctness and previous wrong or empty model counts;
+- current empty prediction count, soft margin/entropy bins, constituent
+  confidence spread, and per-model confidence/entropy/soft-rank order.
 
 For each condition supported by at least 10 calibration events, the engine
 calculates every constituent's calibration accuracy and recommends the best
-one. A condition is retained only when that constituent beats soft voting on
-the same calibration events:
+one. The persisted wording is “locally most accurate calibrated model,” followed
+by the model selected in that particular run. That displayed model is an output
+of `fit`, never a model encoded in the condition implementation. A condition is
+retained only when that constituent beats soft voting on the same calibration
+events:
 
 ```text
 calibration_gain = recommended_model_accuracy - soft_voting_accuracy
@@ -689,6 +1173,12 @@ The condition table is ranked by held-out `net_correct`, with recoveries as the
 tie-breaker. This ranking describes the current test split and must not be used
 to refit the same reported test result. Confirm promising conditions on other
 seeds or a new final holdout.
+
+The dashboard renders the persisted fields in a shorter sentence-like form:
+“when feature” + “has value” → “learned choice.” It shows the calibration event
+count and advantage beside held-out recoveries, harms, net improvement, and
+decisive precision. Less essential intermediate metrics remain available in
+`summary.json` rather than widening the table.
 
 ### Weighted favorable-condition selector
 
@@ -727,12 +1217,26 @@ could repair.
 Every completed run contains:
 
 ```text
-results/sepsis-voting-investigation/
-├── summary.json
-└── events.jsonl
+results/voting-investigation/
+├── Sepsis_Cases/
+│   ├── summary.json
+│   └── events.jsonl
+├── Helpdesk/
+│   ├── summary.json
+│   └── events.jsonl
+└── BPI_Challenge_2012/
+    ├── summary.json
+    └── events.jsonl
 ```
 
+The stable dataset directory is replaced when the same dataset is run again.
+Use an explicit `--output` directory when retaining several seeds or parameter
+sets for one dataset.
+
 The dashboard reads these files directly; it does not retrain models.
+It loads them when the dashboard process starts. After regenerating a result
+directory, stop and restart an already-running dashboard process to see the new
+summary fields and integration comparisons.
 
 ### `summary.json`
 
@@ -746,11 +1250,15 @@ Top-level fields:
 | `train_events` | Training-event count including appended stop events. |
 | `calibration_events` | Calibration-event count including stop events. |
 | `test_events` | Test-event count including stop events. |
+| `run_config` | Data proportion, N-gram windows, and split seed used for the run. |
 | `strategies` | Soft and cheating-voting accuracies. |
 | `per_model` | Constituent accuracy and correct-event count. |
-| `hypotheses` | Rules sorted from highest to lowest test accuracy. |
+| `hypotheses` | Rules sorted by test accuracy, including description, process interpretation, and model-independent selection policy. |
 | `rule_scenarios` | Fixed rule-set consensus scenarios and diagnostic rule-set ceilings. |
-| `best_rule_result` | Highest-accuracy non-oracle individual rule or rule-set scenario. |
+| `rule_integrations` | The independent boost stack with accuracy, impact, description, parameters, and composition audit. |
+| `selector_calibration_events` | Reserved calibration-event count retained for archived integration ablations; the active stack does not use it. |
+| `best_rule_result` | Highest-accuracy deployable individual rule, rule-set scenario, or smart integration. |
+| `independent_boost_contract` | Structural Bag-target checks and counts proving that the active stack used only positive, independently composed modifiers. |
 | `recoverable_gap` | Cheating-voting accuracy minus soft-voting accuracy. |
 | `recovered_gap_with_best_rule` | Best candidate accuracy minus soft-voting accuracy. |
 | `recovered_gap_fraction` | Fraction of the soft-to-oracle gap closed by the best candidate. |
@@ -771,15 +1279,15 @@ Example inspection:
 
 ```bash
 # First event, formatted with jq
-head -n 1 results/sepsis-voting-investigation/events.jsonl | jq
+head -n 1 results/voting-investigation/Sepsis_Cases/events.jsonl | jq
 
 # Count recoverable soft-vote failures
 jq -s '[.[] | select(.oracle_gap)] | length' \
-  results/sepsis-voting-investigation/events.jsonl
+  results/voting-investigation/Sepsis_Cases/events.jsonl
 
 # See which models were correct on those failures
 jq -r 'select(.oracle_gap) | .correct_models[]' \
-  results/sepsis-voting-investigation/events.jsonl | sort | uniq -c | sort -nr
+  results/voting-investigation/Sepsis_Cases/events.jsonl | sort | uniq -c | sort -nr
 ```
 
 File size grows approximately with:
@@ -798,18 +1306,72 @@ fallback is useful for exploration but is not leakage-safe evidence. Rerun the
 investigation into the result directory to obtain calibration-learned
 conditions and persist `condition_matches` in `events.jsonl`.
 
+The dashboard also recognizes files created before the current independent
+stack. At load time it recomputes both transient Bag variants, N-gram streaks, and
+the combined positive multipliers from stored model predictions, complexities,
+N-gram names/metadata, and delayed previous-event outcomes. This is a
+label-safe in-memory compatibility migration because neither active rule needs
+calibration. Former fitted integration rows are hidden, and the reconstructed
+independent stack becomes the displayed deployable policy. The saved files on
+disk are not rewritten.
+
 ## Dashboard guide
+
+### Root dashboard and dataset selector
+
+Opening `results/voting-investigation/` starts the cross-dataset dashboard.
+The dataset selector at the top controls the **Selected dataset** tab. The
+selected view shows that dataset's run configuration, headline scenario chart,
+exact result table, smart-integration comparison, recoveries, harms, and fitted
+parameters.
+
+The selector also controls **Detailed investigation**. That view restores the
+large soft/cheating/gap/best-deployable/gap-closed values and contains nested
+subpanels for sequence exploration, per-rule impact and selection policy,
+conditional hypotheses, and every soft-voting error. Only the selected
+dataset's event file is held in memory.
+
+The **Global comparison** tab is intentionally independent of the selector and
+shows all discovered datasets simultaneously:
+
+- grouped soft-voting, best-deployable, and cheating-baseline accuracy;
+- the fraction of each soft-to-cheating gap recovered by its best deployable
+  method; and
+- an exact sortable table with event count, best individual rule, best smart
+  integration, enforced deployment policy, accuracy gain, and gap recovery.
+
+Diagnostic oracle scenarios are excluded when choosing `best deployable`.
+The independent positive-multiplier stack takes deployment priority even if a
+comparison row has higher retrospective held-out accuracy.
+Only direct child directories containing a readable `summary.json` are
+discovered, which prevents unrelated archived runs from being mixed into the
+comparison accidentally.
+
+Legacy custom names such as `results/sepsis-voting-investigation/` still open
+as single-dataset dashboards. Passing their parent (for example `results/`)
+also discovers them when they are direct children; new runs use the standardized
+dataset-name layout by default.
+
+Opening a specific dataset directory instead retains the detailed single-log
+dashboard described below.
 
 ### Header and summary strip
 
 The header identifies the dataset, event count, sequence count, and loaded
 result directory. The summary strip shows soft accuracy, oracle accuracy, the
-best selected rule/scenario accuracy, and the fraction of the oracle gap that
-candidate recovered.
+best individual-rule accuracy, best smart-integration accuracy, and the
+fraction of the cheating-baseline gap recovered by the best deployable
+candidate.
 
 ### Overview tab
 
-The accuracy chart compares:
+The first Overview panel makes the requested benchmark figures directly
+visible without navigating to another tab. Its chart and exact-value table
+compare soft voting, the best individual rule, the best smart integration,
+core consensus, core/all rule-set diagnostic ceilings, and cheating voting.
+Hovering shows the selected method, gain over soft, and recovered gap.
+
+The candidate-rule accuracy chart compares:
 
 - soft voting;
 - cheating voting;
@@ -838,7 +1400,7 @@ Controls allow filtering by:
 - minimum `agreement_count`.
 
 The table itself supports native sorting and text filtering. Use it to find
-recurring prefixes, suffix patterns, positions, and correct-model combinations.
+recurring states, evidence profiles, positions, and correct-model combinations.
 
 ### Sequence explorer tab
 
@@ -853,6 +1415,26 @@ Green circles are correct predictions. Red crosses are wrong predictions. Text
 above each point is the predicted activity. Hovering shows the actual activity,
 agreement count, and preceding prefix.
 
+The timeline contains aligned lanes for the actual activity, soft voting, the
+best deployable candidate, cheating voting, and every constituent model. When a
+candidate carries `deployment_priority`, “Best deployable” means that enforced
+deployment policy; otherwise it is the highest-accuracy non-oracle individual
+rule, smart integration, or consensus scenario. Its hover text and the summary
+below the chart give the exact method name.
+
+New investigations persist `integration_predictions` and deployable
+`scenario_predictions` in `events.jsonl`, alongside `rule_predictions`, so the
+winning method can be inspected event by event. For an older result file that
+lacks predictions for its aggregate best integration, the explorer displays
+the highest-accuracy deployable candidate whose event predictions are actually
+available and states that method explicitly below the chart. It never
+reconstructs or invents missing predictions from aggregate accuracy.
+
+For new runs, hovering the Best deployable lane additionally shows the active
+recovery target, zero-based recovery age, N-gram streak ratios, and the exact
+combined model multipliers. A blank target means transient Bag
+favoritism is inactive at that event.
+
 This view is intended to reveal temporal behavior such as:
 
 - a model becoming reliable only after a particular prefix;
@@ -863,7 +1445,8 @@ This view is intended to reveal temporal behavior such as:
 ### Hypotheses tab
 
 Filter the leaderboard by rule family. The chart and table show test accuracy,
-correct-event count, and how frequently each model was selected.
+correct-event count, how frequently each model was selected, its selection
+policy, and its process interpretation.
 
 A rule that almost always selects one model may have high accuracy without
 having learned useful conditional behavior. Compare its result against “best
@@ -886,22 +1469,23 @@ true label and are therefore opportunity ceilings only. The table reports
 accuracy, gain versus soft voting, the recovered fraction of the full
 soft-to-oracle gap, and the exact participating rule names.
 
-For the reference Sepsis run (`data-prop=0.5`, seed `0`, windows `2,3,4`), the
-current scenario results are:
+Saved results created with an older rule grid remain visible, but their numeric
+values do not describe the current structural selectors. Rerun the dataset
+before comparing a rule named in this document. A rule-set oracle can exceed
+the top-1 cheating baseline because direct distribution-rank and pooling rules
+can predict an activity that is not any constituent's top-1 prediction.
 
-| Scenario | Accuracy | Soft-to-oracle gap recovered |
-|---|---:|---:|
-| Soft voting | 65.07% | 0% |
-| Best individual rule (`agreement ≥ 3, else confidence`) | 65.94% | 10.20% |
-| Core-rule consensus | 65.68% | 7.14% |
-| Core rule-set oracle ceiling | 70.03% | 58.16% |
-| All rule-set oracle ceiling | 72.46% | 86.73% |
-| Cheating-voting ceiling | 73.59% | 100% |
+### Integration methods tab
 
-This distinction is central: the rule portfolio already contains the correct
-answer for most of the recoverable gap, but the deployable consensus mechanism
-does not yet identify when to trust each rule. The remaining research problem
-is therefore primarily gating/selection, not lack of candidate predictions.
+This tab shows the independent boost stack against soft voting and the cheating
+baseline. Color represents net events gained or lost relative to soft voting;
+hovering shows the description, recoveries, harms, and recovered gap.
+
+The exact-value table reports the fixed composition parameters and enforcement
+audit alongside accuracy and impact counts. In particular, inspect
+`negative_multiplier_events` and `cross_rule_target_overlap_events`.
+N-gram downweights intentionally produce the former after eligible soft errors;
+cross-rule target overlap remains zero for the default model family.
 
 ### Soft-vote analysis tab
 
@@ -957,7 +1541,9 @@ directory represents one split.
 
 Subclass `DecisionRule`. `fit` may use labeled calibration rows. `select` must
 choose a model using only information that would be available before revealing
-the current test label.
+the current test label. Prefer relative policies over literal model names. This
+example chooses the most specific currently supported model and breaks ties by
+confidence; it works for any configured model family:
 
 ```python
 from typing import Any
@@ -965,12 +1551,18 @@ from typing import Any
 from logicsponge.processmining.voting_investigation import DecisionRule
 
 
-class PreferShortNGramEarly(DecisionRule):
-    name = "ngram 2 before position 5, then ngram 4"
-    family = "position"
+class MostSpecificSupportedModel(DecisionRule):
+    name = "most specific supported model"
+    family = "state evidence"
+    selection_policy = "greatest complexity with at least five state visits, then greatest confidence"
 
     def select(self, row: dict[str, Any]) -> str:
-        return "ngram_2" if row["position"] < 5 else "ngram_4"
+        supported = [model for model in row["models"] if model["state_visits"] >= 5]
+        candidates = supported or row["models"]
+        return max(
+            candidates,
+            key=lambda model: (model["complexity"], model["confidence"], -model["index"]),
+        )["name"]
 ```
 
 Evaluate it with other rules:
@@ -979,7 +1571,7 @@ Evaluate it with other rules:
 summaries = evaluate_hypotheses(
     calibration_rows,
     test_rows,
-    rules=[PreferShortNGramEarly()],
+    rules=[MostSpecificSupportedModel()],
 )
 ```
 
@@ -989,6 +1581,11 @@ Useful pre-label inputs available to `select` include:
 - each model's state, visits, confidence, prediction, and complexity;
 - agreement count, consensus prediction, and distinct prediction count;
 - calibration statistics stored by the rule during `fit`.
+
+Avoid returning names such as `ngram_6` from a rule body. A model name may be
+stored after `fit` only when it is the result of a documented policy—for
+example, highest calibration accuracy in a supported state. The built-in grid
+is tested under consistent model renaming to enforce this distinction.
 
 Do **not** inspect these fields inside `select`:
 
@@ -1012,8 +1609,9 @@ custom `ModelSpec` instances when constructing `VotingInvestigator`.
   likelihood would not represent a deployable probabilistic predictor.
 - The dashboard is descriptive. A visually convincing pattern is not proof
   that a rule generalizes.
-- The built-in pattern and position rules use discrete exact groups. They do
-  not smooth across similar patterns or neighboring positions.
+- Position buckets and exact process-state conditions remain discrete. The
+  hierarchical, nearest-behavior, and structural-regime rules provide broader
+  backoff or similarity-based alternatives.
 - Calibration groups with the minimum allowed support can still be noisy.
 - Confidence values are compared directly even though constituent models may
   not be calibrated to the same probability scale.
@@ -1054,7 +1652,7 @@ Confirm that the chosen result directory contains both required files and that
 Dash is installed in the active environment:
 
 ```bash
-ls results/sepsis-voting-investigation/{summary.json,events.jsonl}
+ls results/voting-investigation/Sepsis_Cases/{summary.json,events.jsonl}
 python -c "import dash; print(dash.__version__)"
 ```
 
@@ -1064,7 +1662,7 @@ Choose another port:
 
 ```bash
 python -m logicsponge.processmining.voting_investigation dashboard \
-  results/sepsis-voting-investigation --port 8060
+  results/voting-investigation --port 8060
 ```
 
 ### Matplotlib cache warning
