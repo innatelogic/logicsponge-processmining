@@ -631,6 +631,12 @@ class DelayedFeedbackAdaptiveRule(HierarchicalReliabilityRule):
                     )
 
     def observe(self, row: dict[str, Any], selected_model: str) -> None:  # noqa: ARG002
+        # Result-file migration can evaluate a rule without a calibration
+        # partition.  Lazily create the structural levels from the first
+        # labeled event so delayed feedback remains safe in that mode.
+        if not self.context_scores and row["models"]:
+            level_count = len(self._contexts(row, row["models"][0]))
+            self.context_scores = [defaultdict(lambda: [0.0, 0.0]) for _ in range(level_count)]
         for model in row["models"]:
             for level, context in enumerate(self._contexts(row, model)):
                 correct, total = self.context_scores[level].get(context, (0.0, 0.0))
@@ -2170,6 +2176,203 @@ class StructuralBranchingEnsembleRule(DecisionRule):
         return expert.choose(row) if expert is not None else ("soft voting", row["soft_prediction"])
 
 
+class CalibratedCandidateRouterRule(DecisionRule):
+    """
+    Route to a ranked ensemble candidate when it has a supported local gain.
+
+    The router deliberately has no knowledge of activity labels or model names.
+    A candidate is described only by its *role* in the current ensemble: the
+    soft rank, or the rank emitted by a constituent at a relative complexity
+    position.  This lets the same rule work when the ensemble has a different
+    number of N-grams, their names change, or a non-N-gram model is added.
+
+    It is also stateful at inference time.  Once the label for an event is
+    available, the case-local reliability of every candidate role is updated
+    for subsequent events in that case.  The current label is never used to
+    select the current prediction.
+    """
+
+    family = "calibrated candidate router"
+    description = (
+        "Routes among soft and constituent ranked candidates using paired, shrunk gains in state-support, "
+        "uncertainty, and agreement regimes, with delayed within-case feedback."
+    )
+    interpretation = (
+        "An override identifies a candidate role that is repeatedly superior to the soft leader in the current "
+        "process regime; the within-case term captures a temporary local subprocess."
+    )
+    selection_policy = (
+        "Keep soft voting unless an activity-invariant candidate role has enough calibration support and a positive "
+        "lower confidence bound for paired gain over soft voting."
+    )
+
+    def __init__(
+        self,
+        minimum_support: int = 12,
+        prior_weight: float = 12.0,
+        confidence_z: float = 0.5,
+        online_weight: float = 3.0,
+        decay: float = 0.75,
+    ) -> None:
+        self.minimum_support = minimum_support
+        self.prior_weight = prior_weight
+        self.confidence_z = confidence_z
+        self.online_weight = online_weight
+        self.decay = decay
+        self.name = f"calibrated candidate router (support {minimum_support})"
+        self.global_gains: dict[str, tuple[float, float, int]] = {}
+        self.context_gains: list[dict[tuple[str, ...], tuple[float, float, int]]] = []
+        self.case_scores: dict[str, tuple[float, float]] = {}
+        self.active_sequence = ""
+
+    @staticmethod
+    def _complexity_positions(row: dict[str, Any]) -> dict[str, int]:
+        ordered = sorted(row["models"], key=lambda model: (int(model["complexity"]), int(model["index"])))
+        return {model["name"]: position for position, model in enumerate(ordered)}
+
+    def _candidates(self, row: dict[str, Any]) -> list[tuple[str, str, dict[str, Any] | None, int]]:
+        """Return role, activity, source model, and source probability rank."""
+        candidates: list[tuple[str, str, dict[str, Any] | None, int]] = []
+        for rank, item in enumerate(row.get("soft_ranked_predictions", [])[:3], start=1):
+            candidates.append((f"soft-rank-{rank}", str(item["activity"]), None, rank))
+        positions = self._complexity_positions(row)
+        for model in row["models"]:
+            position = positions[model["name"]]
+            for rank, item in enumerate(model.get("ranked_predictions", [])[:2], start=1):
+                candidates.append((f"model-rank-{rank}-complexity-{position}", str(item["activity"]), model, rank))
+        # A deterministic fallback keeps the rule usable for an empty
+        # distribution, while normal events always include soft-rank-1.
+        return candidates or [("soft-rank-1", row["soft_prediction"], None, 1)]
+
+    def _contexts(
+        self,
+        row: dict[str, Any],
+        role: str,
+        activity: str,
+        model: dict[str, Any] | None,
+        rank: int,
+    ) -> list[tuple[str, ...]]:
+        prediction_support = sum(candidate["prediction"] == activity for candidate in row["models"])
+        topology = _prediction_partition(row)
+        soft_shape = (
+            _value_bin(float(row["soft_normalized_entropy"]), (0.35, 0.6, 0.8)),
+            _value_bin(float(row["soft_margin"]), (0.03, 0.1, 0.25)),
+            str(row["agreement_count"]),
+            str(prediction_support),
+        )
+        if model is None:
+            source = ("soft", str(rank))
+        else:
+            source = (
+                "model",
+                str(rank),
+                _visit_bin(int(model["state_visits"])),
+                str(_relative_rank(row["models"], model, "confidence")),
+                str(_soft_rank_of_model(row, model)),
+            )
+        return [
+            (role, *source, *soft_shape, *topology),
+            (role, *source, *soft_shape),
+            (role, *source, str(row["agreement_count"]), str(prediction_support)),
+            (role, *source),
+            (role,),
+        ]
+
+    def fit(self, rows: list[dict[str, Any]]) -> None:
+        levels = 5
+        totals: defaultdict[str, list[float]] = defaultdict(lambda: [0.0, 0.0, 0.0])
+        contexts: list[defaultdict[tuple[str, ...], list[float]]] = [
+            defaultdict(lambda: [0.0, 0.0, 0.0]) for _ in range(levels)
+        ]
+        for row in rows:
+            soft_outcome = int(row["soft_correct"])
+            for role, activity, model, rank in self._candidates(row):
+                gain = int(activity == row["actual"]) - soft_outcome
+                values = totals[role]
+                values[0] += gain
+                values[1] += gain * gain
+                values[2] += 1
+                for level, context in enumerate(self._contexts(row, role, activity, model, rank)):
+                    values = contexts[level][context]
+                    values[0] += gain
+                    values[1] += gain * gain
+                    values[2] += 1
+        self.global_gains = {role: (values[0], values[1], int(values[2])) for role, values in totals.items()}
+        self.context_gains = [
+            {context: (values[0], values[1], int(values[2])) for context, values in level.items()}
+            for level in contexts
+        ]
+        self.case_scores = {}
+        self.active_sequence = ""
+        self.fitted_parameters = {
+            "calibrated": True,
+            "candidate_roles": "soft ranks 1-3 and constituent ranks 1-2 indexed by relative complexity",
+            "minimum_support": self.minimum_support,
+            "confidence_z": self.confidence_z,
+            "online_feedback": "decayed candidate-role gain after the preceding labeled event in the same case",
+        }
+
+    @staticmethod
+    def _mean_variance(values: tuple[float, float, int]) -> tuple[float, float, int]:
+        total, squares, count = values
+        if not count:
+            return 0.0, 0.0, 0
+        mean = total / count
+        variance = max(0.0, (squares - count * mean * mean) / max(1, count - 1))
+        return mean, variance, count
+
+    def _gain_score(
+        self,
+        row: dict[str, Any],
+        role: str,
+        activity: str,
+        model: dict[str, Any] | None,
+        rank: int,
+    ) -> tuple[float, float, int]:
+        global_values = self.global_gains.get(role, (0.0, 0.0, 0))
+        global_mean, _, global_count = self._mean_variance(global_values)
+        for level, context in enumerate(self._contexts(row, role, activity, model, rank)):
+            values = self.context_gains[level].get(context, (0.0, 0.0, 0))
+            mean, variance, count = self._mean_variance(values)
+            if count >= self.minimum_support:
+                shrunk = (count * mean + self.prior_weight * global_mean) / (count + self.prior_weight)
+                uncertainty = self.confidence_z * math.sqrt(variance / max(1, count))
+                return shrunk - uncertainty, shrunk, count
+        # Global roles are a valid final backoff, but only if they have the
+        # same support requirement as every structural context.
+        if global_count >= self.minimum_support:
+            _, variance, _ = self._mean_variance(global_values)
+            return global_mean - self.confidence_z * math.sqrt(variance / global_count), global_mean, global_count
+        return float("-inf"), 0.0, 0
+
+    def choose(self, row: dict[str, Any]) -> tuple[str, str]:
+        if row["sequence_id"] != self.active_sequence:
+            self.active_sequence = row["sequence_id"]
+            self.case_scores = {}
+        best_role, best_activity, best_score = "soft-rank-1", row["soft_prediction"], 0.0
+        for role, activity, model, rank in self._candidates(row):
+            lower_bound, _mean, _support = self._gain_score(row, role, activity, model, rank)
+            online_gain, online_count = self.case_scores.get(role, (0.0, 0.0))
+            online_mean = online_gain / online_count if online_count else 0.0
+            # Online evidence only refines an already calibrated positive
+            # route; it cannot create an unvalidated override by itself.
+            score = lower_bound + self.online_weight * online_mean / (self.online_weight + online_count)
+            if activity != row["soft_prediction"] and lower_bound > 0 and score > best_score:
+                best_role, best_activity, best_score = role, activity, score
+        if best_activity != row["soft_prediction"]:
+            return best_role, best_activity
+        return "soft voting", row["soft_prediction"]
+
+    def observe(self, row: dict[str, Any], selected_model: str) -> None:  # noqa: ARG002
+        soft_outcome = int(row["soft_correct"])
+        for role, activity, _model, _rank in self._candidates(row):
+            gain, count = self.case_scores.get(role, (0.0, 0.0))
+            self.case_scores[role] = (
+                self.decay * gain + int(activity == row["actual"]) - soft_outcome,
+                self.decay * count + 1.0,
+            )
+
+
 def _new_advanced_hypotheses() -> list[DecisionRule]:
     """
     Return activity-label-invariant higher-capacity selectors.
@@ -2197,6 +2400,8 @@ def default_hypotheses() -> list[DecisionRule]:
         # Distribution evidence and a calibrated alternative to the soft-vote
         # leader complement the single short-lived Bag recovery rule below.
         EvidenceWeightedDistributionRule(minimum_support=12),
+        ConfidenceStateReliabilityRule(minimum_support=5),
+        DelayedFeedbackAdaptiveRule(minimum_support=2, decay=0.94),
         CalibratedSoftRankRule(rank=2),
         CalibratedLoneDissenterRule(),
         CalibratedLoneDissenterSecondRankRule(),
@@ -2234,7 +2439,7 @@ def archived_hypotheses() -> list[DecisionRule]:
     )
     rules.extend(
         [
-            ConfidenceStateReliabilityRule(),
+            CalibratedCandidateRouterRule(minimum_support=6),
             CalibratedSoftRankRule(3),
             CalibratedModelRankRule(2),
             CalibratedModelRankRule(3, minimum_support=5),
@@ -4032,28 +4237,51 @@ def evaluate_rule_integrations(  # noqa: C901, PLR0912, PLR0915
         )
 
     gate_candidates = [(margin, families) for margin in (0.01, 0.03, 0.07, 0.15, 0.3) for families in (2, 3, 4)]
-    best_gate = max(
-        gate_candidates,
-        key=lambda candidate: sum(
-            _family_consensus_prediction(
-                row,
-                rule_names,
-                maximum_margin=candidate[0],
-                minimum_families=candidate[1],
+    minimum_gate_lower_bound = 0.005
+
+    def gate_evidence(candidate: tuple[float, int]) -> tuple[float, float, int]:
+        outcomes = [
+            int(
+                _family_consensus_prediction(
+                    row,
+                    rule_names,
+                    maximum_margin=candidate[0],
+                    minimum_families=candidate[1],
+                )
+                == row["actual"]
             )
-            == row["actual"]
+            - int(row["soft_correct"])
             for row in selector_rows
-        ),
+        ]
+        mean = sum(outcomes) / len(outcomes) if outcomes else 0.0
+        variance = sum((outcome - mean) ** 2 for outcome in outcomes) / max(1, len(outcomes) - 1)
+        lower_bound = mean - 0.5 * math.sqrt(variance / max(1, len(outcomes)))
+        return lower_bound, mean, sum(outcome == 1 for outcome in outcomes)
+
+    supported_gates = [
+        (candidate, *gate_evidence(candidate))
+        for candidate in gate_candidates
+        if gate_evidence(candidate)[0] >= minimum_gate_lower_bound
+    ]
+    selected_gate = (
+        max(supported_gates, key=lambda item: (item[2], item[0][0], -item[0][1]))
+        if supported_gates
+        else None
     )
+    best_gate = selected_gate[0] if selected_gate else None
     results.append(
         _integration_result(
             test_rows,
             [
-                _family_consensus_prediction(
-                    row,
-                    rule_names,
-                    maximum_margin=best_gate[0],
-                    minimum_families=best_gate[1],
+                (
+                    _family_consensus_prediction(
+                        row,
+                        rule_names,
+                        maximum_margin=best_gate[0],
+                        minimum_families=best_gate[1],
+                    )
+                    if best_gate is not None
+                    else row["soft_prediction"]
                 )
                 for row in test_rows
             ],
@@ -4062,7 +4290,13 @@ def evaluate_rule_integrations(  # noqa: C901, PLR0912, PLR0915
                 "Overrides soft voting only when its probability margin is small and several distinct rule "
                 "families independently agree on the same alternative."
             ),
-            parameters={"maximum_soft_margin": best_gate[0], "minimum_families": best_gate[1]},
+            parameters={
+                "maximum_soft_margin": best_gate[0] if best_gate is not None else None,
+                "minimum_families": best_gate[1] if best_gate is not None else None,
+                "selector_lower_bound": selected_gate[1] if selected_gate else 0.0,
+                "minimum_selector_lower_bound": minimum_gate_lower_bound,
+                "active": best_gate is not None,
+            },
         )
     )
 
@@ -4309,12 +4543,39 @@ def run_investigation(
     investigator.train(train_sequences)
     calibration_rows = investigator.diagnose(calibration_sequences, split="calibration")
     test_rows = investigator.diagnose(test_sequences, split="test")
+
+    # Reserve complete cases for the meta-rule.  The constituent rules learn
+    # their parameters on the remaining calibration cases; their resulting
+    # selector predictions are then genuinely out-of-fit evidence for choosing
+    # an integration policy.  Finally, constituents are refit on every
+    # calibration case before touching the test set.
+    rule_fit_rows, selector_rows = split_integration_calibration(calibration_rows)
+    selector_hypotheses = evaluate_hypotheses(rule_fit_rows, selector_rows)
     hypotheses = evaluate_hypotheses(calibration_rows, test_rows)
-    rule_integrations = evaluate_rule_integrations(
-        [],
+    selector_integrations = evaluate_archived_rule_integrations(
+        selector_rows,
         test_rows,
-        [hypothesis["name"] for hypothesis in hypotheses],
+        [hypothesis["name"] for hypothesis in selector_hypotheses],
     )
+    # This is the most conservative meta-policy: it changes the soft leader
+    # only when several independent rule families agree and soft voting is
+    # uncertain.  It is selected from out-of-fit calibration cases, not from
+    # held-out accuracy.  Other integration methods remain inspection-only.
+    active_integration_names = {"uncertainty-gated family consensus"}
+    rule_integrations = [
+        result for result in selector_integrations if result["name"] in active_integration_names
+    ]
+    for row in test_rows:
+        row["integration_predictions"] = {
+            name: prediction
+            for name, prediction in row.get("integration_predictions", {}).items()
+            if name in active_integration_names
+        }
+        row["integration_diagnostics"] = {
+            name: diagnostics
+            for name, diagnostics in row.get("integration_diagnostics", {}).items()
+            if name in active_integration_names
+        }
     soft_failure_analysis = build_soft_failure_analysis(calibration_rows, test_rows)
     summary = build_summary(
         dataset_name=resolved_name,
@@ -4324,7 +4585,7 @@ def run_investigation(
         test_rows=test_rows,
         hypotheses=hypotheses,
         rule_integrations=rule_integrations,
-        selector_calibration_events=0,
+        selector_calibration_events=len(selector_rows),
     )
     summary["soft_failure_analysis"] = soft_failure_analysis
     summary["run_config"] = {

@@ -15,9 +15,10 @@ from logicsponge.processmining.voting_dashboard import (
 )
 from logicsponge.processmining.voting_investigation import (
     CalibratedGeneralizationRecoveryRule,
+    CalibratedCandidateRouterRule,
+    CalibratedComplexityContrastExceptionRule,
     CalibratedLoneDissenterRule,
     CalibratedLoneDissenterSecondRankRule,
-    CalibratedComplexityContrastExceptionRule,
     CalibratedSoftRankRule,
     DecisionRule,
     EvidenceWeightedDistributionRule,
@@ -89,6 +90,21 @@ def test_hypotheses_fit_on_calibration_and_annotate_test_rows() -> None:
     assert test_rows[0]["rule_predictions"]["best calibration accuracy"] == "a"
 
 
+def test_candidate_router_uses_relative_roles_not_model_names() -> None:
+    investigator = VotingInvestigator(specs=fixed_specs())
+    calibration = investigator.diagnose([[event("a"), event("b"), event("a")]], split="calibration")
+    test_rows = investigator.diagnose([[event("a"), event("b")]], split="test")
+    rule = CalibratedCandidateRouterRule(minimum_support=1)
+
+    roles = [role for role, _activity, _model, _rank in rule._candidates(test_rows[0])]
+    assert "soft-rank-1" in roles
+    assert any(role.startswith("model-rank-1-complexity-") for role in roles)
+    assert not any("model_a" in role or "model_b" in role for role in roles)
+
+    evaluate_hypotheses(calibration, test_rows, rules=[rule])
+    assert rule.name in test_rows[0]["rule_predictions"]
+
+
 def test_rule_impact_counts_soft_recoveries_and_harms() -> None:
     investigator = VotingInvestigator(specs=fixed_specs())
     calibration = investigator.diagnose([[event("a"), event("a")]], split="calibration")
@@ -129,6 +145,8 @@ def test_compact_interpretable_rules_are_active_and_other_rules_are_archived() -
     names = {rule.name for rule in default_hypotheses()}
     assert names == {
         "evidence-weighted distribution mixture (support 12)",
+        "confidence/state reliability (support 5)",
+        "delayed-feedback adaptive (decay 0.94)",
         "calibrated soft rank 2 override (support 2)",
         "calibrated lone-dissenter override (support 2)",
         "calibrated lone-dissenter rank 2 override (support 2)",
@@ -137,11 +155,12 @@ def test_compact_interpretable_rules_are_active_and_other_rules_are_archived() -
     }
     archived_names = {rule.name for rule in archived_hypotheses()}
     assert "best calibration accuracy" in archived_names
+    assert "calibrated candidate router (support 6)" in archived_names
     assert "per-state accuracy (support 5)" in archived_names
     assert "agreement ≥ 3, else accuracy" in archived_names
     assert "hierarchical reliability (support 3)" in archived_names
     assert "stacked rule portfolio (support 5)" in archived_names
-    assert "delayed-feedback adaptive (decay 0.94)" in archived_names
+    assert "delayed-feedback adaptive (decay 0.94)" not in archived_names
     assert "calibrated probability pool (support 5)" in archived_names
     assert "state-evidence topology (support 5)" in archived_names
     assert "structural branching ensemble (support 8)" in archived_names

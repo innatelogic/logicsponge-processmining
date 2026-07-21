@@ -570,11 +570,12 @@ Below the threshold:
 
 ## Advanced model-selection rules
 
-The active hypothesis grid contains seven compact, interpretable rules:
-calibrated distribution blending, a guarded second-choice override, a
-calibration-verified lone-dissenter override, a risk-gated lone-dissenter
-second-choice override, a complexity-contrast exception override, and two
-complementary transient Bag boosts. The N-gram multiplier rules remain available for explicit
+The active hypothesis grid contains eight compact, interpretable rules:
+calibrated distribution blending, confidence/state routing, delayed-feedback
+routing, a guarded second-choice override, a calibration-verified
+lone-dissenter override, a risk-gated lone-dissenter second-choice override,
+a complexity-contrast exception override, and a transient Bag boost. The
+N-gram multiplier rules remain available for explicit
 experiments but are disabled from the deployed default grid. An event's correctness becomes available only after
 that event is predicted.
 
@@ -588,6 +589,8 @@ or a particular `ngram_N` name.
 | Rule or generated variants | Selection policy |
 |---|---|
 | Evidence-weighted distribution mixture (support 12) | Blends every model's probability distribution, weighting models by their calibration evidence in the current structural regime; sparse regimes fall back safely. |
+| Confidence/state reliability (support 5) | Routes to the constituent with the best smoothed calibration reliability for its confidence and learned-state support bands. |
+| Delayed-feedback adaptive (decay 0.94) | Starts from the calibration reliability contexts and updates them after each labeled event, for use on later events in that case. |
 | Calibrated soft rank 2 override (support 2) | Uses soft voting's second-ranked activity only in contexts where calibration showed it reliably beats the usual first choice; otherwise retains soft voting. |
 | Calibrated lone-dissenter override (support 2) | Keeps soft voting unless exactly one model opposes a consensus of at least two and its supported, uncertainty-adjusted calibration advantage is positive. |
 | Calibrated lone-dissenter rank 2 override (support 2) | Uses the dissenter's second activity only after an observable failure-risk signal and calibration evidence that it beats soft voting. |
@@ -605,8 +608,8 @@ test suite checks this invariance across the complete default grid.
 includes both former direct-routing transient variants, all three Bag
 calibrations, global and state-accuracy routing, highest-confidence routing,
 agreement routing, alternative position/state variants, hierarchical and contextual
-selectors, other calibrated ranks and probability pools, and the previous-error
-correct-set selector.
+selectors, the relative calibrated candidate router, other calibrated ranks
+and probability pools, and the previous-error correct-set selector.
 
 They are not fitted, evaluated, written to results, or displayed by default.
 They can still be passed explicitly to `evaluate_hypotheses()` for a focused
@@ -1020,10 +1023,22 @@ any feedback exists.
 
 ### Smart rule-integration methods
 
-The active integration is deliberately not a rule selector. It begins every
-constituent at weight `1.0`, reads each rule's `model_multipliers`, multiplies
-independent N-gram modifiers, coalesces overlapping Bag recovery windows, and
-performs one merge of the complete constituent distributions:
+The normal investigation now reserves whole calibration cases for a nested
+meta-policy.  The constituent rules fit on the remaining calibration cases;
+their predictions on the reserved cases choose the uncertainty-gated family
+consensus.  On test events it changes soft voting only when the soft margin is
+within the calibrated threshold and at least the calibrated number of
+independent rule families agree on the same alternative.  This prevents the
+meta-policy from choosing its gate on the same cases used to fit its experts.
+It additionally requires a positive paired lower confidence bound of at least
+0.5 percentage points on the reserved cases; otherwise it deterministically
+falls back to soft voting.
+
+The independent multiplier stack remains available as a separate integration.
+It begins every constituent at weight `1.0`, reads each rule's
+`model_multipliers`, multiplies independent N-gram modifiers, coalesces
+overlapping Bag recovery windows, and performs one merge of the complete
+constituent distributions:
 
 ```text
 combined_weight(ngram) = product of that N-gram's active positive multipliers
@@ -1256,7 +1271,7 @@ Top-level fields:
 | `hypotheses` | Rules sorted by test accuracy, including description, process interpretation, and model-independent selection policy. |
 | `rule_scenarios` | Fixed rule-set consensus scenarios and diagnostic rule-set ceilings. |
 | `rule_integrations` | The independent boost stack with accuracy, impact, description, parameters, and composition audit. |
-| `selector_calibration_events` | Reserved calibration-event count retained for archived integration ablations; the active stack does not use it. |
+| `selector_calibration_events` | Events belonging to complete calibration cases reserved for the nested uncertainty-gated family consensus. |
 | `best_rule_result` | Highest-accuracy deployable individual rule, rule-set scenario, or smart integration. |
 | `independent_boost_contract` | Structural Bag-target checks and counts proving that the active stack used only positive, independently composed modifiers. |
 | `recoverable_gap` | Cheating-voting accuracy minus soft-voting accuracy. |
