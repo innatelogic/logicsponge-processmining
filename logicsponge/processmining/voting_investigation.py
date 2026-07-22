@@ -2373,6 +2373,143 @@ class CalibratedCandidateRouterRule(DecisionRule):
             )
 
 
+class CompleteMissStateRecoveryRule(DecisionRule):
+    """Recover after a complete ensemble miss using state-calibrated candidates."""
+
+    family = "complete-miss recovery"
+    description = (
+        "After the preceding event defeated every constituent, compares the minimum-complexity and adaptive "
+        "candidates using their state-specific paired gain over soft voting."
+    )
+    interpretation = (
+        "A complete miss marks a possible regime change.  A recovery is allowed only when one of the ensemble's "
+        "generalist or online-adaptive views has repeatedly handled the following state better."
+    )
+    selection_policy = (
+        "After a previous complete miss, replace soft voting only with a candidate whose supported state-level "
+        "paired lower confidence bound is positive; otherwise keep soft voting."
+    )
+
+    def __init__(self, minimum_support: int = 8, confidence_z: float = 0.5) -> None:
+        self.minimum_support = minimum_support
+        self.confidence_z = confidence_z
+        self.name = f"complete-miss state recovery (support {minimum_support})"
+        self.global_gains: dict[str, tuple[float, float, int]] = {}
+        self.context_gains: list[dict[tuple[str, ...], tuple[float, float, int]]] = []
+
+    @staticmethod
+    def _complete_previous_miss(row: dict[str, Any]) -> bool:
+        return row.get("previous_soft_correct") is False and not row.get("previous_correct_models", [])
+
+    @staticmethod
+    def _minimum_complexity_model(row: dict[str, Any]) -> dict[str, Any] | None:
+        return min(row["models"], key=lambda model: (int(model["complexity"]), int(model["index"])), default=None)
+
+    def _candidates(self, row: dict[str, Any]) -> list[tuple[str, str, dict[str, Any] | None]]:
+        minimum = self._minimum_complexity_model(row)
+        adaptive_index = row.get("adaptive_model_index")
+        adaptive_model = (
+            next((model for model in row["models"] if model["index"] == adaptive_index), None)
+            if adaptive_index is not None
+            else None
+        )
+        candidates = [
+            ("minimum-complexity", minimum["prediction"], minimum) if minimum is not None else None,
+            ("adaptive", row.get("adaptive_prediction", ""), adaptive_model),
+        ]
+        return [candidate for candidate in candidates if candidate is not None and candidate[1]]
+
+    def _contexts(
+        self,
+        row: dict[str, Any],
+        role: str,
+        model: dict[str, Any] | None,
+    ) -> list[tuple[str, ...]]:
+        source_state = model["state"] if model is not None else ""
+        support = _visit_bin(int(model["state_visits"])) if model is not None else "adaptive"
+        shape = (
+            str(row["agreement_count"]),
+            str(row["empty_prediction_count"]),
+            _value_bin(float(row["soft_margin"]), (0.03, 0.1, 0.25, 0.5)),
+            *_prediction_partition(row),
+        )
+        return [
+            (role, source_state, support, *shape),
+            (role, source_state),
+            (role, support, *shape),
+            (role, *shape[:3]),
+            (role,),
+        ]
+
+    @staticmethod
+    def _mean_variance(values: tuple[float, float, int]) -> tuple[float, float, int]:
+        total, squares, count = values
+        if not count:
+            return 0.0, 0.0, 0
+        mean = total / count
+        variance = max(0.0, (squares - count * mean * mean) / max(1, count - 1))
+        return mean, variance, count
+
+    def fit(self, rows: list[dict[str, Any]]) -> None:
+        totals: defaultdict[str, list[float]] = defaultdict(lambda: [0.0, 0.0, 0.0])
+        contexts: list[defaultdict[tuple[str, ...], list[float]]] = [
+            defaultdict(lambda: [0.0, 0.0, 0.0]) for _ in range(5)
+        ]
+        for row in rows:
+            if not self._complete_previous_miss(row):
+                continue
+            for role, prediction, model in self._candidates(row):
+                gain = int(prediction == row["actual"]) - int(row["soft_correct"])
+                totals[role][0] += gain
+                totals[role][1] += gain * gain
+                totals[role][2] += 1
+                for level, context in enumerate(self._contexts(row, role, model)):
+                    contexts[level][context][0] += gain
+                    contexts[level][context][1] += gain * gain
+                    contexts[level][context][2] += 1
+        self.global_gains = {role: (value[0], value[1], int(value[2])) for role, value in totals.items()}
+        self.context_gains = [
+            {context: (value[0], value[1], int(value[2])) for context, value in level.items()}
+            for level in contexts
+        ]
+        self.fitted_parameters = {
+            "calibrated": True,
+            "trigger": "previous soft error with no correct constituent",
+            "candidates": "minimum-complexity and adaptive-selected constituent, by relative role",
+            "minimum_support": self.minimum_support,
+            "confidence_z": self.confidence_z,
+        }
+
+    def _lower_bound(self, row: dict[str, Any], role: str, model: dict[str, Any] | None) -> tuple[float, int]:
+        for level, context in enumerate(self._contexts(row, role, model)):
+            values = self.context_gains[level].get(context, (0.0, 0.0, 0))
+            mean, variance, count = self._mean_variance(values)
+            if count >= self.minimum_support:
+                return mean - self.confidence_z * math.sqrt(variance / count), count
+        values = self.global_gains.get(role, (0.0, 0.0, 0))
+        mean, variance, count = self._mean_variance(values)
+        if count >= self.minimum_support:
+            return mean - self.confidence_z * math.sqrt(variance / count), count
+        return float("-inf"), 0
+
+    def choose(self, row: dict[str, Any]) -> tuple[str, str]:
+        if not self._complete_previous_miss(row):
+            return "soft voting", row["soft_prediction"]
+        best = (0.0, 0, "soft voting", row["soft_prediction"])
+        diagnostics = []
+        for role, prediction, model in self._candidates(row):
+            lower_bound, support = self._lower_bound(row, role, model)
+            diagnostics.append({"role": role, "prediction": prediction, "lower_bound": lower_bound, "support": support})
+            if prediction != row["soft_prediction"] and lower_bound > best[0]:
+                best = lower_bound, support, role, prediction
+        row.setdefault("rule_diagnostics", {})[self.name] = {
+            "active": best[2] != "soft voting",
+            "candidates": diagnostics,
+            "previous_complete_miss": True,
+        }
+        return best[2], best[3]
+
+
 def _new_advanced_hypotheses() -> list[DecisionRule]:
     """
     Return activity-label-invariant higher-capacity selectors.
@@ -2402,6 +2539,7 @@ def default_hypotheses() -> list[DecisionRule]:
         EvidenceWeightedDistributionRule(minimum_support=12),
         ConfidenceStateReliabilityRule(minimum_support=5),
         DelayedFeedbackAdaptiveRule(minimum_support=2, decay=0.94),
+        CompleteMissStateRecoveryRule(minimum_support=8),
         CalibratedSoftRankRule(rank=2),
         CalibratedLoneDissenterRule(),
         CalibratedLoneDissenterSecondRankRule(),
@@ -2503,6 +2641,7 @@ class VotingInvestigator:
                 soft_stats = _distribution_statistics(soft_distribution)
                 adaptive_metrics = adaptive_voting.state_metrics(tuple(states))
                 adaptive_prediction = self._distribution_prediction(adaptive_metrics["probs"])
+                adaptive_model_index = adaptive_voting.last_selected_model_index
                 for model_row in model_rows:
                     model_row["soft_divergence"] = _jensen_shannon_divergence(
                         model_row["distribution"], soft_distribution
@@ -2559,6 +2698,12 @@ class VotingInvestigator:
                     "soft_correct": soft_prediction == actual,
                     "adaptive_prediction": adaptive_prediction,
                     "adaptive_correct": adaptive_prediction == actual,
+                    "adaptive_model_index": adaptive_model_index,
+                    "adaptive_model": (
+                        model_rows[adaptive_model_index]["name"]
+                        if adaptive_model_index is not None and adaptive_model_index < len(model_rows)
+                        else ""
+                    ),
                     "oracle_prediction": oracle_prediction,
                     "oracle_correct": oracle_prediction == actual,
                     "oracle_model": correct_models[0] if correct_models else "",
@@ -2746,6 +2891,7 @@ def _rule_family(rule_name: str) -> str:
         "nearest calibration": "nearest behavior",
         "stacked rule": "stacked portfolio",
         "delayed-feedback": "adaptive",
+        "complete-miss": "complete-miss recovery",
         "calibrated soft rank": "soft rank",
         "calibrated model rank": "model rank",
         "previous-outcome": "previous outcome",
@@ -3261,6 +3407,7 @@ CORE_RULE_SET = (
     "distribution-shape reliability (support 8)",
     "calibrated probability pool (support 5)",
     "delayed-feedback adaptive (decay 0.94)",
+    "complete-miss state recovery (support 8)",
 )
 ADVANCED_RULE_SET = (
     "consensus hierarchy ≥ 3 (support 3)",

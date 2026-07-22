@@ -570,9 +570,9 @@ Below the threshold:
 
 ## Advanced model-selection rules
 
-The active hypothesis grid contains eight compact, interpretable rules:
+The active hypothesis grid contains nine compact, interpretable rules:
 calibrated distribution blending, confidence/state routing, delayed-feedback
-routing, a guarded second-choice override, a calibration-verified
+routing, complete-miss recovery, a guarded second-choice override, a calibration-verified
 lone-dissenter override, a risk-gated lone-dissenter second-choice override,
 a complexity-contrast exception override, and a transient Bag boost. The
 N-gram multiplier rules remain available for explicit
@@ -591,6 +591,7 @@ or a particular `ngram_N` name.
 | Evidence-weighted distribution mixture (support 12) | Blends every model's probability distribution, weighting models by their calibration evidence in the current structural regime; sparse regimes fall back safely. |
 | Confidence/state reliability (support 5) | Routes to the constituent with the best smoothed calibration reliability for its confidence and learned-state support bands. |
 | Delayed-feedback adaptive (decay 0.94) | Starts from the calibration reliability contexts and updates them after each labeled event, for use on later events in that case. |
+| Complete-miss state recovery (support 8) | After every constituent missed the preceding event, uses the state-calibrated minimum-complexity or adaptive candidate only when it has a positive paired gain over soft voting. |
 | Calibrated soft rank 2 override (support 2) | Uses soft voting's second-ranked activity only in contexts where calibration showed it reliably beats the usual first choice; otherwise retains soft voting. |
 | Calibrated lone-dissenter override (support 2) | Keeps soft voting unless exactly one model opposes a consensus of at least two and its supported, uncertainty-adjusted calibration advantage is positive. |
 | Calibrated lone-dissenter rank 2 override (support 2) | Uses the dissenter's second activity only after an observable failure-risk signal and calibration evidence that it beats soft voting. |

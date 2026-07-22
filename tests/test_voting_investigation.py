@@ -20,6 +20,7 @@ from logicsponge.processmining.voting_investigation import (
     CalibratedLoneDissenterRule,
     CalibratedLoneDissenterSecondRankRule,
     CalibratedSoftRankRule,
+    CompleteMissStateRecoveryRule,
     DecisionRule,
     EvidenceWeightedDistributionRule,
     GlobalAccuracyRule,
@@ -105,6 +106,18 @@ def test_candidate_router_uses_relative_roles_not_model_names() -> None:
     assert rule.name in test_rows[0]["rule_predictions"]
 
 
+def test_complete_miss_recovery_requires_a_complete_previous_ensemble_miss() -> None:
+    investigator = VotingInvestigator(specs=fixed_specs())
+    calibration = investigator.diagnose([[event("c"), event("a")]], split="calibration")
+    test_rows = investigator.diagnose([[event("c"), event("a")]], split="test")
+    rule = CompleteMissStateRecoveryRule(minimum_support=1, confidence_z=0.0)
+
+    evaluate_hypotheses(calibration, test_rows, rules=[rule])
+
+    assert test_rows[0]["rule_models"][rule.name] == "soft voting"
+    assert test_rows[1]["rule_models"][rule.name] != "soft voting"
+
+
 def test_rule_impact_counts_soft_recoveries_and_harms() -> None:
     investigator = VotingInvestigator(specs=fixed_specs())
     calibration = investigator.diagnose([[event("a"), event("a")]], split="calibration")
@@ -147,6 +160,7 @@ def test_compact_interpretable_rules_are_active_and_other_rules_are_archived() -
         "evidence-weighted distribution mixture (support 12)",
         "confidence/state reliability (support 5)",
         "delayed-feedback adaptive (decay 0.94)",
+        "complete-miss state recovery (support 8)",
         "calibrated soft rank 2 override (support 2)",
         "calibrated lone-dissenter override (support 2)",
         "calibrated lone-dissenter rank 2 override (support 2)",
