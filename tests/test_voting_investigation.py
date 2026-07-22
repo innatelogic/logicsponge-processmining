@@ -20,6 +20,7 @@ from logicsponge.processmining.voting_investigation import (
     CalibratedLoneDissenterRule,
     CalibratedLoneDissenterSecondRankRule,
     CalibratedSoftRankRule,
+    CalibratedTransientGeneralistPoolRule,
     CompleteMissStateRecoveryRule,
     DecisionRule,
     EvidenceWeightedDistributionRule,
@@ -87,8 +88,34 @@ def test_hypotheses_fit_on_calibration_and_annotate_test_rows() -> None:
     summaries = evaluate_hypotheses(calibration, test_rows, rules=[GlobalAccuracyRule()])
 
     assert summaries[0]["accuracy"] == 1.0
+    assert summaries[0]["calibration_accuracy"] == 1.0
+    assert summaries[0]["calibration_total"] == len(calibration)
     assert test_rows[0]["rule_models"]["best calibration accuracy"] == "model_a"
     assert test_rows[0]["rule_predictions"]["best calibration accuracy"] == "a"
+
+
+def test_summary_distinguishes_calibration_and_held_out_scores() -> None:
+    specs = fixed_specs()
+    investigator = VotingInvestigator(specs=specs)
+    calibration = investigator.diagnose([[event("a")]], split="calibration")
+    test_rows = investigator.diagnose([[event("b")]], split="test")
+    hypotheses = evaluate_hypotheses(calibration, test_rows, rules=[GlobalAccuracyRule()])
+
+    summary = build_summary(
+        dataset_name="fixture",
+        specs=specs,
+        train_rows=7,
+        calibration_rows=calibration,
+        test_rows=test_rows,
+        hypotheses=hypotheses,
+    )
+
+    soft = next(item for item in summary["strategies"] if item["name"] == "soft voting")
+    assert summary["train_events"] == 7
+    assert soft["calibration_total"] == len(calibration)
+    assert soft["total"] == len(test_rows)
+    assert hypotheses[0]["calibration_total"] == len(calibration)
+    assert hypotheses[0]["total"] == len(test_rows)
 
 
 def test_candidate_router_uses_relative_roles_not_model_names() -> None:
@@ -116,6 +143,17 @@ def test_complete_miss_recovery_requires_a_complete_previous_ensemble_miss() -> 
 
     assert test_rows[0]["rule_models"][rule.name] == "soft voting"
     assert test_rows[1]["rule_models"][rule.name] != "soft voting"
+
+
+def test_calibrated_transient_pool_falls_back_without_positive_selector_evidence() -> None:
+    investigator = VotingInvestigator(specs=fixed_specs())
+    rows = investigator.diagnose([[event("a"), event("a")]], split="calibration")
+    rule = CalibratedTransientGeneralistPoolRule()
+
+    evaluate_hypotheses(rows, rows, rules=[rule])
+
+    assert rule.selected_policy is None
+    assert all(row["rule_predictions"][rule.name] == row["soft_prediction"] for row in rows)
 
 
 def test_rule_impact_counts_soft_recoveries_and_harms() -> None:
@@ -161,6 +199,7 @@ def test_compact_interpretable_rules_are_active_and_other_rules_are_archived() -
         "confidence/state reliability (support 5)",
         "delayed-feedback adaptive (decay 0.94)",
         "complete-miss state recovery (support 8)",
+        "calibrated transient generalist pool",
         "calibrated soft rank 2 override (support 2)",
         "calibrated lone-dissenter override (support 2)",
         "calibrated lone-dissenter rank 2 override (support 2)",
@@ -207,7 +246,7 @@ def test_compact_interpretable_rules_are_active_and_other_rules_are_archived() -
 
     probe = LifecycleRule()
     evaluate_hypotheses(calibration, test_rows, rules=[probe])
-    assert probe.selections == probe.observations == len(test_rows)
+    assert probe.selections == probe.observations == len(calibration) + len(test_rows)
 
 
 def test_previous_error_rule_filters_to_models_correct_on_previous_event() -> None:
@@ -1066,6 +1105,8 @@ def test_saved_results_can_initialize_dashboard(tmp_path: Path) -> None:  # noqa
     assert "Rule-set scenarios" in str(layout)
     assert "Integration methods" in str(layout)
     assert "Headline benchmark results" in str(layout)
+    assert "Data split and generalization check" in str(layout)
+    assert "Calibration (fit data)" in str(layout)
     assert "Hard voting" not in str(layout)
     assert "info-button" in str(layout)
     assert "overview-panel overview-main-panel" in str(layout)

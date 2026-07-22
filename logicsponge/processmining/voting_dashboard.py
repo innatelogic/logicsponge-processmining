@@ -208,7 +208,13 @@ def load_results(results_dir: Path) -> tuple[dict[str, Any], list[dict[str, Any]
     # Rebuild the two active rules and their independent multiplier stack from
     # persisted event diagnostics. This migrates former routing/calibration
     # results without retraining models or fitting on held-out labels.
+    persisted_hypotheses = {item["name"]: item for item in summary.get("hypotheses", [])}
     summary["hypotheses"] = evaluate_hypotheses([], rows, rules=default_hypotheses())
+    for hypothesis in summary["hypotheses"]:
+        persisted = persisted_hypotheses.get(hypothesis["name"], {})
+        for field in ("calibration_accuracy", "calibration_correct", "calibration_total"):
+            if field in persisted:
+                hypothesis[field] = persisted[field]
     integrations = evaluate_rule_integrations(
         [],
         rows,
@@ -220,10 +226,18 @@ def load_results(results_dir: Path) -> tuple[dict[str, Any], list[dict[str, Any]
         summary["soft_failure_analysis"]["rule_impacts"] = analyze_rule_impacts(rows)
     soft_accuracy = sum(row["soft_correct"] for row in rows) / len(rows) if rows else 0.0
     oracle_accuracy = sum(row["oracle_correct"] for row in rows) / len(rows) if rows else 0.0
-    summary["strategies"] = [
-        {"name": "soft voting", "accuracy": soft_accuracy},
-        {"name": "cheating voting", "accuracy": oracle_accuracy},
-    ]
+    persisted_strategies = {item["name"]: item for item in summary.get("strategies", [])}
+    summary["strategies"] = []
+    for name, accuracy in (("soft voting", soft_accuracy), ("cheating voting", oracle_accuracy)):
+        rebuilt = {"name": name, "accuracy": accuracy}
+        rebuilt.update(
+            {
+                field: persisted_strategies[name][field]
+                for field in ("calibration_accuracy", "calibration_correct", "calibration_total")
+                if field in persisted_strategies.get(name, {})
+            }
+        )
+        summary["strategies"].append(rebuilt)
     summary["rule_scenarios"] = evaluate_rule_scenarios(rows, summary.get("hypotheses", []))
     available_hypotheses = [
         hypothesis
@@ -298,6 +312,61 @@ def _accuracy_figure(summary: dict[str, Any]) -> go.Figure:
         margin={"l": 170, "r": 20, "t": 20, "b": 40},
     )
     figure.update_xaxes(tickformat=".0%", range=[0, 1])
+    return figure
+
+
+def _calibration_generalization_figure(summary: dict[str, Any]) -> go.Figure:
+    """Compare in-sample calibration with held-out test accuracy."""
+    candidates = [*summary.get("strategies", []), *summary.get("per_model", []), *summary.get("hypotheses", [])]
+    rows = [candidate for candidate in candidates if candidate.get("calibration_accuracy") is not None]
+    if not rows:
+        figure = go.Figure()
+        figure.add_annotation(
+            text="This saved run has no calibration scores. Rerun the investigation to compare calibration and test.",
+            showarrow=False,
+        )
+        figure.update_layout(height=260)
+        return figure
+    frame = pd.DataFrame(rows)
+    frame["generalization gap"] = frame["calibration_accuracy"] - frame["accuracy"]
+    frame["kind"] = frame.apply(
+        lambda candidate: "rule" if "family" in candidate and pd.notna(candidate.get("family")) else "baseline/model",
+        axis=1,
+    )
+    figure = go.Figure()
+    for _, candidate in frame.sort_values("generalization gap", ascending=False).iterrows():
+        figure.add_trace(
+            go.Scatter(
+                x=[candidate["accuracy"], candidate["calibration_accuracy"]],
+                y=[candidate["name"], candidate["name"]],
+                mode="lines+markers",
+                line={"color": "#7f8c8d"},
+                marker={"size": 9},
+                showlegend=False,
+                hovertemplate=(
+                    "%{y}<br>test: %{x:.1%}<extra></extra>"
+                    if candidate["accuracy"] == candidate["calibration_accuracy"]
+                    else "%{y}<br>test / calibration: %{x:.1%}<extra></extra>"
+                ),
+            )
+        )
+    figure.add_trace(
+        go.Scatter(
+            x=frame["accuracy"], y=frame["name"], mode="markers", name="Held-out test", marker={"symbol": "circle", "size": 10}
+        )
+    )
+    figure.add_trace(
+        go.Scatter(
+            x=frame["calibration_accuracy"], y=frame["name"], mode="markers", name="Calibration (fit data)", marker={"symbol": "diamond", "size": 10}
+        )
+    )
+    figure.update_layout(
+        height=max(360, 28 * len(frame) + 120),
+        margin={"l": 240, "r": 25, "t": 20, "b": 45},
+        yaxis={"categoryorder": "array", "categoryarray": frame["name"].tolist()},
+        legend={"orientation": "h", "y": 1.05},
+    )
+    figure.update_xaxes(title="Accuracy", tickformat=".0%", range=[0, 1])
     return figure
 
 
@@ -1615,6 +1684,8 @@ def create_dashboard(results_dir: Path) -> Dash:  # noqa: PLR0915
         }
         for result in headline_results
     ]
+    calibration_figure = _calibration_generalization_figure(summary)
+    calibration_height = int(calibration_figure.layout.height or 360)
     scenario_figure = _scenario_figure(summary)
     scenario_height = int(scenario_figure.layout.height or 430)
     scenario_rows = [
@@ -1744,6 +1815,36 @@ def create_dashboard(results_dir: Path) -> Dash:  # noqa: PLR0915
                         label="Overview",
                         children=html.Div(
                             [
+                                html.Section(
+                                    [
+                                        _section_heading(
+                                            "Data split and generalization check",
+                                            "Training events update the constituent process models and are never "
+                                            "reported as an accuracy score. Calibration events fit and select rules; "
+                                            "their score is therefore in-sample. Test events are kept untouched until "
+                                            "the final evaluation. A large calibration-to-test drop is evidence that a "
+                                            "selector may be overfitting its calibration data.",
+                                        ),
+                                        html.P(
+                                            f"{summary['train_events']:,} train events → "
+                                            f"{summary['calibration_events']:,} calibration events → "
+                                            f"{summary['test_events']:,} held-out test events. "
+                                            "Circles are held-out test accuracy; diamonds are calibration accuracy.",
+                                            className="selection-summary",
+                                        ),
+                                        html.Div(
+                                            dcc.Graph(
+                                                figure=calibration_figure,
+                                                config=OVERVIEW_GRAPH_CONFIG,
+                                                style={"height": f"{calibration_height}px"},
+                                                className="analysis-fixed-graph",
+                                            ),
+                                            style={"height": f"{calibration_height}px"},
+                                            className="analysis-graph-frame",
+                                        ),
+                                    ],
+                                    className="analysis-graph-panel",
+                                ),
                                 html.Section(
                                     [
                                         _section_heading(
@@ -2282,8 +2383,17 @@ def create_dashboard(results_dir: Path) -> Dash:  # noqa: PLR0915
             color="family",
             orientation="h",
             text=frame["accuracy"].map(_percent) if not frame.empty else None,
-            hover_data={"description": True, "correct": True, "total": True} if not frame.empty else None,
-            labels={"accuracy": "Accuracy", "name": "Hypothesis", "family": "Family"},
+            hover_data={
+                "description": True,
+                "correct": True,
+                "total": True,
+                "calibration_accuracy": ":.1%",
+                "calibration_correct": True,
+                "calibration_total": True,
+            }
+            if not frame.empty
+            else None,
+            labels={"accuracy": "Held-out test accuracy", "name": "Hypothesis", "family": "Family"},
         )
         figure.update_layout(yaxis={"categoryorder": "total ascending"}, margin={"l": 220, "r": 20})
         figure.update_xaxes(tickformat=".0%", range=[0, 1])
@@ -2294,8 +2404,19 @@ def create_dashboard(results_dir: Path) -> Dash:  # noqa: PLR0915
                 "description": rule.get("description") or _rule_description(rule["name"]),
                 "selection policy": rule.get("selection_policy", ""),
                 "process interpretation": rule.get("interpretation", ""),
-                "accuracy": _percent(rule["accuracy"]),
-                "correct / total": f"{rule['correct']} / {rule['total']}",
+                "calibration accuracy (fit data)": (
+                    _percent(rule["calibration_accuracy"])
+                    if rule.get("calibration_accuracy") is not None
+                    else "not recorded"
+                ),
+                "held-out test accuracy": _percent(rule["accuracy"]),
+                "generalization gap": (
+                    f"{rule['calibration_accuracy'] - rule['accuracy']:+.1%}"
+                    if rule.get("calibration_accuracy") is not None
+                    else "not recorded"
+                ),
+                "calibration correct / total": f"{rule.get('calibration_correct', 0)} / {rule.get('calibration_total', 0)}",
+                "test correct / total": f"{rule['correct']} / {rule['total']}",
                 "selected models": ", ".join(f"{name}: {count}" for name, count in rule["selected_models"].items()),
             }
             for rule in selected

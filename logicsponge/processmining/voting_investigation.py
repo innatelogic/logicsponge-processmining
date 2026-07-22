@@ -1048,6 +1048,106 @@ class CalibratedGeneralizationRecoveryRule(TransientGeneralizationBoostRule):
         return source, prediction
 
 
+class CalibratedTransientGeneralistPoolRule(DecisionRule):
+    """Select a transient generalist-pool policy from an internal case holdout."""
+
+    family = "calibrated recovery"
+    description = (
+        "Selects the trigger, horizon, strength, and decay of a minimum-complexity distribution boost from "
+        "out-of-fit calibration cases."
+    )
+    interpretation = (
+        "Separates a generalist-correct branch from a complete generalist failure: the latter can still signal "
+        "that specialized states are temporarily unreliable, but requires a different recovery schedule."
+    )
+    selection_policy = (
+        "Use only the transient policy whose paired selector-holdout lower bound exceeds a small positive gain; "
+        "otherwise retain soft voting for every event."
+    )
+    policies = tuple(
+        (trigger, horizon, boost, decay)
+        for trigger in ("generalist was correct", "generalist was wrong")
+        for horizon in (1, 2, 3, 4, 5)
+        for boost in (0.5, 1.0, 1.5, 2.0, 3.0)
+        for decay in (0.2, 0.4, 0.6, 1.0)
+    )
+
+    def __init__(self, minimum_lower_bound: float = 0.005, confidence_z: float = 0.5) -> None:
+        self.minimum_lower_bound = minimum_lower_bound
+        self.confidence_z = confidence_z
+        self.name = "calibrated transient generalist pool"
+        self.selected_policy: tuple[str, int, float, float] | None = None
+        self.selected_rule: TransientBagFavoritismRule | None = None
+        self.fitted_parameters: dict[str, Any] = {}
+
+    @staticmethod
+    def _paired_lower_bound(predictions: list[str], rows: list[dict[str, Any]], confidence_z: float) -> tuple[float, float]:
+        outcomes = [
+            int(prediction == row["actual"]) - int(row["soft_correct"])
+            for prediction, row in zip(predictions, rows, strict=True)
+        ]
+        if not outcomes:
+            return float("-inf"), 0.0
+        mean = sum(outcomes) / len(outcomes)
+        variance = sum((outcome - mean) ** 2 for outcome in outcomes) / max(1, len(outcomes) - 1)
+        return mean - confidence_z * math.sqrt(variance / len(outcomes)), mean
+
+    @staticmethod
+    def _rule(policy: tuple[str, int, float, float]) -> TransientBagFavoritismRule:
+        trigger, horizon, boost, decay = policy
+        return TransientBagFavoritismRule(
+            horizon=horizon,
+            per_competing_model_boost=boost,
+            decay=decay,
+            trigger_mode=trigger,
+        )
+
+    def fit(self, rows: list[dict[str, Any]]) -> None:
+        fitting_rows, selector_rows = split_integration_calibration(rows)
+        evidence: list[tuple[float, float, tuple[str, int, float, float]]] = []
+        for policy in self.policies:
+            candidate = self._rule(policy)
+            candidate.fit(fitting_rows)
+            predictions = [candidate.choose(row)[1] for row in selector_rows]
+            lower_bound, mean = self._paired_lower_bound(predictions, selector_rows, self.confidence_z)
+            evidence.append((lower_bound, mean, policy))
+        best = max(evidence, default=(float("-inf"), 0.0, None), key=lambda item: (item[0], item[1]))
+        self.selected_policy = best[2] if best[0] >= self.minimum_lower_bound else None
+        self.selected_rule = self._rule(self.selected_policy) if self.selected_policy is not None else None
+        if self.selected_rule is not None:
+            self.selected_rule.fit(rows)
+        self.fitted_parameters = {
+            "calibrated": True,
+            "selector_events": len(selector_rows),
+            "confidence_z": self.confidence_z,
+            "minimum_lower_bound": self.minimum_lower_bound,
+            "best_selector_lower_bound": best[0],
+            "best_selector_mean_gain": best[1],
+            "selected_policy": (
+                {
+                    "trigger": self.selected_policy[0],
+                    "horizon": self.selected_policy[1],
+                    "per_competing_model_boost": self.selected_policy[2],
+                    "decay": self.selected_policy[3],
+                }
+                if self.selected_policy is not None
+                else None
+            ),
+        }
+
+    def choose(self, row: dict[str, Any]) -> tuple[str, str]:
+        if self.selected_rule is None:
+            row.setdefault("rule_diagnostics", {})[self.name] = {"active": False, "selected_policy": None}
+            return "soft voting", row["soft_prediction"]
+        source, prediction = self.selected_rule.choose(row)
+        underlying = row.get("rule_diagnostics", {}).get(self.selected_rule.name, {})
+        row.setdefault("rule_diagnostics", {})[self.name] = {
+            **underlying,
+            "selected_policy": self.fitted_parameters["selected_policy"],
+        }
+        return source, prediction
+
+
 def _ngram_window(model: dict[str, Any]) -> int | None:
     """Return structural N-gram order, with a compatibility fallback for old result files."""
     if model.get("model_type") == "ngram" and model.get("window_size") is not None:
@@ -2540,6 +2640,7 @@ def default_hypotheses() -> list[DecisionRule]:
         ConfidenceStateReliabilityRule(minimum_support=5),
         DelayedFeedbackAdaptiveRule(minimum_support=2, decay=0.94),
         CompleteMissStateRecoveryRule(minimum_support=8),
+        CalibratedTransientGeneralistPoolRule(),
         CalibratedSoftRankRule(rank=2),
         CalibratedLoneDissenterRule(),
         CalibratedLoneDissenterSecondRankRule(),
@@ -2792,6 +2893,16 @@ def evaluate_hypotheses(
 
     for rule in selected_rules:
         rule.fit(calibration_rows)
+        # This is deliberately an in-sample score: it shows how well the rule
+        # explains the data used to fit its selector.  Re-fit below before the
+        # test pass so feedback-consuming rules start the held-out evaluation
+        # with no state carried over from this diagnostic pass.
+        calibration_correct = 0
+        for row in calibration_rows:
+            model_name, prediction = rule.choose(row)
+            calibration_correct += int(prediction == row["actual"])
+            rule.observe(row, model_name)
+        rule.fit(calibration_rows)
         correct = 0
         selected_counts: Counter[str] = Counter()
         for row in test_rows:
@@ -2813,6 +2924,11 @@ def evaluate_hypotheses(
                 "accuracy": correct / len(test_rows) if test_rows else 0.0,
                 "correct": correct,
                 "total": len(test_rows),
+                "calibration_accuracy": (
+                    calibration_correct / len(calibration_rows) if calibration_rows else None
+                ),
+                "calibration_correct": calibration_correct,
+                "calibration_total": len(calibration_rows),
                 "selected_models": dict(selected_counts),
             }
         )
@@ -2900,6 +3016,7 @@ def _rule_family(rule_name: str) -> str:
         "trimmed probability": "distribution pool",
         "product probability": "distribution pool",
         "calibrated probability": "distribution pool",
+        "calibrated transient generalist": "calibrated recovery",
         "confusion residual": "residual activity",
         "run-cycle residual": "residual activity",
         "state residual": "residual activity",
@@ -3408,6 +3525,7 @@ CORE_RULE_SET = (
     "calibrated probability pool (support 5)",
     "delayed-feedback adaptive (decay 0.94)",
     "complete-miss state recovery (support 8)",
+    "calibrated transient generalist pool",
 )
 ADVANCED_RULE_SET = (
     "consensus hierarchy ≥ 3 (support 3)",
@@ -4563,18 +4681,43 @@ def build_summary(
     selector_calibration_events: int = 0,
 ) -> dict[str, Any]:
     """Build aggregate results and oracle-gap slices for persistence and display."""
+    def scored_strategy(name: str, prediction_key: str) -> dict[str, Any]:
+        calibration_correct = sum(row[prediction_key] == row["actual"] for row in calibration_rows)
+        test_correct = sum(row[prediction_key] == row["actual"] for row in test_rows)
+        return {
+            "name": name,
+            "accuracy": test_correct / len(test_rows) if test_rows else 0.0,
+            "correct": test_correct,
+            "total": len(test_rows),
+            "calibration_accuracy": calibration_correct / len(calibration_rows) if calibration_rows else None,
+            "calibration_correct": calibration_correct,
+            "calibration_total": len(calibration_rows),
+        }
+
     strategies = [
-        {"name": "soft voting", "accuracy": _accuracy(test_rows, "soft_prediction")},
-        {"name": "adaptive voting", "accuracy": _accuracy(test_rows, "adaptive_prediction")},
-        {"name": "cheating voting", "accuracy": _accuracy(test_rows, "oracle_prediction")},
+        scored_strategy("soft voting", "soft_prediction"),
+        scored_strategy("adaptive voting", "adaptive_prediction"),
+        scored_strategy("cheating voting", "oracle_prediction"),
     ]
     per_model = []
     for spec in specs:
         correct = sum(
             next(model["correct"] for model in row["models"] if model["name"] == spec.name) for row in test_rows
         )
+        calibration_correct = sum(
+            next(model["correct"] for model in row["models"] if model["name"] == spec.name)
+            for row in calibration_rows
+        )
         per_model.append(
-            {"name": spec.name, "accuracy": correct / len(test_rows) if test_rows else 0.0, "correct": correct}
+            {
+                "name": spec.name,
+                "accuracy": correct / len(test_rows) if test_rows else 0.0,
+                "correct": correct,
+                "total": len(test_rows),
+                "calibration_accuracy": calibration_correct / len(calibration_rows) if calibration_rows else None,
+                "calibration_correct": calibration_correct,
+                "calibration_total": len(calibration_rows),
+            }
         )
     gap_rows = [row for row in test_rows if row["oracle_gap"]]
     rule_scenarios = evaluate_rule_scenarios(test_rows, hypotheses)
@@ -4699,10 +4842,18 @@ def run_investigation(
     rule_fit_rows, selector_rows = split_integration_calibration(calibration_rows)
     selector_hypotheses = evaluate_hypotheses(rule_fit_rows, selector_rows)
     hypotheses = evaluate_hypotheses(calibration_rows, test_rows)
+    integration_rule_names = [
+        hypothesis["name"]
+        for hypothesis in selector_hypotheses
+        # The transient-policy selector already aggregates a family of 200
+        # schedules.  Giving that aggregate another family vote would double
+        # count the same recovery signal.
+        if hypothesis["name"] != "calibrated transient generalist pool"
+    ]
     selector_integrations = evaluate_archived_rule_integrations(
         selector_rows,
         test_rows,
-        [hypothesis["name"] for hypothesis in selector_hypotheses],
+        integration_rule_names,
     )
     # This is the most conservative meta-policy: it changes the soft leader
     # only when several independent rule families agree and soft voting is
