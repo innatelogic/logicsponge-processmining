@@ -78,7 +78,7 @@ python -m logicsponge.processmining.voting_investigation run [OPTIONS]
 |---|---:|---|
 | `--data` | `Sepsis_Cases` | Dataset name resolved through the repository's dataset utilities. Choose among: Sepsis_Cases, Helpdesk, BPI_Challenge_2012, BPI_Challenge_2013, BPI_Challenge_2014, BPI_Challenge_2017, BPI_Challenge_2018, BPI_Challenge_2019|
 | `--data-prop` | `1.0` | Fraction of grouped cases retained before train/calibration/test shuffling. Must be in `(0, 1]`. |
-| `--windows` | `2,3,4` | Comma-separated N-gram window lengths of at least 2. Bag and FPT are always included; smaller values are rejected so `streak / (window_size - 1)` is defined. |
+| `--windows` | `2,3,4` | Comma-separated N-gram window lengths of at least 2. Bag is always included; smaller values are rejected so `streak / (window_size - 1)` is defined. |
 | `--seed` | `0` | Seed used for deterministic case-level split shuffling. |
 | `--output` | `results/voting-investigation/DATASET/` | Optional exact directory receiving `summary.json` and `events.jsonl`. |
 | `--dashboard` | disabled | Start the dashboard after analysis finishes. |
@@ -152,14 +152,13 @@ Open `http://127.0.0.1:8060` in that case.
 The default model order is significant and deterministic:
 
 1. `bag`;
-2. `fpt`, configured with `min_total_visits=10`;
-3. `ngram_2`;
-4. `ngram_3`;
-5. `ngram_4`.
+2. `ngram_2`;
+3. `ngram_3`;
+4. `ngram_4`.
 
 The N-gram entries change according to `--windows`. For example,
-`--windows 2,4,8` produces `ngram_2`, `ngram_4`, and `ngram_8` after Bag and
-FPT.
+`--windows 2,4,8` produces Bag followed by `ngram_2`, `ngram_4`, and
+`ngram_8`. FPT is not part of the current default family.
 
 Every constituent is trained once on the same ordered training-event stream.
 Soft voting and the oracle baseline are computed from the same trained
@@ -169,7 +168,6 @@ copies of the models.
 The `complexity` value recorded for a model is:
 
 - `0` for Bag;
-- `1` for FPT;
 - the window length for an N-gram.
 
 It is recorded as an input for generalization/complexity hypotheses. The
@@ -217,18 +215,44 @@ Only the 70% training split updates the constituent models. Calibration and
 test diagnostics perform state transitions through each sequence but do not
 update model parameters or frequency tables.
 
-### 5. Rule state and calibration split
+### 5. Calibration, delayed feedback, and nested selection
 
-The active rules use the 15% calibration split only where their name says they
-are calibrated. The two transient Bag boosts have fixed strengths and use only
-outcomes revealed after each prediction. The remaining active rules have
-minimum-support fallbacks, so a sparse local pattern cannot replace their
-global or soft-voting fallback.
+Rules are fitted using calibration cases, never the final test cases. A rule may
+use the previous event's observed activity only after that event has completed;
+it cannot use the label of the event it is currently predicting. This permits
+stateful rules such as delayed-feedback and transient recovery while preserving
+the online prediction order.
 
-This separation is intentional: the deployable combination is an arithmetic
-composition of positive per-model multipliers, not a learned hierarchy of
-rules. Former age/context/blend calibrations and meta-selectors remain archived
-for explicit ablation studies only.
+Most calibrated overrides compare a candidate with soft voting on the same
+calibration rows. Their basic quantity is the paired gain:
+
+```text
+gain = 1(candidate prediction == actual) - 1(soft prediction == actual)
+```
+
+They require adequate support and a positive conservative lower confidence
+bound on mean gain. If either condition is absent, they retain soft voting.
+This is deliberately stricter than choosing the largest raw calibration
+accuracy: a small, lucky context is not allowed to override the baseline.
+
+The transient-generalist pool also searches its trigger, horizon, boost, and
+decay on a nested split of calibration *cases*. Roughly one third of calibration
+sequences (`sequence_index[::3]`) is reserved as selector evidence; the other
+two thirds fit the candidate schedules. A schedule is enabled only when its
+held-out paired lower bound is at least 0.005; otherwise it is inert.
+
+The final smart integration follows the same principle. Constituent rules are
+fit on the two-thirds calibration subset and scored on the reserved sequences.
+Only then is the uncertainty-gated family consensus admitted. Afterwards the
+individual rules are refit on all calibration rows before evaluating the test
+set. The transient-generalist pool is excluded from this family vote because it
+already aggregates many related recovery schedules and would otherwise count
+that same signal twice.
+
+`calibration_accuracy` in a rule summary is an in-sample diagnostic explaining
+the fitted selector; it is not a performance claim. The nested selector rows
+and the final test rows are the safeguards against selecting a meta-policy by
+its apparent fit.
 
 ### 6. Final evaluation
 
@@ -236,8 +260,8 @@ The fitted rules select models for the held-out 15% test split. Test labels are
 used only after selection to score the resulting predictions. Built-in rule
 selection therefore does not use the current test event's true activity.
 
-Only test-event rows are written to `events.jsonl`. Calibration aggregates are
-represented indirectly by the fitted rule behavior and hypothesis summaries.
+Only test-event rows are written to `events.jsonl`. Calibration aggregates and
+the number of reserved selector events are represented in `summary.json`.
 
 ## Exact voting definitions
 
@@ -570,14 +594,14 @@ Below the threshold:
 
 ## Advanced model-selection rules
 
-The active hypothesis grid contains ten compact, interpretable rules:
-calibrated distribution blending, confidence/state routing, delayed-feedback
-routing, complete-miss recovery, a guarded second-choice override, a calibration-verified
-lone-dissenter override, a risk-gated lone-dissenter second-choice override,
-a complexity-contrast exception override, and a transient Bag boost. The
-N-gram multiplier rules remain available for explicit
-experiments but are disabled from the deployed default grid. An event's correctness becomes available only after
-that event is predicted.
+The active hypothesis grid contains thirteen compact, interpretable rules. It tests
+calibrated distribution blending, confidence/state routing, delayed feedback,
+complete-miss recovery, calibrated transient generalist recovery, ranked
+alternatives, contrarian disagreement, complexity contrast, three social-choice
+rank aggregators, and one fixed short-lived generalist boost. The N-gram
+multiplier rules remain available for explicit experiments but are disabled
+from the deployed default grid. An event's correctness becomes available only
+after that event is predicted.
 
 ### Current default rule inventory
 
@@ -597,12 +621,116 @@ or a particular `ngram_N` name.
 | Calibrated lone-dissenter override (support 2) | Keeps soft voting unless exactly one model opposes a consensus of at least two and its supported, uncertainty-adjusted calibration advantage is positive. |
 | Calibrated lone-dissenter rank 2 override (support 2) | Uses the dissenter's second activity only after an observable failure-risk signal and calibration evidence that it beats soft voting. |
 | Complexity-contrast exception override | When every model gives the soft-vote top activity less than 50% probability, systematically discounts lower-complexity models' top activities to surface a stronger alternative. |
+| Borda rank aggregation | Treats models as voters and activities as alternatives; sums tie-aware positional scores over every model probability ranking. |
+| Copeland pairwise rank aggregation | Awards an activity one point for each pairwise majority win over another activity and half a point for a tie. |
+| Maximin pairwise rank aggregation | Selects the activity whose worst pairwise vote margin against any rival is largest. |
 | Transient Bag favoritism after a generalist-correct error | After a soft-voting error that the minimum-complexity model predicted correctly, applies a model-count-scaled multiplier with `1.0` extra weight for every competing constituent, then halves that extra weight on each of the next two events. |
 
 Model identity is necessarily retained as the key under which calibration
 statistics are accumulated. This is not a fixed choice: renaming every model
 consistently and refitting produces the same source role and prediction. The
 test suite checks this invariance across the complete default grid.
+
+### How to read the rules
+
+The rules are probes of different kinds of ensemble complementarity, rather
+than ten independent claims that each model has a universal priority.
+
+| Rule family | What it tests about the ensemble | Safe fallback |
+|---|---|---|
+| Evidence mixture; confidence/state reliability | Whether a model's probability and confidence are trustworthy in this structural regime, rather than globally. | Soft vote or the best supported calibrated evidence. |
+| Delayed-feedback adaptive | Whether recently revealed outcomes indicate a temporary shift in which structural view is reliable. Adaptive voting is a routing signal, not an additional constituent model. | Its calibration reliability routing. |
+| Complete-miss recovery | Whether an event after a total ensemble miss is a regime boundary where the broadest model or the adaptive-selected model has a supported advantage. | Soft vote unless paired gain is positive. |
+| Transient generalist rules | Whether a recent generalist success or failure predicts a short-lived recovery period, and how quickly that signal decays. | No boost when the nested evidence is weak. |
+| Soft-rank and lone-dissenter rules | Whether a correlated majority is masking a useful second probability or a specialist's alternative. | Soft leader unless the alternative has supported gain. |
+| Complexity contrast | Whether models disagree because broad context smooths away a locally discriminative path. | Soft vote when the conflict condition is absent. |
+| Social-choice rank aggregation | Whether rank consensus across model distributions contains signal that probability averaging loses. | Soft probability breaks aggregate-score ties; empty profiles retain soft voting. |
+
+### Social-choice rank aggregation
+
+The theoretical source is Felix Brandt, Vincent Conitzer, and Ulle Endriss,
+“[Computational Social Choice](https://eprints.illc.uva.nl/id/eprint/446/1/PP-2012-04.text.pdf),”
+ILLC Prepublication Series PP-2012-04 (2012).
+
+The paper makes the model-ensemble analogy unusually explicit: combining ranked
+results from several search engines is described as preference aggregation, while
+also warning that modern applications may require classical assumptions to be
+altered (pp. 7-8). Here:
+
+- a constituent process model is a voter;
+- a possible next activity is an alternative;
+- the model's descending probability order is its ballot.
+
+Three deterministic, label-invariant candidates follow:
+
+1. **Borda rank aggregation.** Positional scoring gives an alternative credit
+   for every lower-ranked alternative, and Borda uses the score vector
+   `(m-1, m-2, ..., 0)` (p. 18). Equal model probabilities split positional
+   credit, producing a weak-ranking extension instead of inventing an order.
+2. **Copeland pairwise rank aggregation.** Copeland awards one point for each
+   pairwise majority win and half a point for a pairwise tie (pp. 19-20).
+   A model votes for activity `a` over `b` exactly when `P(a) > P(b)`.
+3. **Maximin pairwise rank aggregation.** Maximin evaluates an alternative by
+   its worst pairwise defeat and prefers the least severe worst case (p. 20).
+   The implementation maximizes the minimum signed model-vote margin.
+
+The paper assumes linear ballots in the formal presentation (p. 18), whereas
+process-model distributions routinely contain ties and omit activities.
+Accordingly, equal probabilities abstain in pairwise contests, and two omitted
+activities are never ordered. All three rules are symmetric in model identity
+and activity identity until a tied aggregate score must be made resolute. That
+final engineering tie is broken by soft-voting probability and then by a stable
+activity label; it is documented in each result's `parameters`.
+
+These are uncalibrated candidate rules: they never read calibration or test
+labels to choose an activity. Their calibration accuracy is still reported as a
+diagnostic comparison, but no parameter is selected from it. The principal
+limitation is correlated voters: neighbouring N-gram orders are nested views,
+not independent opinions. Therefore a positive result is evidence for useful
+rank aggregation in this ensemble, not a claim that the classical voting-rule
+axioms hold literally for process predictors.
+
+N-grams are deliberately not treated as independent votes. Their contexts are
+nested suffixes, so neighbouring orders often make the same error for the same
+reason. Bag is a broad, low-complexity view of activity frequency; it can remain
+useful at sparse or boundary states where longer contexts have insufficient
+support, but it is not globally strongest. Medium N-grams can exploit common
+local pathways; high-order N-grams can surface rare, specific continuations but
+also become sparse. Soft voting reduces variance across these related views,
+yet can bury a correct minority prediction when several correlated N-grams
+agree. The family-consensus integration requires agreement from distinct rule
+families, not merely several variants of the same model signal, precisely to
+avoid mistaking correlation for independent evidence.
+
+### Sepsis interpretation and the WW trace
+
+On the saved full Sepsis run with windows 2–6 and seed 0, soft voting scored
+62.70%, cheating/oracle voting 75.32%, and the uncertainty-gated family
+consensus 64.24% (39 net additional correct events, or 12.23% of the oracle
+gap). These are one split's held-out observations, not a claim of stable
+clinical performance; repeat seeds and, ideally, a temporally separate cohort
+are required before deployment.
+
+The constituent results support the complementarity hypothesis. The best
+single constituent in that split was `ngram_4` (61.00%), while Bag was only
+56.96%; nevertheless, oracle voting shows that some of Bag's low-frequency,
+broad-state predictions repair errors from the more accurate models. Adaptive
+voting alone was 60.36%, so its value is not as a global replacement for soft
+voting. Its current selected constituent can still be useful in the narrowly
+defined post-complete-miss state, which is why the complete-miss rule compares
+both relative candidates on paired calibration gains instead of promoting
+either one universally.
+
+Case `WW` illustrates the distinction. Among four oracle-gap errors in the
+recorded trace, the minimum-complexity model correctly supplied `LacticAcid`
+where soft voting chose `CRP`; adaptive routing supplied `CRP` where soft chose
+`LacticAcid`; and the minimum-complexity model supplied `Leucocytes` and
+`Return ER` where soft chose `Admission NC` and `__stop__`, respectively. The
+complete-miss rule corrects the latter three eligible post-miss cases in that
+trace. It deliberately does **not** force the first: its matching calibration
+state had negative paired evidence (−2 over seven observations). This is the
+central calibration principle: an appealing single-case correction becomes a
+rule only when the same observable situation has a supported positive gain.
 
 ### Archived exploratory rules
 
@@ -1036,44 +1164,17 @@ It additionally requires a positive paired lower confidence bound of at least
 0.5 percentage points on the reserved cases; otherwise it deterministically
 falls back to soft voting.
 
-The independent multiplier stack remains available as a separate integration.
-It begins every constituent at weight `1.0`, reads each rule's
-`model_multipliers`, multiplies independent N-gram modifiers, coalesces
-overlapping Bag recovery windows, and performs one merge of the complete
-constituent distributions:
+The sole active integration is `uncertainty-gated family consensus`. The
+current defaults use a maximum soft margin of `0.30`, require two rule
+families, and require a selector lower bound of at least `0.005`. It is an
+interleaving layer, not a new predictor: it asks whether independently derived
+structural rules agree on an alternative precisely when the soft vote is
+uncertain. If selector evidence is insufficient, it is inert and returns soft
+voting. `best_rule_result` records this defined deployment policy rather than
+retrospectively choosing a test-set winner.
 
-```text
-combined_weight(ngram) = product of that N-gram's active positive multipliers
-combined_weight(bag) = max of overlapping transient Bag multipliers
-prediction = argmax_activity sum_model(
-    combined_weight(model) × model_distribution(activity)
-)
-```
-
-In the default family the target sets are disjoint: the two complementary
-transient variants target the minimum-complexity model on mutually exclusive
-events, while streak favoritism targets structurally identified N-grams. The multiplication rule remains well-defined for custom
-families where target sets overlap. Every accepted multiplier must be at least
-`1.0`; a smaller value raises an error in the distribution helper and is also
-counted by the integration audit.
-
-| Method | Decision mechanism |
-|---|---|
-| Independent Bag + N-gram boost stack | Applies the transient Bag and per-N-gram streak modifiers independently, then merges once. It has no calibration gate, winner selection, branch priority, or negative overlay. |
-
-The stack carries `deployment_priority = true` and is available even when no
-selector-calibration partition can be reserved. `best_rule_result` therefore
-uses this defined deployable policy rather than retrospectively choosing a
-different test winner.
-
-`enforcement_audit` reports Bag-boost events, N-gram-boost events, simultaneous
-events, overlap between the two Bag recovery windows, cross-family target overlap, and
-any attempted multiplier below `1.0`.
-Each event's `integration_diagnostics` stores the exact combined model weights,
-per-rule target sets, and whether all weights are non-decreasing. The
-`independent_boost_contract` summary verifies the minimum-complexity target,
-the stack's deployment status, and repeats this audit. The older
-`adaptive_recovery_contract` key is retained as a schema-compatible alias.
+Earlier multiplier-stack integrations remain archived ablations. They are not
+persisted as active integrations in a normal run.
 
 #### Archived integration methods
 
@@ -1268,14 +1369,14 @@ Top-level fields:
 | `calibration_events` | Calibration-event count including stop events. |
 | `test_events` | Test-event count including stop events. |
 | `run_config` | Data proportion, N-gram windows, and split seed used for the run. |
-| `strategies` | Soft and cheating-voting accuracies. |
+| `strategies` | Soft-voting, adaptive-voting, and cheating/oracle accuracies. |
 | `per_model` | Constituent accuracy and correct-event count. |
 | `hypotheses` | Rules sorted by test accuracy, including description, process interpretation, and model-independent selection policy. |
 | `rule_scenarios` | Fixed rule-set consensus scenarios and diagnostic rule-set ceilings. |
-| `rule_integrations` | The independent boost stack with accuracy, impact, description, parameters, and composition audit. |
+| `rule_integrations` | Active uncertainty-gated family consensus, with accuracy, impact, and selector-gate parameters. |
 | `selector_calibration_events` | Events belonging to complete calibration cases reserved for the nested uncertainty-gated family consensus. |
 | `best_rule_result` | Highest-accuracy deployable individual rule, rule-set scenario, or smart integration. |
-| `independent_boost_contract` | Structural Bag-target checks and counts proving that the active stack used only positive, independently composed modifiers. |
+| `independent_boost_contract` | Legacy schema-compatible integration-audit field; it is not the definition of the current consensus policy. |
 | `recoverable_gap` | Cheating-voting accuracy minus soft-voting accuracy. |
 | `recovered_gap_with_best_rule` | Best candidate accuracy minus soft-voting accuracy. |
 | `recovered_gap_fraction` | Fraction of the soft-to-oracle gap closed by the best candidate. |
@@ -1494,15 +1595,12 @@ can predict an activity that is not any constituent's top-1 prediction.
 
 ### Integration methods tab
 
-This tab shows the independent boost stack against soft voting and the cheating
-baseline. Color represents net events gained or lost relative to soft voting;
-hovering shows the description, recoveries, harms, and recovered gap.
-
-The exact-value table reports the fixed composition parameters and enforcement
-audit alongside accuracy and impact counts. In particular, inspect
-`negative_multiplier_events` and `cross_rule_target_overlap_events`.
-N-gram downweights intentionally produce the former after eligible soft errors;
-cross-rule target overlap remains zero for the default model family.
+This tab shows the active uncertainty-gated family consensus against soft
+voting and the cheating baseline. Color represents net events gained or lost
+relative to soft voting; hovering shows the description, recoveries, harms,
+and recovered gap. Inspect the soft-margin gate, minimum-family requirement,
+and selector lower bound before interpreting a gain as a robust deployment
+improvement.
 
 ### Soft-vote analysis tab
 

@@ -14,20 +14,23 @@ from logicsponge.processmining.voting_dashboard import (
     load_results,
 )
 from logicsponge.processmining.voting_investigation import (
-    CalibratedGeneralizationRecoveryRule,
+    BordaRankAggregationRule,
     CalibratedCandidateRouterRule,
     CalibratedComplexityContrastExceptionRule,
+    CalibratedGeneralizationRecoveryRule,
     CalibratedLoneDissenterRule,
     CalibratedLoneDissenterSecondRankRule,
     CalibratedSoftRankRule,
     CalibratedTransientGeneralistPoolRule,
     CompleteMissStateRecoveryRule,
+    CopelandRankAggregationRule,
     DecisionRule,
     EvidenceWeightedDistributionRule,
     GlobalAccuracyRule,
+    LargestNGramDisagreementMultiplierRule,
+    MaximinRankAggregationRule,
     ModelSpec,
     NGramCorrectStreakBoostRule,
-    LargestNGramDisagreementMultiplierRule,
     PreviousErrorCorrectSetRule,
     StateEvidenceTopologyRule,
     StructuralBranchingEnsembleRule,
@@ -92,6 +95,60 @@ def test_hypotheses_fit_on_calibration_and_annotate_test_rows() -> None:
     assert summaries[0]["calibration_total"] == len(calibration)
     assert test_rows[0]["rule_models"]["best calibration accuracy"] == "model_a"
     assert test_rows[0]["rule_predictions"]["best calibration accuracy"] == "a"
+
+
+def social_choice_row() -> dict[str, object]:
+    """Return three model rankings with ``a`` as the Condorcet winner."""
+    rankings = (
+        ("a", "b", "c"),
+        ("a", "c", "b"),
+        ("b", "c", "a"),
+    )
+    models = []
+    for index, ranking in enumerate(rankings):
+        distribution = dict(zip(ranking, (0.6, 0.3, 0.1), strict=True))
+        models.append(
+            {
+                "index": index,
+                "name": f"model_{index}",
+                "prediction": ranking[0],
+                "distribution": distribution,
+            }
+        )
+    return {
+        "actual": "a",
+        "models": models,
+        "soft_prediction": "b",
+        "soft_distribution": {"a": 0.4, "b": 0.45, "c": 0.15},
+        "rule_diagnostics": {},
+    }
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        BordaRankAggregationRule(),
+        CopelandRankAggregationRule(),
+        MaximinRankAggregationRule(),
+    ],
+)
+def test_social_choice_rank_aggregators_recover_condorcet_winner(rule: DecisionRule) -> None:
+    row = social_choice_row()
+
+    source, prediction = rule.choose(row)
+
+    assert source == rule.name
+    assert prediction == "a"
+    assert row["rule_diagnostics"][rule.name]["active"] is True  # type: ignore[index]
+
+
+def test_pairwise_rank_aggregators_abstain_on_equal_missing_probabilities() -> None:
+    row = social_choice_row()
+    row["models"][0]["distribution"] = {"a": 1.0}  # type: ignore[index]
+
+    for rule in (CopelandRankAggregationRule(), MaximinRankAggregationRule()):
+        _source, prediction = rule.choose(row)
+        assert prediction == "a"
 
 
 def test_summary_distinguishes_calibration_and_held_out_scores() -> None:
@@ -204,6 +261,9 @@ def test_compact_interpretable_rules_are_active_and_other_rules_are_archived() -
         "calibrated lone-dissenter override (support 2)",
         "calibrated lone-dissenter rank 2 override (support 2)",
         "complexity-contrast exception override",
+        "Borda rank aggregation",
+        "Copeland pairwise rank aggregation",
+        "maximin pairwise rank aggregation",
         "transient Bag favoritism after generalist-correct error (3 steps)",
     }
     archived_names = {rule.name for rule in archived_hypotheses()}
@@ -289,7 +349,7 @@ def test_default_generalist_is_uniquely_bag() -> None:
 
     assert minimum_complexity == 0
     assert [(spec.name, spec.complexity) for spec in generalists] == [("bag", 0)]
-    assert [(spec.model_type, spec.window_size) for spec in specs[2:]] == [
+    assert [(spec.model_type, spec.window_size) for spec in specs[1:]] == [
         ("ngram", 2),
         ("ngram", 3),
         ("ngram", 4),
@@ -830,7 +890,8 @@ def test_lone_dissenter_second_choice_uses_calibrated_low_representation_signal(
     diagnostic = row["rule_diagnostics"][rule.name]
     assert diagnostic["active"] is True
     assert diagnostic["risk_signals"] == ["low_representation"]
-    assert diagnostic["decision"] == {"systematic": True}
+    assert diagnostic["decision"]["active"] is True
+    assert diagnostic["decision"]["support"] == 4
 
 
 def test_complexity_contrast_selects_calibrated_high_model_exception() -> None:
@@ -882,8 +943,8 @@ def test_complexity_contrast_selects_calibrated_high_model_exception() -> None:
     assert diagnostic["active"] is True
     assert diagnostic["candidate"]["negative_complexity_weights"]["generalist"] > diagnostic["candidate"]["positive_complexity_weights"]["generalist"]
     assert diagnostic["candidate"]["positive_complexity_weights"]["specialist_4"] > diagnostic["candidate"]["negative_complexity_weights"]["specialist_4"]
-    assert diagnostic["candidate"]["top_three_support"] == 4
-    assert diagnostic["decision"]["support"] == 4
+    assert diagnostic["candidate"]["top_three_support"] == 5
+    assert diagnostic["decision"] == {"systematic": True}
 
 
 def test_only_independent_boost_stack_is_active_and_complex_integrations_are_archived() -> None:
@@ -1055,9 +1116,8 @@ def test_saved_results_can_initialize_dashboard(tmp_path: Path) -> None:  # noqa
     assert loaded_summary["independent_boost_contract"]["independent_stack_present"] is True
     assert loaded_summary["independent_boost_contract"]["negative_multiplier_events"] == 0
     headline_labels = {row["scenario"] for row in _headline_results(loaded_summary)}
-    assert {
-        "Transient Bag favoritism",
-    } <= headline_labels
+    assert "Transient Bag favoritism" not in headline_labels
+    assert "Best individual rule" in headline_labels
     best_sequence_candidate = _best_available_sequence_candidate(loaded_summary, loaded_rows)
     sequence_figure = _sequence_figure(loaded_rows, [spec.name for spec in specs], best_sequence_candidate)
     assert best_sequence_candidate is not None
@@ -1139,7 +1199,14 @@ def test_dataset_named_results_initialize_global_dashboard(tmp_path: Path) -> No
     assert "Global comparison" in rendered
     assert "Per-rule impact across datasets" in rendered
     assert "Selected dataset" in rendered
+    assert "selected-dataset-content" in rendered
+    assert "selected-calibration-chart" in rendered
+    assert "selected-split-summary" in rendered
     assert "Sepsis_Cases" in rendered
     assert "fixture_b" in rendered
     assert "global-dataset-selector" in rendered
     assert "'value': 'Sepsis_Cases'" in rendered
+    assert any("selected-calibration-chart.figure" in output for output in app.callback_map)
+    stylesheet = app.server.test_client().get("/assets/voting_investigation.css").get_data(as_text=True)
+    assert ".selected-dataset-content" in stylesheet
+    assert "overflow-y: auto !important" in stylesheet

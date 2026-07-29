@@ -9,7 +9,7 @@ from typing import Any
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from dash import Dash, Input, Output, callback, dash_table, dcc, html
+from dash import Dash, Input, Output, State, callback, dash_table, dcc, html
 
 from logicsponge.processmining.voting_investigation import (
     ARCHIVED_INTEGRATION_NAMES,
@@ -26,6 +26,27 @@ from logicsponge.processmining.voting_investigation import (
 
 OVERVIEW_GRAPH_CONFIG = {"responsive": True, "displayModeBar": False}
 ARCHIVED_RULE_NAMES = frozenset(rule.name for rule in archived_hypotheses())
+ACTIVE_INTEGRATION_NAMES = frozenset({"uncertainty-gated family consensus"})
+CONDITION_FEATURE_DESCRIPTIONS = {
+    "consensus strength": "Whether the most common constituent top prediction has no majority, a majority, or unanimity.",
+    "agreement count": "How many constituent models share the most common top prediction.",
+    "prediction diversity": "How many distinct non-empty constituent top predictions appear at this event.",
+    "sequence stage": "Relative location in the case: early (first third), middle (second third), or late (final third).",
+    "position bucket 2": "Zero-based event position grouped into consecutive two-event buckets.",
+    "position bucket 5": "Zero-based event position grouped into consecutive five-event buckets.",
+    "prediction topology": "Model predictions encoded by equality pattern, not activity names; equal codes mean the models predicted the same activity.",
+    "state evidence profile": "Training-visit support bands for each constituent's current learned process state, in model order.",
+    "n-gram maturity profile": "For each model, whether the observed prefix is at least as long as that model's complexity/order.",
+    "previous soft correctness": "Whether the preceding soft-voting prediction in the same case was correct. It is unknown at the first event.",
+    "previous wrong model count": "Number of constituent top predictions that were wrong at the preceding event in the same case.",
+    "previous empty prediction count": "Number of constituents that had no top prediction at the preceding event in the same case.",
+    "current empty prediction count": "Number of constituents that have no current top prediction.",
+    "soft margin bin": "Bin for the soft vote's top-probability minus second-probability gap; smaller means a less decisive soft prediction.",
+    "soft entropy bin": "Bin for normalized entropy of the soft distribution; larger means probability is spread across more activities.",
+    "model confidence spread bin": "Bin for the range between the highest and lowest constituent top-prediction confidences.",
+    "consensus model set": "The constituent models whose top prediction equals the consensus prediction.",
+    "soft-disagreement model set": "The constituent models whose top prediction differs from soft voting's top prediction.",
+}
 RULE_DESCRIPTIONS = {
     "transient Bag favoritism": (
         "After a soft-vote error that Bag got right, applies a three-step positive, decaying multiplier only to "
@@ -78,6 +99,16 @@ RULE_DESCRIPTIONS = {
     "calibrated probability": (
         "Chooses among soft, median, trimmed-mean, and product pooling according to a calibration-learned "
         "distribution regime."
+    ),
+    "Borda rank aggregation": (
+        "Treats models as voters, activities as alternatives, and aggregates their probability orderings with "
+        "tie-aware positional Borda scores."
+    ),
+    "Copeland pairwise rank aggregation": (
+        "Scores activities by pairwise majority wins across constituent model rankings, with half a point for ties."
+    ),
+    "maximin pairwise rank aggregation": (
+        "Selects the activity whose worst pairwise majority margin across model rankings is strongest."
     ),
     "confusion residual": (
         "Corrects recurring soft-prediction/activity confusion pairs only in supported suffix, transition, and "
@@ -132,14 +163,37 @@ DASHBOARD_EXPLANATIONS = {
         "gain, or gain adjusted by support."
     ),
     "integration": (
-        "The active integration multiplies independent strictly positive Bag and N-gram modifiers, then merges all model "
-        "distributions once. It has no calibration selector or rule priority."
+        "The active integration retains soft voting unless it is uncertain and at least two distinct rule families agree "
+        "on an alternative with positive held-out selector evidence."
     ),
     "headline": (
         "This table puts the main baselines, best individual rule, deployable combinations, and diagnostic ceilings "
         "in one place. Oracle rows use the true label only to measure remaining opportunity."
     ),
 }
+
+
+def _condition_feature_description(feature: str) -> str:
+    """Explain an activity-invariant condition feature, including per-model variants."""
+    if feature in CONDITION_FEATURE_DESCRIPTIONS:
+        return CONDITION_FEATURE_DESCRIPTIONS[feature]
+    if feature.endswith(" vs soft"):
+        return "Whether this constituent's top prediction agrees with soft voting's current top prediction."
+    if feature.endswith(" vs consensus"):
+        return "Whether this constituent's top prediction agrees with the most common constituent top prediction."
+    if feature.endswith(" process state"):
+        return "The constituent's learned process state for the current prefix; it is a model state, not an activity label."
+    if feature.endswith(" state support"):
+        return "Training-visit support band for this constituent's current learned process state."
+    if feature.endswith(" support rank"):
+        return "This constituent's relative rank by current-state training support within the ensemble."
+    if feature.endswith(" confidence rank"):
+        return "This constituent's relative rank by its top-prediction confidence within the ensemble."
+    if feature.endswith(" entropy rank"):
+        return "This constituent's relative rank by normalized distribution entropy within the ensemble."
+    if feature.endswith(" soft-prediction rank"):
+        return "The rank at which this constituent places the activity selected by soft voting."
+    return "Activity-invariant feature extracted from the observable ensemble state at prediction time."
 
 
 def _rule_description(name: str) -> str:
@@ -167,7 +221,7 @@ def _hide_archived_results(summary: dict[str, Any], rows: list[dict[str, Any]] |
     summary["rule_integrations"] = [
         integration
         for integration in summary.get("rule_integrations", [])
-        if integration["name"] not in ARCHIVED_INTEGRATION_NAMES
+        if integration["name"] not in ARCHIVED_INTEGRATION_NAMES or integration["name"] in ACTIVE_INTEGRATION_NAMES
     ]
     soft_analysis = summary.get("soft_failure_analysis")
     if soft_analysis:
@@ -180,13 +234,22 @@ def _hide_archived_results(summary: dict[str, Any], rows: list[dict[str, Any]] |
         row["integration_predictions"] = {
             name: value
             for name, value in row.get("integration_predictions", {}).items()
-            if name not in ARCHIVED_INTEGRATION_NAMES
+            if name not in ARCHIVED_INTEGRATION_NAMES or name in ACTIVE_INTEGRATION_NAMES
         }
         row["integration_diagnostics"] = {
             name: value
             for name, value in row.get("integration_diagnostics", {}).items()
-            if name not in ARCHIVED_INTEGRATION_NAMES
+            if name not in ARCHIVED_INTEGRATION_NAMES or name in ACTIVE_INTEGRATION_NAMES
         }
+
+
+def _restore_calibration_scores(rebuilt: list[dict[str, Any]], persisted: list[dict[str, Any]]) -> None:
+    """Keep calibration scores when test-only event data is rebuilt for the dashboard."""
+    stored_by_name = {item["name"]: item for item in persisted}
+    fields = ("calibration_accuracy", "calibration_correct", "calibration_total")
+    for candidate in rebuilt:
+        stored = stored_by_name.get(candidate["name"], {})
+        candidate.update({field: stored[field] for field in fields if field in stored})
 
 
 def load_results(results_dir: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -205,39 +268,37 @@ def load_results(results_dir: Path) -> tuple[dict[str, Any], list[dict[str, Any]
         row["oracle_prediction"] = row["actual"] if row["correct_models"] else row["soft_prediction"]
         row["oracle_correct"] = row["oracle_prediction"] == row["actual"]
         row["oracle_gap"] = row["oracle_correct"] and not row["soft_correct"]
-    # Rebuild the two active rules and their independent multiplier stack from
-    # persisted event diagnostics. This migrates former routing/calibration
-    # results without retraining models or fitting on held-out labels.
-    persisted_hypotheses = {item["name"]: item for item in summary.get("hypotheses", [])}
-    summary["hypotheses"] = evaluate_hypotheses([], rows, rules=default_hypotheses())
-    for hypothesis in summary["hypotheses"]:
-        persisted = persisted_hypotheses.get(hypothesis["name"], {})
-        for field in ("calibration_accuracy", "calibration_correct", "calibration_total"):
-            if field in persisted:
-                hypothesis[field] = persisted[field]
-    integrations = evaluate_rule_integrations(
-        [],
-        rows,
-        [hypothesis["name"] for hypothesis in summary["hypotheses"]],
-    )
-    summary["rule_integrations"] = integrations
+    # Current result files already persist the calibrated rule and integration
+    # predictions.  Preserve them: recomputing an integration from test rows
+    # would replace its nested selector policy with a different, uncalibrated
+    # policy and make the displayed recovered gap incorrect.  The fallback is
+    # only for legacy files that have no persisted hypotheses at all.
+    persisted_hypotheses = summary.get("hypotheses", [])
+    if not persisted_hypotheses:
+        summary["hypotheses"] = evaluate_hypotheses([], rows, rules=default_hypotheses())
+    else:
+        summary["hypotheses"] = persisted_hypotheses
+    integrations = summary.get("rule_integrations", [])
+    if not integrations:
+        # Legacy result files did not persist an active integration.  Retain
+        # the previous compatibility reconstruction only for those files.
+        integrations = evaluate_rule_integrations(
+            [],
+            rows,
+            [hypothesis["name"] for hypothesis in summary["hypotheses"]],
+        )
+        summary["rule_integrations"] = integrations
     mandatory = next((item for item in integrations if item.get("deployment_priority")), None)
     if summary.get("soft_failure_analysis") is not None:
         summary["soft_failure_analysis"]["rule_impacts"] = analyze_rule_impacts(rows)
     soft_accuracy = sum(row["soft_correct"] for row in rows) / len(rows) if rows else 0.0
     oracle_accuracy = sum(row["oracle_correct"] for row in rows) / len(rows) if rows else 0.0
-    persisted_strategies = {item["name"]: item for item in summary.get("strategies", [])}
-    summary["strategies"] = []
-    for name, accuracy in (("soft voting", soft_accuracy), ("cheating voting", oracle_accuracy)):
-        rebuilt = {"name": name, "accuracy": accuracy}
-        rebuilt.update(
-            {
-                field: persisted_strategies[name][field]
-                for field in ("calibration_accuracy", "calibration_correct", "calibration_total")
-                if field in persisted_strategies.get(name, {})
-            }
-        )
-        summary["strategies"].append(rebuilt)
+    persisted_strategies = summary.get("strategies", [])
+    summary["strategies"] = [
+        {"name": "soft voting", "accuracy": soft_accuracy},
+        {"name": "cheating voting", "accuracy": oracle_accuracy},
+    ]
+    _restore_calibration_scores(summary["strategies"], persisted_strategies)
     summary["rule_scenarios"] = evaluate_rule_scenarios(rows, summary.get("hypotheses", []))
     available_hypotheses = [
         hypothesis
@@ -352,12 +413,20 @@ def _calibration_generalization_figure(summary: dict[str, Any]) -> go.Figure:
         )
     figure.add_trace(
         go.Scatter(
-            x=frame["accuracy"], y=frame["name"], mode="markers", name="Held-out test", marker={"symbol": "circle", "size": 10}
+            x=frame["accuracy"],
+            y=frame["name"],
+            mode="markers",
+            name="Held-out test",
+            marker={"symbol": "circle", "size": 10},
         )
     )
     figure.add_trace(
         go.Scatter(
-            x=frame["calibration_accuracy"], y=frame["name"], mode="markers", name="Calibration (fit data)", marker={"symbol": "diamond", "size": 10}
+            x=frame["calibration_accuracy"],
+            y=frame["name"],
+            mode="markers",
+            name="Calibration (fit data)",
+            marker={"symbol": "diamond", "size": 10},
         )
     )
     figure.update_layout(
@@ -479,15 +548,6 @@ def _headline_results(summary: dict[str, Any]) -> list[dict[str, Any]]:
     integrations = summary.get("rule_integrations", [])
     scenarios = summary.get("rule_scenarios", [])
     selected: list[tuple[str, str, dict[str, Any]]] = [("Soft voting", "baseline", soft)]
-    comparison_labels = {
-        "transient Bag favoritism after generalist-correct error (3 steps)": "Transient Bag favoritism",
-        "ngram correctness-streak multiplier": "N-gram streak multiplier",
-        "largest N-gram disagreement multiplier": "Largest N-gram disagreement multiplier",
-    }
-    hypotheses_by_name = {item["name"]: item for item in hypotheses}
-    for name, label in comparison_labels.items():
-        if name in hypotheses_by_name:
-            selected.append((label, "individual boost", hypotheses_by_name[name]))
     if hypotheses:
         selected.append(("Best individual rule", "deployable", max(hypotheses, key=lambda item: item["accuracy"])))
     if integrations:
@@ -610,6 +670,20 @@ def _condition_table_rows(conditions: list[dict[str, Any]]) -> list[dict[str, An
             "harms": condition["harms"],
             "net improvement": condition["net_correct"],
             "helpful when decisive": _percent(condition["decisive_precision"]),
+        }
+        for condition in conditions
+    ]
+
+
+def _condition_tooltips(conditions: list[dict[str, Any]]) -> list[dict[str, dict[str, str]]]:
+    """Provide hover help for each data-mined condition row."""
+    return [
+        {
+            "when feature": {"value": _condition_feature_description(condition["feature"]), "type": "markdown"},
+            "has value": {
+                "value": "Observed category or bin for this feature. Click the row to keep its explanation visible below.",
+                "type": "markdown",
+            },
         }
         for condition in conditions
     ]
@@ -1267,6 +1341,21 @@ def create_comparison_dashboard(results_root: Path, result_sets: dict[str, Path]
                                 html.Section(
                                     [
                                         _section_heading(
+                                            "Data split and generalization check",
+                                            "Training events fit the constituent models. Calibration events fit and "
+                                            "select candidate rules. Held-out test events provide the final accuracy. "
+                                            "A large calibration-to-test drop flags possible overfitting.",
+                                        ),
+                                        html.P(id="selected-split-summary", className="selection-summary"),
+                                        dcc.Graph(
+                                            id="selected-calibration-chart",
+                                            config=OVERVIEW_GRAPH_CONFIG,
+                                        ),
+                                    ]
+                                ),
+                                html.Section(
+                                    [
+                                        _section_heading(
                                             "Headline benchmark results",
                                             DASHBOARD_EXPLANATIONS["headline"],
                                         ),
@@ -1302,7 +1391,7 @@ def create_comparison_dashboard(results_root: Path, result_sets: dict[str, Path]
                                     ]
                                 ),
                             ],
-                            className="tab-content",
+                            className="tab-content selected-dataset-content",
                         ),
                     ),
                     dcc.Tab(
@@ -1412,6 +1501,10 @@ def create_comparison_dashboard(results_root: Path, result_sets: dict[str, Path]
                                                                 },
                                                                 style_table={"overflowX": "auto"},
                                                             ),
+                                                            html.P(
+                                                                id="detail-condition-explanation",
+                                                                className="selection-summary condition-explanation",
+                                                            ),
                                                         ]
                                                     )
                                                 ],
@@ -1452,13 +1545,16 @@ def create_comparison_dashboard(results_root: Path, result_sets: dict[str, Path]
                             className="tab-content soft-analysis",
                         ),
                     ),
-                ]
+                ],
+                parent_className="dashboard-tabs",
             ),
         ],
     )
 
     @app.callback(
         Output("selected-dataset-config", "children"),
+        Output("selected-split-summary", "children"),
+        Output("selected-calibration-chart", "figure"),
         Output("selected-headline-chart", "figure"),
         Output("selected-headline-table", "data"),
         Output("selected-headline-table", "columns"),
@@ -1504,6 +1600,13 @@ def create_comparison_dashboard(results_root: Path, result_sets: dict[str, Path]
         )
         return (
             config_text,
+            (
+                f"{summary.get('train_events', 0):,} train events → "
+                f"{summary.get('calibration_events', 0):,} calibration events → "
+                f"{summary.get('test_events', 0):,} held-out test events. "
+                "Diamonds show calibration accuracy; circles show test accuracy."
+            ),
+            _calibration_generalization_figure(summary),
             _headline_figure(headline),
             headline_table,
             [{"name": column, "id": column} for column in headline_table[0]] if headline_table else [],
@@ -1531,6 +1634,7 @@ def create_comparison_dashboard(results_root: Path, result_sets: dict[str, Path]
         Output("detail-rule-impact-table", "columns"),
         Output("detail-condition-table", "data"),
         Output("detail-condition-table", "columns"),
+        Output("detail-condition-table", "tooltip_data"),
         Output("detail-soft-failure-table", "data"),
         Output("detail-soft-failure-table", "columns"),
         Input("global-dataset-selector", "value"),
@@ -1589,9 +1693,26 @@ def create_comparison_dashboard(results_root: Path, result_sets: dict[str, Path]
             [{"name": column, "id": column} for column in impact_rows[0]] if impact_rows else [],
             condition_rows,
             [{"name": column, "id": column} for column in condition_rows[0]] if condition_rows else [],
+            _condition_tooltips(conditions),
             failure_rows,
             [{"name": column, "id": column} for column in failure_rows[0]] if failure_rows else [],
         )
+
+    @app.callback(
+        Output("detail-condition-explanation", "children"),
+        Input("detail-condition-table", "active_cell"),
+        State("detail-condition-table", "data"),
+    )
+    def explain_selected_condition(active_cell: dict[str, Any] | None, data: list[dict[str, Any]] | None) -> str:
+        """Keep a clicked condition's meaning visible in addition to cell hover help."""
+        if not active_cell or not data:
+            return "Hover a feature for a definition, or click a condition row to keep its explanation here."
+        row_index = active_cell.get("row")
+        if not isinstance(row_index, int) or not 0 <= row_index < len(data):
+            return "Hover a feature for a definition, or click a condition row to keep its explanation here."
+        feature = str(data[row_index].get("when feature", ""))
+        value = str(data[row_index].get("has value", ""))
+        return f"{feature} = {value}: {_condition_feature_description(feature)}"
 
     @app.callback(
         Output("detail-sequence-timeline", "figure"),
@@ -2415,7 +2536,9 @@ def create_dashboard(results_dir: Path) -> Dash:  # noqa: PLR0915
                     if rule.get("calibration_accuracy") is not None
                     else "not recorded"
                 ),
-                "calibration correct / total": f"{rule.get('calibration_correct', 0)} / {rule.get('calibration_total', 0)}",
+                "calibration correct / total": (
+                    f"{rule.get('calibration_correct', 0)} / {rule.get('calibration_total', 0)}"
+                ),
                 "test correct / total": f"{rule['correct']} / {rule['total']}",
                 "selected models": ", ".join(f"{name}: {count}" for name, count in rule["selected_models"].items()),
             }

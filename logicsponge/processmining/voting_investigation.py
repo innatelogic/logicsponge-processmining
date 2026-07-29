@@ -1851,8 +1851,14 @@ class CalibratedComplexityContrastExceptionRule(DecisionRule):
         negative_total = sum(negative_weights.values())
         low_distribution: defaultdict[str, float] = defaultdict(float)
         for model in models:
+            confidence = float(
+                model.get(
+                    "confidence",
+                    model["ranked_predictions"][0]["probability"] if model.get("ranked_predictions") else 0.0,
+                )
+            )
             low_distribution[model["prediction"]] += (
-                negative_weights[model["name"]] * float(model["confidence"]) / negative_total
+                negative_weights[model["name"]] * confidence / negative_total
             )
         high_consensus_probability = high_distribution.get(consensus, 0.0)
         consensus_contrast = high_consensus_probability - low_distribution.get(consensus, 0.0)
@@ -2010,6 +2016,206 @@ class DistributionPoolRule(DecisionRule):
     def choose(self, row: dict[str, Any]) -> tuple[str, str]:
         distribution = _pooled_distribution(row, self.mode)
         prediction = max(distribution, key=distribution.get, default="")  # type: ignore[arg-type]
+        return self.name, prediction
+
+
+def _rank_aggregation_activities(row: dict[str, Any]) -> list[str]:
+    """Return every activity ranked by at least one constituent model."""
+    return sorted(
+        set(row.get("soft_distribution", {}))
+        | {
+            activity
+            for model in row["models"]
+            for activity in model.get("distribution", {})
+        }
+    )
+
+
+def _rank_aggregation_winner(
+    row: dict[str, Any],
+    scores: dict[str, float],
+) -> str:
+    """Resolve an aggregate-score tie with soft probability, then stable lexical order."""
+    if not scores:
+        return row["soft_prediction"]
+    return min(
+        scores,
+        key=lambda activity: (
+            -scores[activity],
+            -float(row.get("soft_distribution", {}).get(activity, 0.0)),
+            activity != row["soft_prediction"],
+            activity,
+        ),
+    )
+
+
+def _pairwise_model_preferences(
+    row: dict[str, Any],
+    activities: list[str],
+) -> dict[tuple[str, str], int]:
+    """
+    Count strict constituent-model preferences between every activity pair.
+
+    Equal probabilities, including two absent activities, are treated as an
+    abstention. This adapts the paper's linear ballots to the weak rankings
+    naturally produced by probability distributions without inventing an order.
+    """
+    preferences: Counter[tuple[str, str]] = Counter()
+    for model in row["models"]:
+        distribution = model.get("distribution", {})
+        for left_index, left in enumerate(activities):
+            for right in activities[left_index + 1 :]:
+                left_probability = float(distribution.get(left, 0.0))
+                right_probability = float(distribution.get(right, 0.0))
+                if left_probability > right_probability:
+                    preferences[left, right] += 1
+                elif right_probability > left_probability:
+                    preferences[right, left] += 1
+    return dict(preferences)
+
+
+class BordaRankAggregationRule(DecisionRule):
+    """Aggregate constituent probability rankings with a tie-aware Borda score."""
+
+    name = "Borda rank aggregation"
+    family = "social-choice rank aggregation"
+    description = (
+        "Treats constituent models as voters and activities as alternatives, then sums positional Borda scores."
+    )
+    interpretation = (
+        "Tests whether consistently high activity ranks contain useful evidence that equal-weight probability "
+        "averaging loses."
+    )
+    selection_policy = (
+        "Give each activity one point per strictly lower-ranked alternative and half a point per tied alternative "
+        "within every model; choose the largest total."
+    )
+    def __init__(self) -> None:
+        self.fitted_parameters = {
+            "calibrated": False,
+            "source": "Brandt, Conitzer, and Endriss (2012), pp. 7-8 and 18",
+            "weak_ranking_adaptation": "equal probabilities split positional credit",
+            "tie_break": "soft-voting probability, then stable activity label",
+        }
+
+    def choose(self, row: dict[str, Any]) -> tuple[str, str]:
+        activities = _rank_aggregation_activities(row)
+        scores = dict.fromkeys(activities, 0.0)
+        for model in row["models"]:
+            distribution = model.get("distribution", {})
+            for activity in activities:
+                probability = float(distribution.get(activity, 0.0))
+                scores[activity] += sum(
+                    1.0
+                    if probability > float(distribution.get(other, 0.0))
+                    else 0.5
+                    if probability == float(distribution.get(other, 0.0))
+                    else 0.0
+                    for other in activities
+                    if other != activity
+                )
+        prediction = _rank_aggregation_winner(row, scores)
+        row.setdefault("rule_diagnostics", {})[self.name] = {
+            "active": prediction != row["soft_prediction"],
+            "winner": prediction,
+            "top_scores": sorted(scores.items(), key=lambda item: (-item[1], item[0]))[:5],
+        }
+        return self.name, prediction
+
+
+class CopelandRankAggregationRule(DecisionRule):
+    """Choose the activity with the strongest pairwise-majority record."""
+
+    name = "Copeland pairwise rank aggregation"
+    family = "social-choice rank aggregation"
+    description = (
+        "Treats constituent models as voters and scores each activity by pairwise majority wins plus half-points "
+        "for ties."
+    )
+    interpretation = (
+        "Tests whether an activity supported across direct rank comparisons is more reliable than the soft-vote leader."
+    )
+    selection_policy = (
+        "For every activity pair, count models assigning higher probability to each side; award one point for a "
+        "pairwise win and half a point for a tie."
+    )
+    def __init__(self) -> None:
+        self.fitted_parameters = {
+            "calibrated": False,
+            "source": "Brandt, Conitzer, and Endriss (2012), pp. 19-20",
+            "weak_ranking_adaptation": "equal probabilities abstain in that pairwise contest",
+            "tie_break": "soft-voting probability, then stable activity label",
+        }
+
+    def choose(self, row: dict[str, Any]) -> tuple[str, str]:
+        activities = _rank_aggregation_activities(row)
+        preferences = _pairwise_model_preferences(row, activities)
+        scores = dict.fromkeys(activities, 0.0)
+        for left_index, left in enumerate(activities):
+            for right in activities[left_index + 1 :]:
+                left_support = preferences.get((left, right), 0)
+                right_support = preferences.get((right, left), 0)
+                if left_support > right_support:
+                    scores[left] += 1.0
+                elif right_support > left_support:
+                    scores[right] += 1.0
+                else:
+                    scores[left] += 0.5
+                    scores[right] += 0.5
+        prediction = _rank_aggregation_winner(row, scores)
+        row.setdefault("rule_diagnostics", {})[self.name] = {
+            "active": prediction != row["soft_prediction"],
+            "winner": prediction,
+            "top_scores": sorted(scores.items(), key=lambda item: (-item[1], item[0]))[:5],
+        }
+        return self.name, prediction
+
+
+class MaximinRankAggregationRule(DecisionRule):
+    """Choose the activity with the best worst pairwise-majority margin."""
+
+    name = "maximin pairwise rank aggregation"
+    family = "social-choice rank aggregation"
+    description = (
+        "Treats constituent models as voters and maximizes each activity's worst pairwise support margin."
+    )
+    interpretation = (
+        "Tests a conservative rank consensus: the selected activity is the one least exposed to a strong pairwise "
+        "defeat."
+    )
+    selection_policy = (
+        "For each activity, compute its vote margin against every rival and choose the activity with the largest "
+        "worst-case margin."
+    )
+    def __init__(self) -> None:
+        self.fitted_parameters = {
+            "calibrated": False,
+            "source": "Brandt, Conitzer, and Endriss (2012), p. 20",
+            "weak_ranking_adaptation": "equal probabilities abstain in that pairwise contest",
+            "tie_break": "soft-voting probability, then stable activity label",
+        }
+
+    def choose(self, row: dict[str, Any]) -> tuple[str, str]:
+        activities = _rank_aggregation_activities(row)
+        preferences = _pairwise_model_preferences(row, activities)
+        scores = {
+            activity: min(
+                (
+                    preferences.get((activity, other), 0)
+                    - preferences.get((other, activity), 0)
+                    for other in activities
+                    if other != activity
+                ),
+                default=0,
+            )
+            for activity in activities
+        }
+        prediction = _rank_aggregation_winner(row, scores)
+        row.setdefault("rule_diagnostics", {})[self.name] = {
+            "active": prediction != row["soft_prediction"],
+            "winner": prediction,
+            "top_scores": sorted(scores.items(), key=lambda item: (-item[1], item[0]))[:5],
+        }
         return self.name, prediction
 
 
@@ -2645,6 +2851,9 @@ def default_hypotheses() -> list[DecisionRule]:
         CalibratedLoneDissenterRule(),
         CalibratedLoneDissenterSecondRankRule(),
         CalibratedComplexityContrastExceptionRule(),
+        BordaRankAggregationRule(),
+        CopelandRankAggregationRule(),
+        MaximinRankAggregationRule(),
         TransientBagFavoritismRule(per_competing_model_boost=3.0),
     ]
 
@@ -3016,6 +3225,9 @@ def _rule_family(rule_name: str) -> str:
         "trimmed probability": "distribution pool",
         "product probability": "distribution pool",
         "calibrated probability": "distribution pool",
+        "Borda rank": "social-choice rank aggregation",
+        "Copeland pairwise": "social-choice rank aggregation",
+        "maximin pairwise": "social-choice rank aggregation",
         "calibrated transient generalist": "calibrated recovery",
         "confusion residual": "residual activity",
         "run-cycle residual": "residual activity",
@@ -4739,7 +4951,7 @@ def build_summary(
         row["best_deployable_method"] = best_candidate_name
         row["best_deployable_prediction"] = best_prediction
     soft_accuracy = strategies[0]["accuracy"]
-    oracle_accuracy = strategies[1]["accuracy"]
+    oracle_accuracy = strategies[2]["accuracy"]
     recoverable_gap = oracle_accuracy - soft_accuracy
     recovered_accuracy = max(0.0, best_candidate["accuracy"] - soft_accuracy) if best_candidate else 0.0
     minimum_complexity = min((spec.complexity for spec in specs), default=None)
