@@ -2077,7 +2077,7 @@ def _pairwise_model_preferences(
 class BordaRankAggregationRule(DecisionRule):
     """Aggregate constituent probability rankings with a tie-aware Borda score."""
 
-    name = "Borda rank aggregation"
+    name = "Borda positional rank aggregation"
     family = "social-choice rank aggregation"
     description = (
         "Treats constituent models as voters and activities as alternatives, then sums positional Borda scores."
@@ -2174,7 +2174,7 @@ class CopelandRankAggregationRule(DecisionRule):
 class MaximinRankAggregationRule(DecisionRule):
     """Choose the activity with the best worst pairwise-majority margin."""
 
-    name = "maximin pairwise rank aggregation"
+    name = "Maximin pairwise rank aggregation"
     family = "social-choice rank aggregation"
     description = (
         "Treats constituent models as voters and maximizes each activity's worst pairwise support margin."
@@ -3225,9 +3225,9 @@ def _rule_family(rule_name: str) -> str:
         "trimmed probability": "distribution pool",
         "product probability": "distribution pool",
         "calibrated probability": "distribution pool",
-        "Borda rank": "social-choice rank aggregation",
+        "Borda positional": "social-choice rank aggregation",
         "Copeland pairwise": "social-choice rank aggregation",
-        "maximin pairwise": "social-choice rank aggregation",
+        "Maximin pairwise": "social-choice rank aggregation",
         "calibrated transient generalist": "calibrated recovery",
         "confusion residual": "residual activity",
         "run-cycle residual": "residual activity",

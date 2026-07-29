@@ -66,6 +66,45 @@ python -m logicsponge.processmining.voting_investigation run \
   --dashboard
 ```
 
+### Regenerate the social-choice experiments and launch
+
+Saved summaries contain only the rules that existed when they were produced.
+Therefore an older cross-dataset result root will not show Borda, Copeland, or
+maximin with valid calibration scores.
+
+Run the combined regeneration and launch script:
+
+```bash
+uv run python examples/regenerate_and_launch_voting_dashboard.py
+```
+
+By default it regenerates full-data Sepsis Cases, Helpdesk, and BPI Challenge
+2013 experiments with N-gram windows 2-6 and seed 0. It writes them under the
+clean result root:
+
+```text
+results/social-choice-rank-dashboard/
+```
+
+After every run, the script verifies that all three social-choice rules are
+present in `summary.json`. The dashboard starts only when every verification
+succeeds, at:
+
+```text
+http://127.0.0.1:8050
+```
+
+Choose a smaller or different set with `--data`, or change the seed and port:
+
+```bash
+uv run python examples/regenerate_and_launch_voting_dashboard.py \
+  --data Sepsis_Cases Helpdesk \
+  --seed 1 \
+  --port 8060
+```
+
+Use `--no-dashboard` when only regenerated files are required.
+
 ## Command-line reference
 
 ### Running an experiment
@@ -621,7 +660,7 @@ or a particular `ngram_N` name.
 | Calibrated lone-dissenter override (support 2) | Keeps soft voting unless exactly one model opposes a consensus of at least two and its supported, uncertainty-adjusted calibration advantage is positive. |
 | Calibrated lone-dissenter rank 2 override (support 2) | Uses the dissenter's second activity only after an observable failure-risk signal and calibration evidence that it beats soft voting. |
 | Complexity-contrast exception override | When every model gives the soft-vote top activity less than 50% probability, systematically discounts lower-complexity models' top activities to surface a stronger alternative. |
-| Borda rank aggregation | Treats models as voters and activities as alternatives; sums tie-aware positional scores over every model probability ranking. |
+| Borda positional rank aggregation | Treats models as voters and activities as alternatives; sums tie-aware positional scores over every model probability ranking. |
 | Copeland pairwise rank aggregation | Awards an activity one point for each pairwise majority win over another activity and half a point for a tie. |
 | Maximin pairwise rank aggregation | Selects the activity whose worst pairwise vote margin against any rival is largest. |
 | Transient Bag favoritism after a generalist-correct error | After a soft-voting error that the minimum-complexity model predicted correctly, applies a model-count-scaled multiplier with `1.0` extra weight for every competing constituent, then halves that extra weight on each of the next two events. |
@@ -663,7 +702,7 @@ altered (pp. 7-8). Here:
 
 Three deterministic, label-invariant candidates follow:
 
-1. **Borda rank aggregation.** Positional scoring gives an alternative credit
+1. **Borda positional rank aggregation.** Positional scoring gives an alternative credit
    for every lower-ranked alternative, and Borda uses the score vector
    `(m-1, m-2, ..., 0)` (p. 18). Equal model probabilities split positional
    credit, producing a weak-ranking extension instead of inventing an order.

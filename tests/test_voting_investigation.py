@@ -261,9 +261,9 @@ def test_compact_interpretable_rules_are_active_and_other_rules_are_archived() -
         "calibrated lone-dissenter override (support 2)",
         "calibrated lone-dissenter rank 2 override (support 2)",
         "complexity-contrast exception override",
-        "Borda rank aggregation",
+        "Borda positional rank aggregation",
         "Copeland pairwise rank aggregation",
-        "maximin pairwise rank aggregation",
+        "Maximin pairwise rank aggregation",
         "transient Bag favoritism after generalist-correct error (3 steps)",
     }
     archived_names = {rule.name for rule in archived_hypotheses()}

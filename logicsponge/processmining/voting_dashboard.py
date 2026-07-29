@@ -100,14 +100,14 @@ RULE_DESCRIPTIONS = {
         "Chooses among soft, median, trimmed-mean, and product pooling according to a calibration-learned "
         "distribution regime."
     ),
-    "Borda rank aggregation": (
+    "Borda positional rank aggregation": (
         "Treats models as voters, activities as alternatives, and aggregates their probability orderings with "
         "tie-aware positional Borda scores."
     ),
     "Copeland pairwise rank aggregation": (
         "Scores activities by pairwise majority wins across constituent model rankings, with half a point for ties."
     ),
-    "maximin pairwise rank aggregation": (
+    "Maximin pairwise rank aggregation": (
         "Selects the activity whose worst pairwise majority margin across model rankings is strongest."
     ),
     "confusion residual": (
